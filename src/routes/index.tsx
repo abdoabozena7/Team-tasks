@@ -6,8 +6,8 @@ export const Route = createFileRoute("/")({
   component: Index,
   head: () => ({
     meta: [
-      { title: "Real-Time Comment Intelligence — Team Breakdown" },
-      { name: "description", content: "Seven-person team breakdown for the real-time comment streaming, sentiment, and fake-detection project." },
+      { title: "تقسيمة المشروع — Real-Time Comment Intelligence" },
+      { name: "description", content: "تقسيمة المشروع على 7 أشخاص مع كل التفاصيل والتاسكات." },
     ],
   }),
 });
@@ -16,7 +16,7 @@ type Member = {
   name: string;
   role: string;
   icon: React.ComponentType<{ className?: string }>;
-  accent: string;
+  color: string;
   sections: { title: string; items: (string | { sub: string; items: string[] })[] }[];
   note?: { title: string; body: string };
 };
@@ -26,12 +26,9 @@ const members: Member[] = [
     name: "Abozena",
     role: "Project Lead + Integration",
     icon: Activity,
-    accent: "from-[oklch(0.72_0.18_25)] to-[oklch(0.65_0.22_15)]",
+    color: "oklch(0.78 0.16 200)",
     sections: [
-      {
-        title: "دوره",
-        items: ["الشخص اللي ماسك الصورة الكاملة وبيجمع كل الأجزاء مع بعض"],
-      },
+      { title: "دوره", items: ["الشخص اللي ماسك الصورة الكاملة وبيجمع كل الأجزاء مع بعض"] },
       {
         title: "مسؤولياته",
         items: [
@@ -82,12 +79,9 @@ const members: Member[] = [
     name: "Mariam Helal",
     role: "Data Collection / API Engineer",
     icon: Database,
-    accent: "from-[oklch(0.75_0.17_60)] to-[oklch(0.68_0.2_45)]",
+    color: "oklch(0.78 0.16 80)",
     sections: [
-      {
-        title: "دوره",
-        items: ["مسؤول عن سحب التعليقات من الـ API الجاهز أو عمل simulated stream"],
-      },
+      { title: "دوره", items: ["مسؤول عن سحب التعليقات من الـ API الجاهز أو عمل simulated stream"] },
       {
         title: "مسؤولياته",
         items: [
@@ -100,18 +94,9 @@ const members: Member[] = [
       {
         title: "التاسكات",
         items: [
-          {
-            sub: "يحدد API مناسب:",
-            items: ["YouTube API", "Reddit API", "أو dataset + simulation لو API صعب"],
-          },
-          {
-            sub: "يسحب الحقول المهمة:",
-            items: ["comment text", "author/user id", "timestamp", "source/post id"],
-          },
-          {
-            sub: "يعمل Producer يبعت التعليقات على topic:",
-            items: ["raw-comments"],
-          },
+          { sub: "يحدد API مناسب:", items: ["YouTube API", "Reddit API", "أو dataset + simulation لو API صعب"] },
+          { sub: "يسحب الحقول المهمة:", items: ["comment text", "author/user id", "timestamp", "source/post id"] },
+          { sub: "يعمل Producer يبعت التعليقات على topic:", items: ["raw-comments"] },
           "لو الـ API مش real-time قوي، يعمل script يحاكي stream بشكل تدريجي",
         ],
       },
@@ -134,20 +119,12 @@ const members: Member[] = [
     name: "Renad",
     role: "Kafka & Streaming Engineer",
     icon: Radio,
-    accent: "from-[oklch(0.74_0.16_140)] to-[oklch(0.65_0.19_155)]",
+    color: "oklch(0.75 0.18 145)",
     sections: [
-      {
-        title: "دوره",
-        items: ["مسؤول عن الجزء اللي يثبت إن المشروع فعلًا real-time ومستخدم Kafka صح"],
-      },
+      { title: "دوره", items: ["مسؤول عن الجزء اللي يثبت إن المشروع فعلًا real-time ومستخدم Kafka صح"] },
       {
         title: "مسؤولياته",
-        items: [
-          "إعداد Kafka",
-          "إنشاء الـ topics",
-          "بناء producers/consumers",
-          "التأكد إن كل stage مفصولة عن التانية",
-        ],
+        items: ["إعداد Kafka", "إنشاء الـ topics", "بناء producers/consumers", "التأكد إن كل stage مفصولة عن التانية"],
       },
       {
         title: "التاسكات",
@@ -162,12 +139,7 @@ const members: Member[] = [
       },
       {
         title: "الـ Deliverables",
-        items: [
-          "Kafka setup guide",
-          "topics configured",
-          "producer/consumer scripts",
-          "demo يوضح data بتتنقل live",
-        ],
+        items: ["Kafka setup guide", "topics configured", "producer/consumer scripts", "demo يوضح data بتتنقل live"],
       },
     ],
     note: {
@@ -179,37 +151,20 @@ const members: Member[] = [
     name: "Kero",
     role: "Data Cleaning & Preprocessing",
     icon: Sparkles,
-    accent: "from-[oklch(0.75_0.16_200)] to-[oklch(0.66_0.18_215)]",
+    color: "oklch(0.78 0.14 230)",
     sections: [
-      {
-        title: "دوره",
-        items: ["تنظيف التعليقات وتجهيزها قبل أي تحليل"],
-      },
+      { title: "دوره", items: ["تنظيف التعليقات وتجهيزها قبل أي تحليل"] },
       {
         title: "مسؤولياته",
-        items: [
-          "تنظيف النصوص",
-          "توحيد الـ format",
-          "إزالة noise",
-          "تجهيز comments صالحة للتحليل",
-        ],
+        items: ["تنظيف النصوص", "توحيد الـ format", "إزالة noise", "تجهيز comments صالحة للتحليل"],
       },
       {
         title: "التاسكات",
         items: [
-          {
-            sub: "إزالة:",
-            items: ["URLs", "mentions", "extra spaces", "special characters غير المهمة"],
-          },
+          { sub: "إزالة:", items: ["URLs", "mentions", "extra spaces", "special characters غير المهمة"] },
           "lowercase / normalization",
-          {
-            sub: "optional:",
-            items: ["emoji handling", "Arabic/English mixed text normalization لو موجود"],
-          },
-          {
-            sub: "إرسال الناتج إلى:",
-            items: ["cleaned-comments"],
-          },
+          { sub: "optional:", items: ["emoji handling", "Arabic/English mixed text normalization لو موجود"] },
+          { sub: "إرسال الناتج إلى:", items: ["cleaned-comments"] },
         ],
       },
       {
@@ -231,12 +186,9 @@ const members: Member[] = [
     name: "Mohamed",
     role: "Sentiment Analysis Engineer",
     icon: Brain,
-    accent: "from-[oklch(0.72_0.18_290)] to-[oklch(0.64_0.21_305)]",
+    color: "oklch(0.72 0.18 290)",
     sections: [
-      {
-        title: "دوره",
-        items: ["مسؤول عن تحليل المشاعر للتعليقات"],
-      },
+      { title: "دوره", items: ["مسؤول عن تحليل المشاعر للتعليقات"] },
       {
         title: "مسؤولياته",
         items: [
@@ -248,22 +200,10 @@ const members: Member[] = [
       {
         title: "التاسكات",
         items: [
-          {
-            sub: "اختيار الطريقة:",
-            items: ["API جاهز", "model جاهز من Hugging Face", "TextBlob/VADER لو English"],
-          },
-          {
-            sub: "تصنيف كل تعليق:",
-            items: ["Positive", "Negative", "Neutral"],
-          },
-          {
-            sub: "حفظ النتائج في topic:",
-            items: ["sentiment-results"],
-          },
-          {
-            sub: "حساب إحصائيات:",
-            items: ["نسبة الإيجابي/السلبي/المحايد", "raw sentiment", "filtered sentiment"],
-          },
+          { sub: "اختيار الطريقة:", items: ["API جاهز", "model جاهز من Hugging Face", "TextBlob/VADER لو English"] },
+          { sub: "تصنيف كل تعليق:", items: ["Positive", "Negative", "Neutral"] },
+          { sub: "حفظ النتائج في topic:", items: ["sentiment-results"] },
+          { sub: "حساب إحصائيات:", items: ["نسبة الإيجابي/السلبي/المحايد", "raw sentiment", "filtered sentiment"] },
         ],
       },
       {
@@ -283,14 +223,11 @@ const members: Member[] = [
   },
   {
     name: "Basmala",
-    role: "Suspicious / Fake Comment Detection Engineer",
+    role: "Suspicious / Fake Comment Detection",
     icon: ShieldAlert,
-    accent: "from-[oklch(0.7_0.2_350)] to-[oklch(0.6_0.23_5)]",
+    color: "oklch(0.7 0.2 350)",
     sections: [
-      {
-        title: "دوره",
-        items: ["أهم جزء مميز في المشروع: اكتشاف التعليقات المشبوهة"],
-      },
+      { title: "دوره", items: ["أهم جزء مميز في المشروع: اكتشاف التعليقات المشبوهة"] },
       {
         title: "مسؤولياته",
         items: [
@@ -314,10 +251,7 @@ const members: Member[] = [
             ],
           },
           { sub: "C) Timing / Burst Detection", items: ["عدد كبير من التعليقات المتشابهة في وقت قصير"] },
-          {
-            sub: "D) Simple spam patterns",
-            items: ["كلمات دعائية مكررة", "links كتير", "صياغة متكررة جدًا"],
-          },
+          { sub: "D) Simple spam patterns", items: ["كلمات دعائية مكررة", "links كتير", "صياغة متكررة جدًا"] },
           {
             sub: "E) Final Suspicious Score — مثال:",
             items: [
@@ -345,14 +279,11 @@ const members: Member[] = [
   },
   {
     name: "Malak",
-    role: "Dashboard + Alerts + Presentation Support",
+    role: "Dashboard + Alerts + Presentation",
     icon: LayoutDashboard,
-    accent: "from-[oklch(0.78_0.15_95)] to-[oklch(0.7_0.18_75)]",
+    color: "oklch(0.78 0.16 60)",
     sections: [
-      {
-        title: "دوره",
-        items: ["واجهة المشروع والجزء اللي هيبان في الديمو"],
-      },
+      { title: "دوره", items: ["واجهة المشروع والجزء اللي هيبان في الديمو"] },
       {
         title: "مسؤولياته",
         items: [
@@ -390,33 +321,28 @@ const members: Member[] = [
       },
       {
         title: "الـ Deliverables",
-        items: [
-          "dashboard شغال",
-          "alerts panel",
-          "visual comparison بين قبل وبعد التنقية",
-          "demo-ready interface",
-        ],
+        items: ["dashboard شغال", "alerts panel", "visual comparison بين قبل وبعد التنقية", "demo-ready interface"],
       },
     ],
   },
 ];
 
-function renderItems(items: (string | { sub: string; items: string[] })[]) {
+function renderItems(items: (string | { sub: string; items: string[] })[], color: string) {
   return (
-    <ul className="space-y-2">
+    <ul className="space-y-2.5">
       {items.map((it, i) =>
         typeof it === "string" ? (
-          <li key={i} className="flex gap-3 text-foreground/85 leading-relaxed">
-            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70" />
+          <li key={i} className="flex gap-3 text-foreground/90 leading-[1.9]">
+            <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />
             <span>{it}</span>
           </li>
         ) : (
           <li key={i} className="space-y-2">
-            <div className="font-semibold text-foreground">{it.sub}</div>
-            <ul className="space-y-1.5 ps-5 border-s border-border/60">
+            <div className="font-bold text-foreground">{it.sub}</div>
+            <ul className="space-y-1.5 ps-4 ms-1 border-s-2 border-border/60">
               {it.items.map((sub, j) => (
-                <li key={j} className="flex gap-2 text-foreground/75 text-sm">
-                  <span className="text-primary/60">›</span>
+                <li key={j} className="flex gap-2 text-foreground/75 ps-2">
+                  <span style={{ color }}>›</span>
                   <span>{sub}</span>
                 </li>
               ))}
@@ -428,62 +354,72 @@ function renderItems(items: (string | { sub: string; items: string[] })[]) {
   );
 }
 
-function MemberCard({ member, index, open, onToggle }: { member: Member; index: number; open: boolean; onToggle: () => void }) {
+function MemberCard({
+  member,
+  index,
+  open,
+  onToggle,
+}: {
+  member: Member;
+  index: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const Icon = member.icon;
   return (
     <div
-      className={`group relative overflow-hidden rounded-3xl border border-border/40 bg-card/60 backdrop-blur-xl transition-all duration-500 ${
-        open ? "shadow-[0_30px_80px_-20px_oklch(0.5_0.2_280/0.4)]" : "hover:border-border/80 hover:-translate-y-1"
-      }`}
+      className="rounded-2xl border border-border bg-card transition-colors duration-200"
+      style={open ? { borderColor: member.color } : undefined}
     >
-      <div className={`absolute inset-x-0 top-0 h-px bg-gradient-to-r ${member.accent} opacity-60`} />
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-5 p-6 text-start"
-        aria-expanded={open}
-      >
-        <div className={`relative shrink-0 grid place-items-center w-14 h-14 rounded-2xl bg-gradient-to-br ${member.accent} text-white shadow-lg`}>
-          <Icon className="w-6 h-6" />
-          <span className="absolute -top-1.5 -right-1.5 grid place-items-center w-6 h-6 rounded-full bg-background border border-border text-[11px] font-mono font-bold text-foreground">
-            {index + 1}
-          </span>
+      <button onClick={onToggle} className="w-full flex items-center gap-4 p-5 text-start" aria-expanded={open}>
+        <div
+          className="shrink-0 grid place-items-center w-12 h-12 rounded-xl"
+          style={{ background: `color-mix(in oklab, ${member.color} 18%, transparent)`, color: member.color }}
+        >
+          <Icon className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-xs font-mono uppercase tracking-[0.2em] text-muted-foreground mb-1">
-            Person {index + 1}
+          <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground mb-1">
+            <span>0{index + 1}</span>
+            <span className="opacity-40">/</span>
+            <span>07</span>
           </div>
-          <h3 className="text-2xl font-bold text-foreground tracking-tight">{member.name}</h3>
+          <h3 className="text-xl font-bold text-foreground leading-tight">{member.name}</h3>
           <p className="text-sm text-muted-foreground mt-0.5">{member.role}</p>
         </div>
-        <div className={`shrink-0 grid place-items-center w-10 h-10 rounded-full border border-border/60 bg-background/40 transition-transform duration-500 ${open ? "rotate-180" : ""}`}>
-          <ChevronDown className="w-5 h-5" />
-        </div>
+        <ChevronDown
+          className={`shrink-0 w-5 h-5 text-muted-foreground transition-transform duration-300 ${open ? "rotate-180" : ""}`}
+          style={open ? { color: member.color } : undefined}
+        />
       </button>
 
       <div
-        className={`grid transition-all duration-500 ease-out ${
+        className={`grid transition-all duration-300 ease-out ${
           open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
         }`}
       >
         <div className="overflow-hidden">
-          <div className="px-6 pb-7 space-y-6 border-t border-border/40 pt-6 mx-6 -mt-px">
+          <div className="px-5 pb-6 space-y-6 border-t border-border/60 pt-5">
             {member.sections.map((s, i) => (
               <div key={i} className="space-y-3">
-                <h4 className="text-sm font-bold uppercase tracking-wider text-primary/90">
+                <h4 className="text-xs font-bold uppercase tracking-wider" style={{ color: member.color }}>
                   {s.title}
                 </h4>
-                {renderItems(s.items)}
+                {renderItems(s.items, member.color)}
               </div>
             ))}
             {member.note && (
-              <div className={`relative rounded-2xl p-5 bg-gradient-to-br ${member.accent} bg-opacity-10`}>
-                <div className="absolute inset-0 rounded-2xl bg-background/80 backdrop-blur-sm" />
-                <div className="relative">
-                  <div className="text-xs font-mono uppercase tracking-[0.18em] text-foreground/60 mb-2">
-                    ⚡ {member.note.title}
-                  </div>
-                  <p className="text-foreground/90 leading-relaxed">{member.note.body}</p>
+              <div
+                className="rounded-xl p-4 border-s-4"
+                style={{
+                  borderInlineStartColor: member.color,
+                  background: `color-mix(in oklab, ${member.color} 8%, transparent)`,
+                }}
+              >
+                <div className="text-xs font-bold mb-1.5" style={{ color: member.color }}>
+                  ⚡ {member.note.title}
                 </div>
+                <p className="text-foreground/90 leading-[1.9] text-sm">{member.note.body}</p>
               </div>
             )}
           </div>
@@ -497,43 +433,26 @@ function Index() {
   const [openIdx, setOpenIdx] = useState<number | null>(0);
 
   return (
-    <div dir="rtl" className="min-h-screen bg-background text-foreground relative overflow-hidden">
-      {/* Ambient gradient orbs */}
-      <div className="pointer-events-none absolute -top-40 -right-40 w-[500px] h-[500px] rounded-full bg-[oklch(0.6_0.25_290)] opacity-20 blur-[120px]" />
-      <div className="pointer-events-none absolute top-1/3 -left-40 w-[500px] h-[500px] rounded-full bg-[oklch(0.65_0.22_200)] opacity-20 blur-[120px]" />
-      <div className="pointer-events-none absolute bottom-0 right-1/3 w-[400px] h-[400px] rounded-full bg-[oklch(0.7_0.2_350)] opacity-15 blur-[120px]" />
-
-      {/* Grid pattern */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.025]"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, currentColor 1px, transparent 1px), linear-gradient(to bottom, currentColor 1px, transparent 1px)",
-          backgroundSize: "48px 48px",
-        }}
-      />
-
-      <div className="relative max-w-5xl mx-auto px-6 py-16 md:py-24">
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="max-w-3xl mx-auto px-5 py-12 md:py-20">
         {/* Hero */}
-        <header className="text-center mb-16 animate-fade-in">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-border/60 bg-card/40 backdrop-blur-md text-xs font-mono uppercase tracking-[0.2em] text-muted-foreground mb-6">
-            <span className="w-2 h-2 rounded-full bg-[oklch(0.7_0.2_140)] animate-pulse" />
+        <header className="mb-12">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-border text-xs font-mono text-muted-foreground mb-5">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
             Real-Time Comment Intelligence
           </div>
-          <h1 className="text-5xl md:text-7xl font-black tracking-tight mb-6 bg-gradient-to-br from-foreground via-foreground to-foreground/40 bg-clip-text text-transparent">
+          <h1 className="text-4xl md:text-5xl font-black tracking-tight text-foreground leading-[1.2] mb-3">
             تقسيمة المشروع
             <br />
-            <span className="text-3xl md:text-5xl bg-gradient-to-r from-[oklch(0.7_0.2_290)] via-[oklch(0.7_0.2_200)] to-[oklch(0.75_0.2_350)] bg-clip-text text-transparent">
-              على 7 أشخاص
-            </span>
+            <span style={{ color: "oklch(0.78 0.16 200)" }}>على 7 أشخاص</span>
           </h1>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            اضغط على أي اسم لعرض المسؤوليات والتاسكات والـ deliverables بالتفصيل
+          <p className="text-base text-muted-foreground leading-relaxed">
+            اضغط على أي اسم لعرض المسؤوليات والتاسكات والـ deliverables بالتفصيل.
           </p>
         </header>
 
         {/* Members */}
-        <div className="space-y-4">
+        <div className="space-y-3">
           {members.map((m, i) => (
             <MemberCard
               key={m.name}
@@ -545,20 +464,18 @@ function Index() {
           ))}
         </div>
 
-        {/* Footer pipeline summary */}
-        <footer className="mt-20 rounded-3xl border border-border/40 bg-card/40 backdrop-blur-xl p-8">
-          <h2 className="text-xs font-mono uppercase tracking-[0.2em] text-muted-foreground mb-6 text-center">
-            Pipeline Flow
-          </h2>
-          <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
-            {["API", "Producer", "Kafka", "Cleaning", "Sentiment", "Fake Detection", "Alerts", "Dashboard"].map((step, i, arr) => (
-              <div key={step} className="flex items-center gap-2">
-                <span className="px-3 py-1.5 rounded-lg bg-background border border-border/60 font-mono text-foreground/80">
-                  {step}
-                </span>
-                {i < arr.length - 1 && <span className="text-muted-foreground">←</span>}
-              </div>
-            ))}
+        {/* Pipeline */}
+        <footer className="mt-12 rounded-2xl border border-border bg-card p-6">
+          <h2 className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-4">Pipeline</h2>
+          <div className="flex flex-wrap items-center gap-2 text-sm" dir="ltr">
+            {["API", "Producer", "Kafka", "Cleaning", "Sentiment", "Detection", "Alerts", "Dashboard"].map(
+              (step, i, arr) => (
+                <div key={step} className="flex items-center gap-2">
+                  <span className="px-2.5 py-1 rounded-md bg-muted font-mono text-foreground/80 text-xs">{step}</span>
+                  {i < arr.length - 1 && <span className="text-muted-foreground text-xs">→</span>}
+                </div>
+              )
+            )}
           </div>
         </footer>
       </div>
