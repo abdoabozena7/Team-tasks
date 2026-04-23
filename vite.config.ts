@@ -6,4 +6,25 @@
 // You can pass additional config via defineConfig({ vite: { ... } }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
-export default defineConfig();
+const repoBasePath = "/Team-tasks";
+
+export default defineConfig({
+  cloudflare: false,
+  tanstackStart: {
+    router: {
+      basepath: repoBasePath,
+    },
+    pages: [{ path: "/" }],
+    prerender: {
+      enabled: true,
+      autoStaticPathsDiscovery: false,
+      crawlLinks: false,
+    },
+    sitemap: {
+      enabled: false,
+    },
+  },
+  vite: {
+    base: `${repoBasePath}/`,
+  },
+});
