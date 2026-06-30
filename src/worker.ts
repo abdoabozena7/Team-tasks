@@ -43,6 +43,34 @@ type TaskProgressUpdate = {
   createdAt: string;
 };
 
+type Meeting = {
+  id: string;
+  title: string;
+  startsAt: string;
+  durationMinutes: number;
+  points: number;
+  status?: "active" | "archived";
+  createdAt: string;
+};
+
+type MeetingAttendance = {
+  memberId: string;
+  memberName: string;
+  checkedAt: string;
+  lateMinutes: number;
+  score: number;
+};
+
+type RepoUpdate = {
+  id: string;
+  memberId: string;
+  createdAt: string;
+  taskId?: string;
+  source?: "submission" | "progress" | "manual";
+  excerpt?: string;
+  seen?: boolean;
+};
+
 type StudioData = {
   projectName: string;
   announcement?: string;
@@ -55,7 +83,9 @@ type StudioData = {
   tasks: StudioTask[];
   responses: Record<string, Record<string, TaskResponse>>;
   progressUpdates?: Record<string, TaskProgressUpdate[]>;
-  repoUpdates?: Array<{ id: string; memberId: string; createdAt: string; seen?: boolean }>;
+  meetings?: Meeting[];
+  meetingAttendance?: Record<string, Record<string, MeetingAttendance>>;
+  repoUpdates?: RepoUpdate[];
   meta?: { updatedAt: string };
 };
 
@@ -91,6 +121,11 @@ function json(env: Env, body: unknown, status = 200) {
   return new Response(JSON.stringify(body), jsonHeaders(env, status));
 }
 
+function positiveNumber(value: unknown, fallback: number) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : fallback;
+}
+
 function normalizeData(data: StudioData): StudioData {
   return {
     projectName: data.projectName || "Hivo Studio",
@@ -109,9 +144,73 @@ function normalizeData(data: StudioData): StudioData {
     })),
     responses: data.responses ?? {},
     progressUpdates: data.progressUpdates ?? {},
+    meetings: (data.meetings ?? []).map((meeting) => ({
+      ...meeting,
+      title: meeting.title || "Meeting",
+      startsAt: meeting.startsAt || meeting.createdAt || new Date().toISOString(),
+      durationMinutes: Math.floor(positiveNumber(meeting.durationMinutes, 60)),
+      points: positiveNumber(meeting.points, 1),
+      status: meeting.status === "archived" ? "archived" : "active",
+      createdAt: meeting.createdAt || new Date().toISOString(),
+    })),
+    meetingAttendance: data.meetingAttendance ?? {},
     repoUpdates: data.repoUpdates ?? [],
     meta: data.meta ?? { updatedAt: new Date().toISOString() },
   };
+}
+
+function containsGitHubSignal(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[ـ_\-.]+/g, " ")
+    .trim();
+  const compact = normalized.replace(/\s+/g, "");
+  return (
+    /\bgithub\b/.test(normalized) ||
+    /\bgit\b/.test(normalized) ||
+    compact.includes("جيتهاب") ||
+    compact.includes("جيتهب") ||
+    compact.includes("جتهاب") ||
+    /\bجيت\b/u.test(normalized) ||
+    /\bجت\b/u.test(normalized)
+  );
+}
+
+function repoUpdateFromText({
+  memberId,
+  taskId,
+  source,
+  text,
+}: {
+  memberId: string;
+  taskId?: string;
+  source: RepoUpdate["source"];
+  text: string;
+}): RepoUpdate | null {
+  if (!containsGitHubSignal(text)) return null;
+  return {
+    id: `repo-${source}-${memberId}-${taskId ?? "general"}-${Date.now()}`,
+    memberId,
+    taskId,
+    source,
+    excerpt: text.trim().slice(0, 140),
+    createdAt: new Date().toISOString(),
+    seen: false,
+  };
+}
+
+function appendRepoUpdate(data: StudioData, update: RepoUpdate | null) {
+  if (!update) return data.repoUpdates ?? [];
+  const existing = data.repoUpdates ?? [];
+  const exists = existing.some(
+    (item) =>
+      item.memberId === update.memberId &&
+      item.taskId === update.taskId &&
+      item.source === update.source &&
+      item.excerpt === update.excerpt,
+  );
+  return exists ? existing : [update, ...existing];
 }
 
 function encodeBase64(value: string) {
@@ -257,12 +356,30 @@ function mergeRepoUpdates(latest: StudioData, incoming: StudioData) {
   );
 }
 
+function mergeMeetingAttendance(latest: StudioData, incoming: StudioData) {
+  const meetingIds = new Set([
+    ...Object.keys(latest.meetingAttendance ?? {}),
+    ...Object.keys(incoming.meetingAttendance ?? {}),
+  ]);
+  const attendance: NonNullable<StudioData["meetingAttendance"]> = {};
+
+  for (const meetingId of meetingIds) {
+    attendance[meetingId] = {
+      ...(latest.meetingAttendance?.[meetingId] ?? {}),
+      ...(incoming.meetingAttendance?.[meetingId] ?? {}),
+    };
+  }
+
+  return attendance;
+}
+
 function mergeAdminReplacement(latest: StudioData, incomingPayload: StudioData) {
   const incoming = normalizeData(incomingPayload);
   return {
     ...incoming,
     responses: mergeResponses(latest, incoming),
     progressUpdates: mergeProgressUpdates(latest, incoming),
+    meetingAttendance: mergeMeetingAttendance(latest, incoming),
     repoUpdates: mergeRepoUpdates(latest, incoming),
   };
 }
@@ -283,6 +400,12 @@ export default {
         const next = await commitData(env, `Submit ${item.taskId} by ${item.memberId}`, (data) => {
           getTask(data, item.taskId);
           getMember(data, item.memberId);
+          const repoUpdate = repoUpdateFromText({
+            memberId: item.memberId,
+            taskId: item.taskId,
+            source: "submission",
+            text: item.answer,
+          });
           return {
             ...data,
             responses: {
@@ -298,6 +421,7 @@ export default {
                 },
               },
             },
+            repoUpdates: appendRepoUpdate(data, repoUpdate),
           };
         });
         return json(env, next);
@@ -308,6 +432,12 @@ export default {
         const next = await commitData(env, `Progress ${item.taskId} by ${item.memberId}`, (data) => {
           getTask(data, item.taskId);
           getMember(data, item.memberId);
+          const repoUpdate = repoUpdateFromText({
+            memberId: item.memberId,
+            taskId: item.taskId,
+            source: "progress",
+            text: item.note,
+          });
           return {
             ...data,
             progressUpdates: {
@@ -324,6 +454,7 @@ export default {
                 ...((data.progressUpdates ?? {})[item.taskId] ?? []),
               ],
             },
+            repoUpdates: appendRepoUpdate(data, repoUpdate),
           };
         });
         return json(env, next);

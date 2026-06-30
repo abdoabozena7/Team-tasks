@@ -290,7 +290,11 @@
 .leaderboard-row-top {
   animation:
     leaderboard-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1) both,
-    leaderboard-float 3.2s ease-in-out 0.7s infinite;
+    leaderboard-float 3.2s ease-in-out 0.7s infinite,
+    leaderboard-winner-aura 2.6s ease-in-out 0.9s infinite;
+  background:
+    linear-gradient(135deg, rgba(255, 244, 168, 0.96), rgba(186, 230, 253, 0.94) 46%, rgba(220, 252, 231, 0.95)),
+    #fff4a8;
   box-shadow:
     4px 4px 0 0 var(--ink),
     0 0 0 5px rgba(250, 204, 21, 0.35),
@@ -342,6 +346,10 @@
   transform: rotate(-4deg);
   box-shadow: 1px 1px 0 0 var(--ink);
   animation: leaderboard-top-tag 1.35s ease-in-out infinite;
+}
+
+.leaderboard-row-worst {
+  animation: leaderboard-danger-pulse 1.15s ease-in-out infinite;
 }
 
 @keyframes leaderboard-enter {
@@ -414,5 +422,27 @@
   }
   50% {
     transform: rotate(5deg) translateY(-3px);
+  }
+}
+
+@keyframes leaderboard-winner-aura {
+  0%,
+  100% {
+    filter: saturate(1) brightness(1);
+  }
+  50% {
+    filter: saturate(1.45) brightness(1.08);
+  }
+}
+
+@keyframes leaderboard-danger-pulse {
+  0%,
+  100% {
+    background-color: #ffffff;
+    box-shadow: none;
+  }
+  50% {
+    background-color: #fee2e2;
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.35);
   }
 }

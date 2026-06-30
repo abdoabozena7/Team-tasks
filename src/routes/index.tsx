@@ -99,6 +99,24 @@ type TaskProgressUpdate = {
   createdAt: string;
 };
 
+type Meeting = {
+  id: string;
+  title: string;
+  startsAt: string;
+  durationMinutes: number;
+  points: number;
+  status?: "active" | "archived";
+  createdAt: string;
+};
+
+type MeetingAttendance = {
+  memberId: string;
+  memberName: string;
+  checkedAt: string;
+  lateMinutes: number;
+  score: number;
+};
+
 type StudioSettings = {
   adminPassword: string;
   statsPassword: string;
@@ -132,6 +150,9 @@ type RepoUpdate = {
   id: string;
   memberId: string;
   createdAt: string;
+  taskId?: string;
+  source?: "submission" | "progress" | "manual";
+  excerpt?: string;
   note?: string;
   seen?: boolean;
 };
@@ -144,6 +165,8 @@ type StudioData = {
   tasks: StudioTask[];
   responses: Record<string, Record<string, TaskResponse>>;
   progressUpdates?: Record<string, TaskProgressUpdate[]>;
+  meetings?: Meeting[];
+  meetingAttendance?: Record<string, Record<string, MeetingAttendance>>;
   repoUpdates?: RepoUpdate[];
   meta: { updatedAt: string };
 };
@@ -167,6 +190,7 @@ type MemberScore = {
   completed: number;
   taskPoints: number;
   basePoints: number;
+  meetingPoints: number;
   points: number;
   avgHours: number | null;
   responseRate: number;
@@ -181,6 +205,13 @@ type TaskMetric = {
   rejected: number;
   submitted: number;
   progressUpdates: number;
+};
+
+type MeetingMetric = {
+  meeting: Meeting;
+  attended: number;
+  expected: number;
+  totalScore: number;
 };
 
 const DEFAULT_ADMIN_PASSWORD = "5678";
@@ -216,6 +247,8 @@ const DEFAULT_DATA: StudioData = {
   tasks: [],
   responses: {},
   progressUpdates: {},
+  meetings: [],
+  meetingAttendance: {},
   repoUpdates: [],
   meta: { updatedAt: new Date().toISOString() },
 };
@@ -246,6 +279,19 @@ function findMemberByName(name: string, members: Member[]) {
 function sanitizeNumber(value: unknown) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) && numberValue > 0 ? Math.floor(numberValue) : 0;
+}
+
+function sanitizePositiveNumber(value: unknown, fallback = 0) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : fallback;
+}
+
+function meetingStatus(meeting: Meeting) {
+  return meeting.status === "archived" ? "archived" : "active";
+}
+
+function isActiveMeeting(meeting: Meeting) {
+  return meetingStatus(meeting) === "active";
 }
 
 function sanitizeData(data: StudioData): StudioData {
@@ -279,6 +325,16 @@ function sanitizeData(data: StudioData): StudioData {
     })),
     responses: data.responses ?? {},
     progressUpdates: data.progressUpdates ?? {},
+    meetings: (data.meetings ?? []).map((meeting) => ({
+      ...meeting,
+      title: meeting.title || "Meeting",
+      startsAt: meeting.startsAt || meeting.createdAt || new Date().toISOString(),
+      durationMinutes: sanitizeNumber(meeting.durationMinutes) || 60,
+      points: sanitizePositiveNumber(meeting.points, 1),
+      status: meeting.status === "archived" ? "archived" : "active",
+      createdAt: meeting.createdAt || new Date().toISOString(),
+    })),
+    meetingAttendance: data.meetingAttendance ?? {},
     repoUpdates: data.repoUpdates ?? [],
     meta: data.meta ?? DEFAULT_DATA.meta,
   };
@@ -418,6 +474,7 @@ function formatPercent(value: number) {
 
 function createStats(data: StudioData) {
   const activeTasks = data.tasks.filter(isActiveTask);
+  const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const memberStats = data.members.map((member) => {
     const assignedTasks = activeTasks.filter((task) => taskIsForMember(task, member.id));
     const responses = assignedTasks
@@ -438,6 +495,10 @@ function createStats(data: StudioData) {
     const baseApproved = sanitizeNumber(member.baseApproved);
     const baseRejected = sanitizeNumber(member.baseRejected);
     const basePoints = sanitizeNumber(member.basePoints);
+    const meetingPoints = activeMeetings.reduce(
+      (sum, meeting) => sum + (data.meetingAttendance?.[meeting.id]?.[member.id]?.score ?? 0),
+      0,
+    );
     const approved = approvedTasks.length + baseApproved;
     const rejected =
       responses.filter((item) => item.response.status === "rejected").length + baseRejected;
@@ -462,7 +523,8 @@ function createStats(data: StudioData) {
       completed: baseCompleted + approvedTasks.length,
       taskPoints,
       basePoints,
-      points: basePoints + taskPoints,
+      meetingPoints,
+      points: Math.round((basePoints + taskPoints + meetingPoints) * 100) / 100,
       avgHours,
       responseRate,
       approvalRate,
@@ -507,6 +569,17 @@ function createStats(data: StudioData) {
   const worst = rankedMembers[rankedMembers.length - 1];
   const approvedTotal = visibleStats.reduce((sum, item) => sum + item.completed, 0);
   const pointsTotal = visibleStats.reduce((sum, item) => sum + item.points, 0);
+  const meetingMetrics: MeetingMetric[] = activeMeetings.map((meeting) => {
+    const attendance = Object.values(data.meetingAttendance?.[meeting.id] ?? {}).filter((item) =>
+      data.members.some((member) => !member.hidden && member.id === item.memberId),
+    );
+    return {
+      meeting,
+      attended: attendance.length,
+      expected: data.members.filter((member) => !member.hidden).length,
+      totalScore: Math.round(attendance.reduce((sum, item) => sum + item.score, 0) * 100) / 100,
+    };
+  });
   const pendingTotal = Object.values(data.responses).reduce(
     (sum, taskResponses) =>
       sum +
@@ -518,8 +591,11 @@ function createStats(data: StudioData) {
     allMemberStats: memberStats,
     memberStats: rankedMembers,
     taskMetrics,
+    meetingMetrics,
     activeTasks,
     archivedTasks: data.tasks.filter((task) => taskStatus(task) === "archived"),
+    activeMeetings,
+    archivedMeetings: (data.meetings ?? []).filter((meeting) => meetingStatus(meeting) === "archived"),
     leader,
     worst,
     approvedTotal,
@@ -693,7 +769,7 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
               key={item.member.id}
               type="button"
               onClick={() => setOpenMemberId(isOpen ? "" : item.member.id)}
-              className="border border-black bg-white p-2 text-left font-serif text-black shadow-none"
+              className="leaderboard-row-worst border border-black bg-white p-2 text-left font-serif text-black shadow-none"
               dir="rtl"
             >
               <div>
@@ -941,7 +1017,15 @@ function MemberView({
               return (
                 <article
                   key={task.id}
-                  className="border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+                  className={`border-[2.5px] border-ink p-5 doodle-shadow ${
+                    existing?.status === "approved"
+                      ? "bg-emerald-50"
+                      : existing?.status === "submitted" || finalSent
+                        ? "bg-yellow-50"
+                        : existing?.status === "rejected"
+                          ? "bg-red-50"
+                          : "bg-card"
+                  }`}
                   style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
                 >
                   <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -1123,7 +1207,7 @@ function MemberView({
   );
 }
 
-type AdminSection = "overview" | "tasks" | "members" | "logs" | "archive" | "settings";
+type AdminSection = "overview" | "tasks" | "meetings" | "members" | "logs" | "archive" | "settings";
 
 function formatDateTime(value?: string) {
   if (!value) return "Not set";
@@ -1142,6 +1226,78 @@ function toDateTimeInputValue(value?: string) {
 
 function fromDateTimeInputValue(value: string) {
   return value ? new Date(value).toISOString() : "";
+}
+
+function calculateMeetingAttendance(meeting: Meeting, checkedAt = new Date().toISOString()) {
+  const startTime = new Date(meeting.startsAt).getTime();
+  const checkTime = new Date(checkedAt).getTime();
+  const duration = Math.max(1, sanitizeNumber(meeting.durationMinutes) || 60);
+  const lateMinutes =
+    Number.isFinite(startTime) && Number.isFinite(checkTime)
+      ? Math.max(0, Math.round((checkTime - startTime) / 60000))
+      : 0;
+  const billableLateMinutes = Math.max(0, lateMinutes - 10);
+  const penaltyRate = Math.min(1, billableLateMinutes / duration);
+  const score = Math.max(0, sanitizePositiveNumber(meeting.points, 1) * (1 - penaltyRate));
+
+  return {
+    lateMinutes,
+    score: Math.round(score * 100) / 100,
+  };
+}
+
+function containsGitHubSignal(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[ـ_\-.]+/g, " ")
+    .trim();
+  const compact = normalized.replace(/\s+/g, "");
+  return (
+    /\bgithub\b/.test(normalized) ||
+    /\bgit\b/.test(normalized) ||
+    compact.includes("جيتهاب") ||
+    compact.includes("جيتهب") ||
+    compact.includes("جتهاب") ||
+    /\bجيت\b/u.test(normalized) ||
+    /\bجت\b/u.test(normalized)
+  );
+}
+
+function createRepoUpdateFromText({
+  memberId,
+  taskId,
+  source,
+  text,
+}: {
+  memberId: string;
+  taskId?: string;
+  source: RepoUpdate["source"];
+  text: string;
+}): RepoUpdate | null {
+  if (!containsGitHubSignal(text)) return null;
+  return {
+    id: `repo-${source}-${memberId}-${taskId ?? "general"}-${Date.now()}`,
+    memberId,
+    taskId,
+    source,
+    excerpt: text.trim().slice(0, 140),
+    createdAt: new Date().toISOString(),
+    seen: false,
+  };
+}
+
+function appendRepoUpdateIfMissing(data: StudioData, update: RepoUpdate | null) {
+  if (!update) return data;
+  const exists = (data.repoUpdates ?? []).some(
+    (item) =>
+      item.memberId === update.memberId &&
+      item.taskId === update.taskId &&
+      item.source === update.source &&
+      item.excerpt === update.excerpt,
+  );
+  if (exists) return data;
+  return sanitizeData({ ...data, repoUpdates: [update, ...(data.repoUpdates ?? [])] });
 }
 
 function statusTone(status?: TaskResponse["status"]) {
@@ -1173,6 +1329,9 @@ function AdminView({
   onLogout,
   onAddTask,
   onUpdateTask,
+  onAddMeeting,
+  onUpdateMeeting,
+  onRecordMeetingAttendance,
   onRemoveTask,
   onManualApprove,
   onApproveQueuedSubmission,
@@ -1202,6 +1361,9 @@ function AdminView({
   onLogout: () => void;
   onAddTask: (task: Omit<StudioTask, "id" | "createdAt">) => void;
   onUpdateTask: (taskId: string, updates: Partial<StudioTask>) => void;
+  onAddMeeting: (meeting: Omit<Meeting, "id" | "createdAt">) => void;
+  onUpdateMeeting: (meetingId: string, updates: Partial<Meeting>) => void;
+  onRecordMeetingAttendance: (meeting: Meeting, member: Member) => void;
   onRemoveTask: (taskId: string) => void;
   onManualApprove: (task: StudioTask, memberId: string) => void;
   onApproveQueuedSubmission: (item: QueuedSubmission) => void;
@@ -1228,7 +1390,12 @@ function AdminView({
   const [taskMemberId, setTaskMemberId] = useState("");
   const [taskStartAt, setTaskStartAt] = useState("");
   const [taskDeadlineAt, setTaskDeadlineAt] = useState("");
+  const [meetingTitle, setMeetingTitle] = useState("");
+  const [meetingStartsAt, setMeetingStartsAt] = useState("");
+  const [meetingDuration, setMeetingDuration] = useState(60);
+  const [meetingPoints, setMeetingPoints] = useState(1);
   const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [selectedMeetingId, setSelectedMeetingId] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState(data.members[0]?.id ?? "");
   const [manualApproveMembers, setManualApproveMembers] = useState<Record<string, string>>({});
   const [progressMembers, setProgressMembers] = useState<Record<string, string>>({});
@@ -1238,11 +1405,17 @@ function AdminView({
 
   const activeTasks = data.tasks.filter(isActiveTask);
   const archivedTasks = data.tasks.filter((task) => taskStatus(task) === "archived");
+  const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
+  const archivedMeetings = (data.meetings ?? []).filter((meeting) => meetingStatus(meeting) === "archived");
   const visibleArchive = archivedTasks.filter((task) =>
     `${task.title} ${task.question}`.toLowerCase().includes(query.toLowerCase()),
   );
   const selectedTask =
     data.tasks.find((task) => task.id === selectedTaskId) ?? activeTasks[0] ?? archivedTasks[0];
+  const selectedMeeting =
+    (data.meetings ?? []).find((meeting) => meeting.id === selectedMeetingId) ??
+    activeMeetings[0] ??
+    archivedMeetings[0];
   const selectedMember =
     data.members.find((member) => member.id === selectedMemberId) ?? data.members[0];
   const pendingSubmissions = data.tasks.flatMap((task) =>
@@ -1301,6 +1474,21 @@ function AdminView({
     setTaskMemberId("");
     setTaskStartAt("");
     setTaskDeadlineAt("");
+  }
+
+  function submitMeeting() {
+    if (!meetingTitle.trim()) return;
+    onAddMeeting({
+      title: meetingTitle.trim(),
+      startsAt: fromDateTimeInputValue(meetingStartsAt) || new Date().toISOString(),
+      durationMinutes: sanitizeNumber(meetingDuration) || 60,
+      points: sanitizePositiveNumber(meetingPoints, 1),
+      status: "active",
+    });
+    setMeetingTitle("");
+    setMeetingStartsAt("");
+    setMeetingDuration(60);
+    setMeetingPoints(1);
   }
 
   function assignedMembers(task: StudioTask) {
@@ -1533,7 +1721,18 @@ function AdminView({
               (update) => update.memberId === member.id,
             );
             return (
-              <details key={member.id} className="rounded-lg border border-ink/10 bg-white p-3">
+              <details
+                key={member.id}
+                className={`rounded-lg border p-3 transition ${
+                  response?.status === "approved"
+                    ? "border-emerald-200 bg-emerald-50"
+                    : response?.status === "submitted"
+                      ? "border-yellow-200 bg-yellow-50"
+                      : response?.status === "rejected"
+                        ? "border-red-200 bg-red-50"
+                        : "border-ink/10 bg-white"
+                }`}
+              >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
                   <div className="min-w-0">
                     <strong className="truncate">{member.name}</strong>
@@ -1588,6 +1787,165 @@ function AdminView({
     );
   }
 
+  function renderMeetingRows(meetings: Meeting[]) {
+    if (meetings.length === 0) {
+      return <p className="rounded-lg border border-dashed border-ink/20 bg-white p-6 text-sm text-foreground/55">No meetings here yet.</p>;
+    }
+
+    return (
+      <div className="grid gap-2">
+        {meetings.map((meeting) => {
+          const attendance = Object.values(data.meetingAttendance?.[meeting.id] ?? {});
+          const isSelected = selectedMeeting?.id === meeting.id;
+          return (
+            <button
+              key={meeting.id}
+              type="button"
+              onClick={() => setSelectedMeetingId(meeting.id)}
+              className={`rounded-lg border p-3 text-start transition hover:border-ink/40 hover:bg-white ${
+                isSelected ? "border-ink bg-white shadow-sm" : "border-ink/10 bg-white/70"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-lg font-bold">{meeting.title}</div>
+                  <div className="mt-1 text-xs text-foreground/55">
+                    {formatDateTime(meeting.startsAt)} | {meeting.durationMinutes}m | {meeting.points} pts
+                  </div>
+                </div>
+                <span className="shrink-0 rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
+                  {attendance.length}/{data.members.filter((member) => !member.hidden).length}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderMeetingDetail(meeting?: Meeting) {
+    if (!meeting) return null;
+    const attendanceMap = data.meetingAttendance?.[meeting.id] ?? {};
+    const totalScore = Object.values(attendanceMap).reduce((sum, item) => sum + item.score, 0);
+
+    return (
+      <section className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-2xl font-bold">{meeting.title}</h3>
+              <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
+                {meetingStatus(meeting)}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
+              <span>Start: {formatDateTime(meeting.startsAt)}</span>
+              <span>Duration: {meeting.durationMinutes}m</span>
+              <span>Points: {meeting.points}</span>
+              <span>Total score: {Math.round(totalScore * 100) / 100}</span>
+            </div>
+          </div>
+          {isActiveMeeting(meeting) ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onUpdateMeeting(meeting.id, { status: "archived" })}
+              className="border border-ink/20 bg-paper"
+            >
+              <Archive data-icon="inline-start" />
+              Archive
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              onClick={() => onUpdateMeeting(meeting.id, { status: "active" })}
+              className="border border-ink/20"
+            >
+              <RotateCcw data-icon="inline-start" />
+              Restore
+            </Button>
+          )}
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <label className="grid gap-1 text-sm font-bold">
+            Start
+            <Input
+              type="datetime-local"
+              value={toDateTimeInputValue(meeting.startsAt)}
+              onChange={(event) =>
+                onUpdateMeeting(meeting.id, { startsAt: fromDateTimeInputValue(event.target.value) })
+              }
+              className="border border-ink/20 bg-paper"
+            />
+          </label>
+          <label className="grid gap-1 text-sm font-bold">
+            Duration minutes
+            <Input
+              type="number"
+              min={1}
+              value={meeting.durationMinutes}
+              onChange={(event) =>
+                onUpdateMeeting(meeting.id, { durationMinutes: sanitizeNumber(event.target.value) || 60 })
+              }
+              className="border border-ink/20 bg-paper"
+            />
+          </label>
+          <label className="grid gap-1 text-sm font-bold">
+            Points
+            <Input
+              type="number"
+              min={0.1}
+              step={0.1}
+              value={meeting.points}
+              onChange={(event) =>
+                onUpdateMeeting(meeting.id, { points: sanitizePositiveNumber(event.target.value, 1) })
+              }
+              className="border border-ink/20 bg-paper"
+            />
+          </label>
+        </div>
+
+        <div className="mt-5 grid gap-2">
+          {data.members.map((member) => {
+            const attendance = attendanceMap[member.id];
+            return (
+              <div
+                key={member.id}
+                className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 transition ${
+                  attendance
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+                    : "border-ink/10 bg-white"
+                }`}
+              >
+                <div>
+                  <strong>{member.name}</strong>
+                  {attendance ? (
+                    <p className="text-xs text-foreground/60">
+                      Checked {formatDateTime(attendance.checkedAt)} | late {attendance.lateMinutes}m | score{" "}
+                      {attendance.score}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-foreground/50">Not checked yet</p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  onClick={() => onRecordMeetingAttendance(meeting, member)}
+                  className={attendance ? "bg-emerald-600 text-white hover:bg-emerald-700" : ""}
+                >
+                  <Check data-icon="inline-start" />
+                  {attendance ? "Checked" : "Check"}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
+
   function renderMemberLog(member: Member) {
     const memberTasks = data.tasks.filter((task) => taskIsForMember(task, member.id));
     return (
@@ -1598,6 +1956,33 @@ function AdminView({
           <CompactMetric label="Old rejected" value={member.baseRejected ?? 0} />
           <CompactMetric label="Old points" value={member.basePoints ?? 0} />
         </div>
+        {(data.meetings ?? []).length > 0 && (
+          <div className="grid gap-2">
+            {(data.meetings ?? []).map((meeting) => {
+              const attendance = data.meetingAttendance?.[meeting.id]?.[member.id];
+              return (
+                <div key={meeting.id} className="rounded-lg border border-ink/10 bg-white p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <strong>{meeting.title}</strong>
+                    <span
+                      className={`rounded-full border px-2 py-1 text-xs font-bold ${
+                        attendance
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          : "border-zinc-200 bg-zinc-50 text-zinc-500"
+                      }`}
+                    >
+                      {attendance ? `${attendance.score} pts` : "absent"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-foreground/55">
+                    {meetingStatus(meeting)} | {formatDateTime(meeting.startsAt)}
+                    {attendance ? ` | late ${attendance.lateMinutes}m` : ""}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
         {memberTasks.map((task) => {
           const response = getResponse(data, task.id, member.id);
           const progress = (data.progressUpdates?.[task.id] ?? []).filter(
@@ -1630,6 +2015,7 @@ function AdminView({
   const navItems: Array<{ id: AdminSection; label: string; icon: typeof BarChart3 }> = [
     { id: "overview", label: "Overview", icon: BarChart3 },
     { id: "tasks", label: "Tasks", icon: ClipboardList },
+    { id: "meetings", label: "Meetings", icon: CalendarClock },
     { id: "members", label: "Members", icon: Users },
     { id: "logs", label: "Logs", icon: ListChecks },
     { id: "archive", label: "Archive", icon: Archive },
@@ -1750,8 +2136,9 @@ function AdminView({
         <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 pb-24">
           {section === "overview" && (
             <>
-              <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
                 <CompactMetric label="Active tasks" value={activeTasks.length} />
+                <CompactMetric label="Meetings" value={activeMeetings.length} />
                 <CompactMetric label="Archived" value={archivedTasks.length} />
                 <CompactMetric label="Pending review" value={stats.pendingTotal} />
                 <CompactMetric label="Completion" value={`${completionRate}%`} />
@@ -1851,6 +2238,65 @@ function AdminView({
                 </div>
               </div>
               {renderTaskDetail(selectedTask && isActiveTask(selectedTask) ? selectedTask : activeTasks[0])}
+            </section>
+          )}
+
+          {section === "meetings" && (
+            <section className="grid gap-5 xl:grid-cols-[380px_1fr]">
+              <div className="grid gap-4">
+                <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                  <h2 className="text-xl font-bold">New meeting</h2>
+                  <div className="mt-3 grid gap-3">
+                    <Input
+                      value={meetingTitle}
+                      onChange={(event) => setMeetingTitle(event.target.value)}
+                      placeholder="Meeting title"
+                      className="border border-ink/20 bg-paper"
+                    />
+                    <label className="grid gap-1 text-xs font-bold">
+                      Start time
+                      <Input
+                        type="datetime-local"
+                        value={meetingStartsAt}
+                        onChange={(event) => setMeetingStartsAt(event.target.value)}
+                        className="border border-ink/20 bg-paper"
+                      />
+                    </label>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        value={meetingDuration}
+                        onChange={(event) => setMeetingDuration(Number(event.target.value))}
+                        placeholder="Duration minutes"
+                        className="border border-ink/20 bg-paper"
+                      />
+                      <Input
+                        type="number"
+                        min={0.1}
+                        step={0.1}
+                        value={meetingPoints}
+                        onChange={(event) => setMeetingPoints(Number(event.target.value))}
+                        placeholder="Points"
+                        className="border border-ink/20 bg-paper"
+                      />
+                    </div>
+                    <Button type="button" onClick={submitMeeting}>
+                      <Plus data-icon="inline-start" />
+                      Add meeting
+                    </Button>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                  <h2 className="mb-3 text-xl font-bold">Active meetings</h2>
+                  {renderMeetingRows(activeMeetings)}
+                </div>
+                <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                  <h2 className="mb-3 text-xl font-bold">Archived meetings</h2>
+                  {renderMeetingRows(archivedMeetings)}
+                </div>
+              </div>
+              {renderMeetingDetail(selectedMeeting)}
             </section>
           )}
 
@@ -2002,7 +2448,15 @@ function AdminView({
                         <div key={update.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ink/10 bg-paper p-3">
                           <div>
                             <strong>{member?.name ?? update.memberId}</strong>
+                            {update.source && (
+                              <span className="ms-2 rounded-full border border-ink/10 bg-yellow-50 px-2 py-1 text-xs font-bold text-yellow-800">
+                                {update.source}
+                              </span>
+                            )}
                             <p className="text-xs text-foreground/50">{formatDateTime(update.createdAt)}</p>
+                            {update.excerpt && (
+                              <p className="mt-1 max-w-md text-sm text-foreground/65">{update.excerpt}</p>
+                            )}
                           </div>
                           <div className="flex gap-2">
                             {member?.repoUrl && (
@@ -2954,6 +3408,7 @@ function StatsView({
   onLogout: () => void;
 }) {
   const activeTasks = data.tasks.filter(isActiveTask);
+  const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const visibleStats = stats.memberStats;
   const leader = visibleStats[0];
   const needsFollowUp = [...visibleStats]
@@ -2967,6 +3422,7 @@ function StatsView({
   const completionRate = expectedTotal > 0 ? Math.round((receivedTotal / expectedTotal) * 100) : 0;
   const approved = visibleStats.reduce((sum, item) => sum + item.approved, 0);
   const rejected = visibleStats.reduce((sum, item) => sum + item.rejected, 0);
+  const meetingPointsTotal = visibleStats.reduce((sum, item) => sum + item.meetingPoints, 0);
   const chartData = [
     { name: "Accepted", value: approved, fill: "#10b981" },
     { name: "Pending", value: stats.pendingTotal, fill: "#f59e0b" },
@@ -3012,8 +3468,9 @@ function StatsView({
               {completionRate}%
             </div>
           </div>
-          <div className="mt-4 grid grid-cols-3 gap-2">
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <CompactMetric label="Active" value={activeTasks.length} />
+            <CompactMetric label="Meetings" value={activeMeetings.length} />
             <CompactMetric label="Pending" value={stats.pendingTotal} />
             <CompactMetric label="Done" value={receivedTotal} />
           </div>
@@ -3065,6 +3522,11 @@ function StatsView({
                 ? `${formatPercent(needsFollowUp.responseRate)} submitted / ${needsFollowUp.pending} pending`
                 : "No active assignments"}
             </p>
+          </div>
+          <div className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
+            <div className="text-sm font-bold text-foreground/50">Meeting points</div>
+            <div className="mt-1 text-2xl font-bold">{Math.round(meetingPointsTotal * 100) / 100}</div>
+            <p className="mt-1 text-sm text-foreground/55">Included in leaderboard totals.</p>
           </div>
         </section>
 
@@ -3607,6 +4069,52 @@ function Index() {
     }));
   }
 
+  function addMeeting(meeting: Omit<Meeting, "id" | "createdAt">) {
+    updateData((current) => ({
+      ...current,
+      meetings: [
+        ...(current.meetings ?? []),
+        {
+          ...meeting,
+          id: `meeting-${Date.now()}`,
+          createdAt: new Date().toISOString(),
+          status: meeting.status ?? "active",
+        },
+      ],
+    }));
+  }
+
+  function updateMeeting(meetingId: string, updates: Partial<Meeting>) {
+    updateData((current) => ({
+      ...current,
+      meetings: (current.meetings ?? []).map((meeting) =>
+        meeting.id === meetingId ? { ...meeting, ...updates } : meeting,
+      ),
+    }));
+  }
+
+  function recordMeetingAttendance(meeting: Meeting, member: Member) {
+    const checkedAt = new Date().toISOString();
+    const calculated = calculateMeetingAttendance(meeting, checkedAt);
+
+    updateData((current) => ({
+      ...current,
+      meetingAttendance: {
+        ...(current.meetingAttendance ?? {}),
+        [meeting.id]: {
+          ...((current.meetingAttendance ?? {})[meeting.id] ?? {}),
+          [member.id]: {
+            memberId: member.id,
+            memberName: member.name,
+            checkedAt,
+            lateMinutes: calculated.lateMinutes,
+            score: calculated.score,
+          },
+        },
+      },
+    }));
+  }
+
   function removeTask(taskId: string) {
     updateData((current) => {
       const nextResponses = { ...current.responses };
@@ -3641,7 +4149,13 @@ function Index() {
     setIsSubmitting(true);
     try {
       const nextData = await postSubmission(item);
-      setData(nextData);
+      const repoUpdate = createRepoUpdateFromText({
+        memberId: item.memberId,
+        taskId: item.taskId,
+        source: "submission",
+        text: item.answer,
+      });
+      setData(appendRepoUpdateIfMissing(nextData, repoUpdate));
       setIsDirty(false);
       writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
       setSentState((current) => {
@@ -3677,7 +4191,13 @@ function Index() {
     setIsSubmitting(true);
     try {
       const nextData = await postProgressUpdate(item);
-      setData(nextData);
+      const repoUpdate = createRepoUpdateFromText({
+        memberId: item.memberId,
+        taskId: item.taskId,
+        source: "progress",
+        text: item.note,
+      });
+      setData(appendRepoUpdateIfMissing(nextData, repoUpdate));
       setIsDirty(false);
       writeMemberDrafts({ ...readMemberDrafts(), [key]: note });
       setSentState((current) => {
@@ -3945,6 +4465,9 @@ function Index() {
         onLogout={logout}
         onAddTask={addTask}
         onUpdateTask={updateTask}
+        onAddMeeting={addMeeting}
+        onUpdateMeeting={updateMeeting}
+        onRecordMeetingAttendance={recordMeetingAttendance}
         onRemoveTask={removeTask}
         onManualApprove={manualApprove}
         onApproveQueuedSubmission={approveQueuedSubmission}
