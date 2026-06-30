@@ -1,11 +1,20 @@
 {
   "projectName": "Hivo Studio",
   "announcement": "",
+  "settings": {
+    "adminPassword": "5678",
+    "statsPassword": "6789"
+  },
   "members": [
     {
       "id": "abozena",
       "name": "Abozena",
-      "aliases": ["abozena", "abo zena", "ابو زينة", "أبو زينة"],
+      "aliases": [
+        "abozena",
+        "abo zena",
+        "ابو زينة",
+        "أبو زينة"
+      ],
       "hidden": false,
       "baseCompleted": 0,
       "basePoints": 0,
@@ -18,7 +27,12 @@
     {
       "id": "shoiab",
       "name": "shoiab",
-      "aliases": ["shoiab", "shoaib", "شعيب"],
+      "aliases": [
+        "shoiab",
+        "shoaib",
+        "شعيب",
+        "شع"
+      ],
       "hidden": false,
       "baseCompleted": 0,
       "basePoints": 0,
@@ -31,7 +45,14 @@
     {
       "id": "kareem-adel",
       "name": "kareem adel",
-      "aliases": ["kareem adel", "karim adel", "kareem", "karim", "كريم", "كريم عادل"],
+      "aliases": [
+        "kareem adel",
+        "karim adel",
+        "kareem",
+        "karim",
+        "كريم",
+        "كريم عادل"
+      ],
       "hidden": false,
       "baseCompleted": 0,
       "basePoints": 0,
@@ -44,7 +65,14 @@
     {
       "id": "abo-grir",
       "name": "Abo grir",
-      "aliases": ["abo grir", "abo grer", "abo greer", "ابو جرير", "أبو جرير", "احمد"],
+      "aliases": [
+        "abo grir",
+        "abo grer",
+        "abo greer",
+        "ابو جرير",
+        "أبو جرير",
+        "احمد"
+      ],
       "hidden": false,
       "baseCompleted": 0,
       "basePoints": 0,
@@ -77,7 +105,10 @@
     {
       "id": "renad",
       "name": "renad",
-      "aliases": ["renad", "ريناد"],
+      "aliases": [
+        "renad",
+        "ريناد"
+      ],
       "hidden": false,
       "baseCompleted": 0,
       "basePoints": 0,
@@ -90,7 +121,11 @@
     {
       "id": "tasneem",
       "name": "tasneem",
-      "aliases": ["tasneem", "tasnim", "تسنيم"],
+      "aliases": [
+        "tasneem",
+        "tasnim",
+        "تسنيم"
+      ],
       "hidden": false,
       "baseCompleted": 0,
       "basePoints": 0,
@@ -103,7 +138,11 @@
     {
       "id": "rodina",
       "name": "rodina",
-      "aliases": ["rodina", "rudina", "رودينا"],
+      "aliases": [
+        "rodina",
+        "rudina",
+        "رودينا"
+      ],
       "hidden": false,
       "baseCompleted": 0,
       "basePoints": 0,
@@ -116,7 +155,12 @@
     {
       "id": "fatema",
       "name": "fatema",
-      "aliases": ["fatema", "fatma", "fatima", "فاطمة"],
+      "aliases": [
+        "fatema",
+        "fatma",
+        "fatima",
+        "فاطمة"
+      ],
       "hidden": false,
       "baseCompleted": 0,
       "basePoints": 0,
@@ -129,7 +173,13 @@
     {
       "id": "marihan",
       "name": "marihan",
-      "aliases": ["marihan", "merihan", "maryhan", "مريهان", "ماريهان"],
+      "aliases": [
+        "marihan",
+        "merihan",
+        "maryhan",
+        "مريهان",
+        "ماريهان"
+      ],
       "hidden": false,
       "baseCompleted": 0,
       "basePoints": 0,
@@ -140,14 +190,19 @@
       "repoUrl": ""
     }
   ],
-  "tasks": [],
+  "tasks": [
+    {
+      "title": "123",
+      "question": "5321",
+      "points": 5,
+      "scope": "all",
+      "id": "task-1782846239248",
+      "createdAt": "2026-06-30T19:03:59.248Z"
+    }
+  ],
   "responses": {},
+  "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-06-30T16:52:11.483Z"
-  },
-  "settings": {
-    "adminPassword": "5678",
-    "statsPassword": "6789"
-  },
-  "repoUpdates": []
+    "updatedAt": "2026-06-30T19:04:48.967Z"
+  }
 }
