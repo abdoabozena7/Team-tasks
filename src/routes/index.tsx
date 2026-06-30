@@ -473,13 +473,25 @@ function MemberDetails({ item }: { item: MemberScore }) {
 function Leaderboard({ scores }: { scores: MemberScore[] }) {
   const [openMemberId, setOpenMemberId] = useState("");
   const worstMemberId = scores[scores.length - 1]?.member.id;
+  const rowPalettes = [
+    "bg-[#fff4a8]",
+    "bg-[#cffafe]",
+    "bg-[#dcfce7]",
+    "bg-[#fde2f3]",
+    "bg-[#ede9fe]",
+    "bg-[#ffedd5]",
+    "bg-[#dbeafe]",
+    "bg-[#fef3c7]",
+    "bg-[#ccfbf1]",
+  ];
 
   return (
-    <div className="grid gap-2 md:grid-cols-2">
+    <div className="leaderboard-stage grid gap-3 md:grid-cols-2">
       {scores.map((item, index) => {
         const isLeader = index === 0;
         const isWorst = item.member.id === worstMemberId && scores.length > 1;
         const isOpen = openMemberId === item.member.id;
+        const rowColor = rowPalettes[index % rowPalettes.length];
 
         if (isWorst) {
           return (
@@ -506,33 +518,52 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
             key={item.member.id}
             type="button"
             onClick={() => setOpenMemberId(isOpen ? "" : item.member.id)}
-            className={`text-right border-[2px] border-ink bg-paper px-3 py-2 doodle-shadow-sm transition ${
-              isLeader ? "scale-[1.02] bg-yellow-100 shadow-[0_0_0_4px_rgba(255,221,87,0.45)]" : ""
+            className={`leaderboard-row group relative overflow-hidden text-right border-[2.5px] border-ink px-3 py-3 doodle-shadow-sm transition ${rowColor} ${
+              isLeader ? "leaderboard-row-top md:col-span-2" : ""
             }`}
-            style={{ borderRadius: "12px 16px 10px 14px / 14px 10px 16px 12px" }}
+            style={{
+              borderRadius: "14px 18px 12px 16px / 16px 12px 18px 14px",
+              animationDelay: `${index * 80}ms`,
+            }}
           >
-            <div className="flex items-center gap-3">
+            <div className="relative z-10 flex items-center gap-3">
               <span
-                className={`grid size-8 shrink-0 place-items-center rounded-full border-[2px] border-ink font-bold ${rankingBadgeClass(
+                className={`leaderboard-badge grid size-10 shrink-0 place-items-center rounded-full border-[2.5px] border-ink font-bold ${rankingBadgeClass(
                   item,
                 )}`}
               >
                 {index + 1}
               </span>
-              <span className="min-w-0 flex-1 truncate font-bold">
-                {item.member.name}
-                {isLeader && <span className="ms-2 text-xs text-yellow-700">TOP</span>}
-                {item.member.publicFlag && (
-                  <span className="ms-2 text-xs font-bold text-red-600">
-                    {item.member.publicFlag}
-                  </span>
-                )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-lg font-bold leading-tight">
+                  {item.member.name}
+                  {isLeader && <span className="leaderboard-top-tag ms-2">TOP</span>}
+                  {item.member.publicFlag && (
+                    <span className="ms-2 text-xs font-bold text-red-600">
+                      {item.member.publicFlag}
+                    </span>
+                  )}
+                </span>
+                <span className="mt-1 block h-2 overflow-hidden rounded-full border-[1.5px] border-ink bg-white/70">
+                  <span
+                    className="leaderboard-progress block h-full rounded-full bg-emerald-400"
+                    style={{
+                      width: `${Math.max(8, Math.min(100, item.responseRate || item.approvalRate || 0))}%`,
+                    }}
+                  />
+                </span>
               </span>
-              <span className="text-sm text-foreground/70">
-                {item.points} pts / {item.completed} tasks
+              <span className="leaderboard-points shrink-0 rounded-full border-[2px] border-ink bg-white/80 px-3 py-1 text-sm font-bold">
+                {item.points} pts
+                <span className="mx-1 text-foreground/45">/</span>
+                {item.completed}
               </span>
             </div>
-            {isOpen && <MemberDetails item={item} />}
+            {isOpen && (
+              <div className="relative z-10">
+                <MemberDetails item={item} />
+              </div>
+            )}
           </button>
         );
       })}
