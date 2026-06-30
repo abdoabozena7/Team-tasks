@@ -16,7 +16,7 @@
         "ابو زينة",
         "أبو زينة"
       ],
-      "hidden": false,
+      "hidden": true,
       "baseCompleted": 0,
       "basePoints": 0,
       "adminNote": "",
@@ -204,6 +204,6 @@
   "progressUpdates": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-06-30T21:23:27.162Z"
+    "updatedAt": "2026-06-30T21:24:59.088Z"
   }
 }
