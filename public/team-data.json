@@ -23,7 +23,7 @@
       "baseApproved": 13,
       "baseRejected": 0,
       "publicFlag": "",
-      "repoUrl": ""
+      "repoUrl": "https://github.com/abdoabozena7/simple_coding_agent"
     },
     {
       "id": "shoiab",
@@ -223,6 +223,6 @@
   "progressUpdates": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-06-30T22:12:20.016Z"
+    "updatedAt": "2026-06-30T22:13:04.572Z"
   }
 }
