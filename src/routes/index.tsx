@@ -1,15 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
+  BarChart3,
+  Bell,
   Check,
-  Edit3,
+  ExternalLink,
   Eye,
   EyeOff,
-  KeyRound,
   LogOut,
   Plus,
+  RefreshCw,
   RotateCcw,
   Save,
+  Settings,
   Star,
   Trash2,
 } from "lucide-react";
@@ -34,8 +37,12 @@ type Member = {
   aliases: string[];
   hidden?: boolean;
   baseCompleted?: number;
+  baseApproved?: number;
+  baseRejected?: number;
   basePoints?: number;
   adminNote?: string;
+  publicFlag?: string;
+  repoUrl?: string;
 };
 
 type StudioTask = {
@@ -57,12 +64,27 @@ type TaskResponse = {
   reviewedAt?: string;
 };
 
+type StudioSettings = {
+  adminPassword: string;
+  statsPassword: string;
+};
+
+type RepoUpdate = {
+  id: string;
+  memberId: string;
+  createdAt: string;
+  note?: string;
+  seen?: boolean;
+};
+
 type StudioData = {
   projectName: string;
   announcement?: string;
+  settings?: StudioSettings;
   members: Member[];
   tasks: StudioTask[];
   responses: Record<string, Record<string, TaskResponse>>;
+  repoUpdates?: RepoUpdate[];
   meta: { updatedAt: string };
 };
 
@@ -73,29 +95,55 @@ type ActiveMember = {
 
 type MemberScore = {
   member: Member;
+  submitted: number;
   approved: number;
+  rejected: number;
   baseCompleted: number;
+  baseApproved: number;
+  baseRejected: number;
   completed: number;
   taskPoints: number;
   basePoints: number;
   points: number;
+  avgHours: number | null;
 };
 
-const ADMIN_PASSWORD = "5678";
+type TaskMetric = {
+  task: StudioTask;
+  received: number;
+  expected: number;
+  approved: number;
+  rejected: number;
+  submitted: number;
+};
+
+const DEFAULT_ADMIN_PASSWORD = "5678";
+const DEFAULT_STATS_PASSWORD = "6789";
 const ACTIVE_MEMBER_KEY = "hivo-studio-active-member";
 const ACTIVE_DISPLAY_NAME_KEY = "hivo-studio-active-display-name";
 const ADMIN_SESSION_KEY = "hivo-studio-admin";
+const STATS_SESSION_KEY = "hivo-studio-stats";
 const GITHUB_TOKEN_KEY = "hivo-studio-github-token";
+const REFRESHED_SESSION_KEY = "hivo-studio-refreshed-this-session";
+const NICKNAME_HINT_KEY = "hivo-studio-nickname-hint";
 const GITHUB_OWNER = "abdoabozena7";
 const GITHUB_REPO = "Team-tasks";
 const GITHUB_BRANCH = "main";
 const GITHUB_DATA_PATHS = ["team-data.json", "public/team-data.json"];
+
+const DEFAULT_SETTINGS: StudioSettings = {
+  adminPassword: DEFAULT_ADMIN_PASSWORD,
+  statsPassword: DEFAULT_STATS_PASSWORD,
+};
+
 const DEFAULT_DATA: StudioData = {
   projectName: "Hivo Studio",
   announcement: "",
+  settings: DEFAULT_SETTINGS,
   members: [],
   tasks: [],
   responses: {},
+  repoUpdates: [],
   meta: { updatedAt: new Date().toISOString() },
 };
 
@@ -107,6 +155,10 @@ function normalizeName(value: string) {
     .replace(/ة/g, "ه")
     .replace(/ى/g, "ي")
     .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function uniqueText(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
 function findMemberByName(name: string, members: Member[]) {
@@ -128,16 +180,25 @@ function sanitizeData(data: StudioData): StudioData {
     ...DEFAULT_DATA,
     ...data,
     announcement: data.announcement ?? "",
+    settings: {
+      adminPassword: data.settings?.adminPassword || DEFAULT_ADMIN_PASSWORD,
+      statsPassword: data.settings?.statsPassword || DEFAULT_STATS_PASSWORD,
+    },
     members: (data.members ?? []).map((member) => ({
       ...member,
-      aliases: member.aliases ?? [],
+      aliases: uniqueText(member.aliases ?? []),
       hidden: Boolean(member.hidden),
       baseCompleted: sanitizeNumber(member.baseCompleted),
+      baseApproved: sanitizeNumber(member.baseApproved),
+      baseRejected: sanitizeNumber(member.baseRejected),
       basePoints: sanitizeNumber(member.basePoints),
       adminNote: member.adminNote ?? "",
+      publicFlag: member.publicFlag ?? "",
+      repoUrl: member.repoUrl ?? "",
     })),
     tasks: data.tasks ?? [],
     responses: data.responses ?? {},
+    repoUpdates: data.repoUpdates ?? [],
     meta: data.meta ?? DEFAULT_DATA.meta,
   };
 }
@@ -154,23 +215,58 @@ function getResponse(data: StudioData, taskId: string, memberId: string) {
   return data.responses[taskId]?.[memberId];
 }
 
+function hoursBetween(start?: string, end?: string) {
+  if (!start || !end) return null;
+  const startTime = new Date(start).getTime();
+  const endTime = new Date(end).getTime();
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return null;
+  return (endTime - startTime) / 36e5;
+}
+
+function formatHours(value: number | null) {
+  if (value === null) return "N/A";
+  if (value < 1) return `${Math.max(1, Math.round(value * 60))}m`;
+  return `${value.toFixed(1)}h`;
+}
+
 function createStats(data: StudioData) {
   const memberStats = data.members.map((member) => {
-    const approvedTasks = data.tasks.filter(
-      (task) => getResponse(data, task.id, member.id)?.status === "approved",
-    );
-    const taskPoints = approvedTasks.reduce((sum, task) => sum + (task.points || 1), 0);
+    const responses = data.tasks
+      .map((task) => ({ task, response: getResponse(data, task.id, member.id) }))
+      .filter((item): item is { task: StudioTask; response: TaskResponse } =>
+        Boolean(item.response),
+      );
+    const approvedTasks = responses.filter((item) => item.response.status === "approved");
+    const taskPoints = approvedTasks.reduce((sum, item) => sum + (item.task.points || 1), 0);
+    const speedSamples = responses
+      .map((item) => hoursBetween(item.task.createdAt, item.response.submittedAt))
+      .filter((value): value is number => value !== null);
+    const avgHours =
+      speedSamples.length > 0
+        ? speedSamples.reduce((sum, value) => sum + value, 0) / speedSamples.length
+        : null;
     const baseCompleted = sanitizeNumber(member.baseCompleted);
+    const baseApproved = sanitizeNumber(member.baseApproved);
+    const baseRejected = sanitizeNumber(member.baseRejected);
     const basePoints = sanitizeNumber(member.basePoints);
+    const approved = approvedTasks.length + baseApproved;
+    const rejected =
+      responses.filter((item) => item.response.status === "rejected").length + baseRejected;
+    const submitted = responses.length;
 
     return {
       member,
-      approved: approvedTasks.length,
+      submitted,
+      approved,
+      rejected,
       baseCompleted,
+      baseApproved,
+      baseRejected,
       completed: baseCompleted + approvedTasks.length,
       taskPoints,
       basePoints,
       points: basePoints + taskPoints,
+      avgHours,
     };
   });
   const visibleStats = memberStats.filter((item) => !item.member.hidden);
@@ -178,16 +274,43 @@ function createStats(data: StudioData) {
     if (b.points !== a.points) return b.points - a.points;
     return b.completed - a.completed;
   });
+  const taskMetrics = data.tasks.map((task) => {
+    const expected =
+      task.scope === "member"
+        ? task.memberId
+          ? 1
+          : 0
+        : data.members.filter((member) => !member.hidden).length;
+    const responses = Object.values(data.responses[task.id] ?? {});
+    return {
+      task,
+      expected,
+      received: responses.length,
+      approved: responses.filter((response) => response.status === "approved").length,
+      rejected: responses.filter((response) => response.status === "rejected").length,
+      submitted: responses.filter((response) => response.status === "submitted").length,
+    };
+  });
   const leader = rankedMembers[0];
+  const worst = rankedMembers[rankedMembers.length - 1];
   const approvedTotal = visibleStats.reduce((sum, item) => sum + item.completed, 0);
   const pointsTotal = visibleStats.reduce((sum, item) => sum + item.points, 0);
+  const pendingTotal = Object.values(data.responses).reduce(
+    (sum, taskResponses) =>
+      sum +
+      Object.values(taskResponses).filter((response) => response.status === "submitted").length,
+    0,
+  );
 
   return {
     allMemberStats: memberStats,
     memberStats: rankedMembers,
+    taskMetrics,
     leader,
+    worst,
     approvedTotal,
     pointsTotal,
+    pendingTotal,
   };
 }
 
@@ -207,31 +330,55 @@ function Logo({ size = "size-24" }: { size?: string }) {
   );
 }
 
+function SectionTitle({ title, help }: { title: string; help: string }) {
+  return (
+    <div className="mb-4">
+      <h2 className="text-2xl font-bold">
+        <span className="highlight-yellow">{title}</span>
+      </h2>
+      <p className="mt-1 text-sm leading-6 text-foreground/60">{help}</p>
+    </div>
+  );
+}
+
 function LoginScreen({
-  members,
+  data,
   onMemberLogin,
   onAdminLogin,
+  onStatsLogin,
 }: {
-  members: Member[];
+  data: StudioData;
   onMemberLogin: (member: Member, displayName: string) => void;
   onAdminLogin: () => void;
+  onStatsLogin: () => void;
 }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const settings = data.settings ?? DEFAULT_SETTINGS;
 
   function submitName() {
     const displayName = name.trim();
     if (!displayName) return;
 
-    if (displayName === ADMIN_PASSWORD) {
+    if (displayName === settings.adminPassword) {
       window.localStorage.setItem(ADMIN_SESSION_KEY, "true");
+      window.localStorage.removeItem(STATS_SESSION_KEY);
       window.localStorage.removeItem(ACTIVE_MEMBER_KEY);
       window.localStorage.removeItem(ACTIVE_DISPLAY_NAME_KEY);
       onAdminLogin();
       return;
     }
 
-    const member = findMemberByName(displayName, members);
+    if (displayName === settings.statsPassword) {
+      window.localStorage.setItem(STATS_SESSION_KEY, "true");
+      window.localStorage.removeItem(ADMIN_SESSION_KEY);
+      window.localStorage.removeItem(ACTIVE_MEMBER_KEY);
+      window.localStorage.removeItem(ACTIVE_DISPLAY_NAME_KEY);
+      onStatsLogin();
+      return;
+    }
+
+    const member = findMemberByName(displayName, data.members);
     if (!member) {
       setError("الاسم مش واضح عندي. اكتبه عربي أو إنجليزي زي اسمك في التيم.");
       return;
@@ -240,6 +387,7 @@ function LoginScreen({
     window.localStorage.setItem(ACTIVE_MEMBER_KEY, member.id);
     window.localStorage.setItem(ACTIVE_DISPLAY_NAME_KEY, displayName);
     window.localStorage.removeItem(ADMIN_SESSION_KEY);
+    window.localStorage.removeItem(STATS_SESSION_KEY);
     onMemberLogin(member, displayName);
   }
 
@@ -284,28 +432,85 @@ function LoginScreen({
   );
 }
 
+function MemberDetails({ item }: { item: MemberScore }) {
+  return (
+    <div className="mt-3 grid gap-2 border-t-[2px] border-ink/30 pt-3 text-sm sm:grid-cols-3">
+      <span>مسلم: {item.submitted}</span>
+      <span>مقبول: {item.approved}</span>
+      <span>مرفوض: {item.rejected}</span>
+      <span>نقاط: {item.points}</span>
+      <span>تاسكات محسوبة: {item.completed}</span>
+      <span>متوسط السرعة: {formatHours(item.avgHours)}</span>
+    </div>
+  );
+}
+
 function Leaderboard({ scores }: { scores: MemberScore[] }) {
+  const [openMemberId, setOpenMemberId] = useState("");
+  const worstMemberId = scores[scores.length - 1]?.member.id;
+
   return (
     <div className="grid gap-2 md:grid-cols-2">
-      {scores.map((item, index) => (
-        <div
-          key={item.member.id}
-          className="flex items-center gap-3 border-[2px] border-ink bg-paper px-3 py-2 doodle-shadow-sm"
-          style={{ borderRadius: "12px 16px 10px 14px / 14px 10px 16px 12px" }}
-        >
-          <span
-            className={`grid size-8 shrink-0 place-items-center rounded-full border-[2px] border-ink font-bold ${rankingBadgeClass(
-              item,
-            )}`}
+      {scores.map((item, index) => {
+        const isLeader = index === 0;
+        const isWorst = item.member.id === worstMemberId && scores.length > 1;
+        const isOpen = openMemberId === item.member.id;
+
+        if (isWorst) {
+          return (
+            <button
+              key={item.member.id}
+              type="button"
+              onClick={() => setOpenMemberId(isOpen ? "" : item.member.id)}
+              className="border border-black bg-white p-2 text-left font-serif text-black shadow-none"
+              dir="rtl"
+            >
+              <div>
+                {index + 1}. {item.member.name} - {item.points} pts / {item.completed} tasks
+              </div>
+              {item.member.publicFlag && (
+                <div className="text-red-700">[{item.member.publicFlag}]</div>
+              )}
+              {isOpen && <MemberDetails item={item} />}
+            </button>
+          );
+        }
+
+        return (
+          <button
+            key={item.member.id}
+            type="button"
+            onClick={() => setOpenMemberId(isOpen ? "" : item.member.id)}
+            className={`text-right border-[2px] border-ink bg-paper px-3 py-2 doodle-shadow-sm transition ${
+              isLeader ? "scale-[1.02] bg-yellow-100 shadow-[0_0_0_4px_rgba(255,221,87,0.45)]" : ""
+            }`}
+            style={{ borderRadius: "12px 16px 10px 14px / 14px 10px 16px 12px" }}
           >
-            {index + 1}
-          </span>
-          <span className="min-w-0 flex-1 truncate font-bold">{item.member.name}</span>
-          <span className="text-sm text-foreground/70">
-            {item.points} pts / {item.completed} tasks
-          </span>
-        </div>
-      ))}
+            <div className="flex items-center gap-3">
+              <span
+                className={`grid size-8 shrink-0 place-items-center rounded-full border-[2px] border-ink font-bold ${rankingBadgeClass(
+                  item,
+                )}`}
+              >
+                {index + 1}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-bold">
+                {item.member.name}
+                {isLeader && <span className="ms-2 text-xs text-yellow-700">TOP</span>}
+                {item.member.publicFlag && (
+                  <span className="ms-2 text-xs font-bold text-red-600">
+                    {item.member.publicFlag}
+                  </span>
+                )}
+              </span>
+              <span className="text-sm text-foreground/70">
+                {item.points} pts / {item.completed} tasks
+              </span>
+            </div>
+            {isOpen && <MemberDetails item={item} />}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -315,22 +520,92 @@ function MemberView({
   activeMember,
   stats,
   draftAnswers,
+  refreshStatus,
   onDraftChange,
   onSubmitAnswer,
   onLogout,
+  onRefreshData,
+  onUpdateMember,
+  onRepoUpdate,
 }: {
   data: StudioData;
   activeMember: ActiveMember;
   stats: ReturnType<typeof createStats>;
   draftAnswers: Record<string, string>;
+  refreshStatus: string;
   onDraftChange: (key: string, value: string) => void;
   onSubmitAnswer: (task: StudioTask) => void;
   onLogout: () => void;
+  onRefreshData: () => Promise<void>;
+  onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
+  onRepoUpdate: (memberId: string) => void;
 }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [nicknameDraft, setNicknameDraft] = useState("");
+  const [repoDraft, setRepoDraft] = useState(activeMember.member.repoUrl ?? "");
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshedOnce, setRefreshedOnce] = useState(
+    window.sessionStorage.getItem(REFRESHED_SESSION_KEY) === "true",
+  );
+  const [showNicknameHint, setShowNicknameHint] = useState(
+    window.localStorage.getItem(NICKNAME_HINT_KEY) !== "seen",
+  );
   const memberTasks = data.tasks.filter((task) => taskIsForMember(task, activeMember.member.id));
+
+  async function refreshMemberData() {
+    setRefreshing(true);
+    try {
+      await onRefreshData();
+      window.sessionStorage.setItem(REFRESHED_SESSION_KEY, "true");
+      setRefreshedOnce(true);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  function addNickname() {
+    const nickname = nicknameDraft.trim();
+    if (!nickname) return;
+    onUpdateMember(activeMember.member.id, {
+      aliases: uniqueText([...activeMember.member.aliases, nickname]),
+    });
+    setNicknameDraft("");
+  }
+
+  function saveRepoUrl() {
+    onUpdateMember(activeMember.member.id, { repoUrl: repoDraft.trim() });
+  }
+
+  function closeHint() {
+    window.localStorage.setItem(NICKNAME_HINT_KEY, "seen");
+    setShowNicknameHint(false);
+  }
 
   return (
     <div className="min-h-screen text-foreground" dir="rtl">
+      <button
+        type="button"
+        onClick={() => setSettingsOpen(true)}
+        className="fixed left-4 top-4 z-30 grid size-11 place-items-center rounded-full border-[2px] border-ink bg-card doodle-shadow-sm"
+        aria-label="settings"
+      >
+        <Settings className="size-5" />
+      </button>
+
+      {showNicknameHint && (
+        <div className="fixed left-4 top-20 z-30 max-w-xs border-[2px] border-ink bg-card p-3 text-sm doodle-shadow-sm">
+          <p>ممكن تضيف nickname تسجل بيه دايمًا لو اسمك مش عاجبك.</p>
+          <Button
+            type="button"
+            size="sm"
+            onClick={closeHint}
+            className="mt-2 border-[2px] border-ink"
+          >
+            تمام
+          </Button>
+        </div>
+      )}
+
       <div className="mx-auto max-w-4xl px-5 py-10 md:py-14">
         <header className="relative mb-10 text-center">
           <Logo />
@@ -352,25 +627,40 @@ function MemberView({
                 نقاط التيم: {stats.pointsTotal} | تاسكات محسوبة: {stats.approvedTotal}
               </span>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onLogout}
-              className="border-[2px] border-ink bg-paper doodle-shadow-sm"
-            >
-              <LogOut data-icon="inline-start" />
-              تغيير الاسم
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={refreshMemberData}
+                disabled={refreshing}
+                className={`border-[2px] border-ink doodle-shadow-sm ${
+                  refreshedOnce
+                    ? ""
+                    : "scale-105 bg-red-500 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.35)]"
+                }`}
+              >
+                <RefreshCw data-icon="inline-start" />
+                {refreshing ? "Refreshing..." : "Refresh"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onLogout}
+                className="border-[2px] border-ink bg-paper doodle-shadow-sm"
+              >
+                <LogOut data-icon="inline-start" />
+                تغيير الاسم
+              </Button>
+            </div>
           </div>
+          {refreshStatus && <p className="mt-2 text-sm text-foreground/65">{refreshStatus}</p>}
         </section>
 
-        {data.announcement?.trim() && (
+        {activeMember.member.publicFlag?.trim() && (
           <section
-            className="mb-7 border-[2.5px] border-ink bg-card p-5 text-lg leading-[1.8] doodle-shadow"
-            style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
+            className="mb-7 border-[2.5px] border-red-700 bg-red-50 p-4 text-lg font-bold text-red-700 doodle-shadow-sm"
+            style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
           >
-            <strong className="highlight-yellow">آخر تحديث: </strong>
-            {data.announcement}
+            {activeMember.member.name}: {activeMember.member.publicFlag}
           </section>
         )}
 
@@ -472,6 +762,69 @@ function MemberView({
           <Leaderboard scores={stats.memberStats} />
         </section>
       </div>
+
+      {settingsOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 px-4">
+          <section
+            className="w-full max-w-lg border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+            style={{ borderRadius: "22px 28px 18px 26px / 24px 18px 28px 20px" }}
+          >
+            <h2 className="mb-3 text-3xl font-bold">
+              <span className="highlight-yellow">Settings</span>
+            </h2>
+            <p className="mb-3 text-sm text-foreground/65">الأسماء المتاحة للدخول:</p>
+            <div className="mb-4 flex flex-wrap gap-2">
+              {[activeMember.member.name, ...activeMember.member.aliases].map((alias) => (
+                <span key={alias} className="border-[2px] border-ink bg-paper px-2 py-1 text-sm">
+                  {alias}
+                </span>
+              ))}
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <Input
+                value={nicknameDraft}
+                onChange={(event) => setNicknameDraft(event.target.value)}
+                placeholder="New nickname"
+                className="border-[2px] border-ink bg-paper"
+              />
+              <Button type="button" onClick={addNickname} className="border-[2px] border-ink">
+                إضافة
+              </Button>
+            </div>
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+              <Input
+                value={repoDraft}
+                onChange={(event) => setRepoDraft(event.target.value)}
+                placeholder="GitHub repo link"
+                className="border-[2px] border-ink bg-paper"
+              />
+              <Button type="button" onClick={saveRepoUrl} className="border-[2px] border-ink">
+                حفظ اللينك
+              </Button>
+            </div>
+
+            <Button
+              type="button"
+              onClick={() => onRepoUpdate(activeMember.member.id)}
+              className="mt-3 w-full border-[2px] border-ink doodle-shadow-sm"
+            >
+              <Bell data-icon="inline-start" />
+              Update GitHub Repo
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSettingsOpen(false)}
+              className="mt-4 w-full border-[2px] border-ink bg-paper doodle-shadow-sm"
+            >
+              رجوع
+            </Button>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -479,30 +832,42 @@ function MemberView({
 function AdminView({
   data,
   stats,
-  githubToken,
   saveStatus,
+  isDirty,
+  isSaving,
+  tokenDialogOpen,
+  tokenDraft,
   onLogout,
   onAddTask,
   onRemoveTask,
   onManualApprove,
   onReviewAnswer,
   onUpdateMember,
-  onUpdateAnnouncement,
-  onGithubTokenChange,
+  onUpdateSettings,
+  onMarkRepoUpdateSeen,
+  onTokenDraftChange,
+  onCloseTokenDialog,
+  onConfirmTokenAndSave,
   onSaveToGithub,
 }: {
   data: StudioData;
   stats: ReturnType<typeof createStats>;
-  githubToken: string;
   saveStatus: string;
+  isDirty: boolean;
+  isSaving: boolean;
+  tokenDialogOpen: boolean;
+  tokenDraft: string;
   onLogout: () => void;
   onAddTask: (task: Omit<StudioTask, "id" | "createdAt">) => void;
   onRemoveTask: (taskId: string) => void;
   onManualApprove: (task: StudioTask, memberId: string) => void;
   onReviewAnswer: (taskId: string, memberId: string, status: "approved" | "rejected") => void;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
-  onUpdateAnnouncement: (value: string) => void;
-  onGithubTokenChange: (value: string) => void;
+  onUpdateSettings: (settings: Partial<StudioSettings>) => void;
+  onMarkRepoUpdateSeen: (updateId: string) => void;
+  onTokenDraftChange: (value: string) => void;
+  onCloseTokenDialog: () => void;
+  onConfirmTokenAndSave: () => void;
   onSaveToGithub: () => void;
 }) {
   const [taskTitle, setTaskTitle] = useState("");
@@ -511,6 +876,7 @@ function AdminView({
   const [taskScope, setTaskScope] = useState<"all" | "member">("all");
   const [taskMemberId, setTaskMemberId] = useState("");
   const [manualApproveMembers, setManualApproveMembers] = useState<Record<string, string>>({});
+  const unseenUpdates = data.repoUpdates?.filter((update) => !update.seen) ?? [];
 
   function submitTask() {
     if (!taskTitle.trim() || !taskQuestion.trim()) return;
@@ -530,7 +896,7 @@ function AdminView({
 
   return (
     <div className="min-h-screen text-foreground" dir="rtl">
-      <div className="mx-auto max-w-5xl px-5 py-10 md:py-14">
+      <div className="mx-auto max-w-6xl px-5 pb-32 pt-10 md:pb-36 md:pt-14">
         <header className="mb-8 text-center">
           <Logo />
           <h1 className="mb-2 mt-4 text-5xl font-bold leading-tight">
@@ -539,28 +905,115 @@ function AdminView({
           <p className="text-lg text-foreground/75">
             إدارة التاسكات، متابعة الفريق، وحفظ التحديثات في GitHub.
           </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onLogout}
+            className="mt-4 border-[2px] border-ink bg-paper doodle-shadow-sm"
+          >
+            <LogOut data-icon="inline-start" />
+            تغيير الدخول
+          </Button>
         </header>
 
-        <section
-          className="mb-7 border-[2.5px] border-ink bg-card p-4 doodle-shadow"
-          style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="font-bold">
-              <span className="highlight-blue">
-                النقاط: {stats.pointsTotal} | التاسكات المحسوبة: {stats.approvedTotal} | التاسكات:{" "}
-                {data.tasks.length}
-              </span>
+        <section className="mb-7 grid gap-3 md:grid-cols-4">
+          {[
+            ["التاسكات", data.tasks.length],
+            ["إجابات مستنية", stats.pendingTotal],
+            ["Repo updates", unseenUpdates.length],
+            ["نقاط ظاهرة", stats.pointsTotal],
+          ].map(([label, value]) => (
+            <div
+              key={label}
+              className="border-[2.5px] border-ink bg-card p-4 text-center doodle-shadow"
+              style={{ borderRadius: "16px 20px 14px 18px / 18px 14px 20px 16px" }}
+            >
+              <div className="text-3xl font-bold">{value}</div>
+              <div className="text-sm text-foreground/65">{label}</div>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onLogout}
-              className="border-[2px] border-ink bg-paper doodle-shadow-sm"
-            >
-              <LogOut data-icon="inline-start" />
-              خروج الأدمن
-            </Button>
+          ))}
+        </section>
+
+        <section
+          className="mb-7 border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+          style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
+        >
+          <SectionTitle
+            title="تنبيهات الريبو"
+            help="أي عضو يضغط Update GitHub Repo يظهر هنا، والضغط على اسمه يفتح الريبو بتاعه."
+          />
+          {unseenUpdates.length === 0 ? (
+            <p className="text-sm text-foreground/60">مفيش تحديثات ريبو جديدة.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {unseenUpdates.map((update) => {
+                const member = data.members.find((item) => item.id === update.memberId);
+                return (
+                  <div
+                    key={update.id}
+                    className="flex flex-wrap items-center justify-between gap-2 border-[2px] border-ink bg-paper p-3"
+                  >
+                    <div>
+                      <strong>{member?.name ?? update.memberId}</strong>
+                      <p className="text-xs text-foreground/60">
+                        {new Date(update.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {member?.repoUrl && (
+                        <Button
+                          type="button"
+                          onClick={() =>
+                            window.open(member.repoUrl, "_blank", "noopener,noreferrer")
+                          }
+                          className="border-[2px] border-ink doodle-shadow-sm"
+                        >
+                          <ExternalLink data-icon="inline-start" />
+                          فتح الريبو
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => onMarkRepoUpdateSeen(update.id)}
+                        className="border-[2px] border-ink bg-card"
+                      >
+                        Done
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section
+          className="mb-7 border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+          style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
+        >
+          <SectionTitle
+            title="إحصائيات التاسكات"
+            help="متابعة سريعة: كام إجابة وصلت لكل تاسك من أصل المطلوب."
+          />
+          <div className="grid gap-2 md:grid-cols-2">
+            {stats.taskMetrics.length === 0 ? (
+              <p className="text-sm text-foreground/60">لسه مفيش تاسكات.</p>
+            ) : (
+              stats.taskMetrics.map((item) => (
+                <div key={item.task.id} className="border-[2px] border-ink bg-paper p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <strong>{item.task.title}</strong>
+                    <span className="rounded-full border-[2px] border-ink bg-card px-2 py-1 text-sm">
+                      {item.received}/{item.expected}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-foreground/60">
+                    pending {item.submitted} • accepted {item.approved} • rejected {item.rejected}
+                  </p>
+                </div>
+              ))
+            )}
           </div>
         </section>
 
@@ -568,38 +1021,10 @@ function AdminView({
           className="mb-7 border-[2.5px] border-ink bg-card p-5 doodle-shadow"
           style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
         >
-          <h2 className="mb-4 flex items-center gap-2 text-2xl font-bold">
-            <KeyRound data-icon="inline-start" />
-            حفظ GitHub
-          </h2>
-          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-            <Input
-              type="password"
-              value={githubToken}
-              onChange={(event) => onGithubTokenChange(event.target.value)}
-              placeholder="GitHub token للحفظ في team-data.json"
-              className="border-[2px] border-ink bg-paper"
-            />
-            <Button
-              type="button"
-              onClick={onSaveToGithub}
-              className="border-[2px] border-ink doodle-shadow-sm"
-            >
-              <Save data-icon="inline-start" />
-              حفظ على GitHub
-            </Button>
-          </div>
-          {saveStatus && <p className="mt-3 text-sm font-bold text-foreground/75">{saveStatus}</p>}
-        </section>
-
-        <section
-          className="mb-7 border-[2.5px] border-ink bg-card p-5 doodle-shadow"
-          style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
-        >
-          <h2 className="mb-4 flex items-center gap-2 text-2xl font-bold">
-            <Edit3 data-icon="inline-start" />
-            إضافة تاسك
-          </h2>
+          <SectionTitle
+            title="إدارة التاسكات"
+            help="نزّل سؤال عام للتيم كله أو خصصه لشخص واحد، وحدد نقاطه."
+          />
           <div className="grid gap-3 md:grid-cols-[1fr_120px_1fr]">
             <Input
               value={taskTitle}
@@ -773,29 +1198,15 @@ function AdminView({
           className="mb-7 border-[2.5px] border-ink bg-card p-5 doodle-shadow"
           style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
         >
-          <h2 className="mb-4 text-2xl font-bold">
-            <span className="highlight-yellow">تحديث عام</span>
-          </h2>
-          <Textarea
-            value={data.announcement ?? ""}
-            onChange={(event) => onUpdateAnnouncement(event.target.value)}
-            placeholder="اكتب newsletter أو آخر تحديث يظهر لكل التيم..."
-            className="min-h-24 border-[2px] border-ink bg-paper"
+          <SectionTitle
+            title="إدارة الفريق"
+            help="الأرقام القديمة، الرسالة الحمراء، الريبو، والإخفاء المؤقت."
           />
-        </section>
-
-        <section
-          className="mb-7 border-[2.5px] border-ink bg-card p-5 doodle-shadow"
-          style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
-        >
-          <h2 className="mb-4 text-2xl font-bold">
-            <span className="highlight-yellow">تحديث الفريق</span>
-          </h2>
           <div className="flex flex-col gap-3">
             {data.members.map((member) => (
               <div
                 key={member.id}
-                className="grid gap-3 border-[2px] border-ink bg-paper p-3 md:grid-cols-[1fr_110px_110px_1.3fr_auto]"
+                className="grid gap-3 border-[2px] border-ink bg-paper p-3 md:grid-cols-[1fr_90px_90px_90px_90px]"
               >
                 <div>
                   <strong className={member.hidden ? "text-foreground/45" : ""}>
@@ -812,7 +1223,27 @@ function AdminView({
                   onChange={(event) =>
                     onUpdateMember(member.id, { baseCompleted: sanitizeNumber(event.target.value) })
                   }
-                  placeholder="تاسكات قديمة"
+                  placeholder="قديم"
+                  className="border-[2px] border-ink bg-card"
+                />
+                <Input
+                  type="number"
+                  min={0}
+                  value={member.baseApproved ?? 0}
+                  onChange={(event) =>
+                    onUpdateMember(member.id, { baseApproved: sanitizeNumber(event.target.value) })
+                  }
+                  placeholder="مقبول"
+                  className="border-[2px] border-ink bg-card"
+                />
+                <Input
+                  type="number"
+                  min={0}
+                  value={member.baseRejected ?? 0}
+                  onChange={(event) =>
+                    onUpdateMember(member.id, { baseRejected: sanitizeNumber(event.target.value) })
+                  }
+                  placeholder="مرفوض"
                   className="border-[2px] border-ink bg-card"
                 />
                 <Input
@@ -822,14 +1253,38 @@ function AdminView({
                   onChange={(event) =>
                     onUpdateMember(member.id, { basePoints: sanitizeNumber(event.target.value) })
                   }
-                  placeholder="نقط قديمة"
+                  placeholder="نقط"
                   className="border-[2px] border-ink bg-card"
+                />
+                <Input
+                  value={member.publicFlag ?? ""}
+                  onChange={(event) =>
+                    onUpdateMember(member.id, { publicFlag: event.target.value })
+                  }
+                  placeholder="رسالة حمراء عامة"
+                  className="border-[2px] border-ink bg-card md:col-span-2"
                 />
                 <Input
                   value={member.adminNote ?? ""}
                   onChange={(event) => onUpdateMember(member.id, { adminNote: event.target.value })}
                   placeholder="رسالة الأدمن للعضو"
-                  className="border-[2px] border-ink bg-card"
+                  className="border-[2px] border-ink bg-card md:col-span-2"
+                />
+                <Input
+                  value={member.repoUrl ?? ""}
+                  onChange={(event) => onUpdateMember(member.id, { repoUrl: event.target.value })}
+                  placeholder="Repo URL"
+                  className="border-[2px] border-ink bg-card md:col-span-2"
+                />
+                <Input
+                  value={member.aliases.join(", ")}
+                  onChange={(event) =>
+                    onUpdateMember(member.id, {
+                      aliases: uniqueText(event.target.value.split(",")),
+                    })
+                  }
+                  placeholder="Nicknames"
+                  className="border-[2px] border-ink bg-card md:col-span-2"
                 />
                 <Button
                   type="button"
@@ -850,13 +1305,220 @@ function AdminView({
         </section>
 
         <section
+          className="mb-7 border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+          style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
+        >
+          <SectionTitle title="Settings" help="تغيير باسورد الأدمن وباسورد شاشة الإحصائيات." />
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input
+              value={data.settings?.adminPassword ?? DEFAULT_ADMIN_PASSWORD}
+              onChange={(event) => onUpdateSettings({ adminPassword: event.target.value })}
+              placeholder="Admin password"
+              className="border-[2px] border-ink bg-paper"
+            />
+            <Input
+              value={data.settings?.statsPassword ?? DEFAULT_STATS_PASSWORD}
+              onChange={(event) => onUpdateSettings({ statsPassword: event.target.value })}
+              placeholder="Stats password"
+              className="border-[2px] border-ink bg-paper"
+            />
+          </div>
+        </section>
+
+        <section
           className="border-[2.5px] border-ink bg-card p-5 doodle-shadow"
           style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
         >
-          <h2 className="mb-4 text-2xl font-bold">
-            <span className="highlight-yellow">Leaderboard</span>
-          </h2>
+          <SectionTitle
+            title="Leaderboard"
+            help="نفس الصورة اللي التيم بيشوفها، مع تفاصيل عند الضغط."
+          />
           <Leaderboard scores={stats.memberStats} />
+        </section>
+      </div>
+
+      <SaveBar
+        saveStatus={saveStatus}
+        isDirty={isDirty}
+        isSaving={isSaving}
+        tokenDialogOpen={tokenDialogOpen}
+        tokenDraft={tokenDraft}
+        onTokenDraftChange={onTokenDraftChange}
+        onCloseTokenDialog={onCloseTokenDialog}
+        onConfirmTokenAndSave={onConfirmTokenAndSave}
+        onSaveToGithub={onSaveToGithub}
+      />
+    </div>
+  );
+}
+
+function SaveBar({
+  saveStatus,
+  isDirty,
+  isSaving,
+  tokenDialogOpen,
+  tokenDraft,
+  onTokenDraftChange,
+  onCloseTokenDialog,
+  onConfirmTokenAndSave,
+  onSaveToGithub,
+}: {
+  saveStatus: string;
+  isDirty: boolean;
+  isSaving: boolean;
+  tokenDialogOpen: boolean;
+  tokenDraft: string;
+  onTokenDraftChange: (value: string) => void;
+  onCloseTokenDialog: () => void;
+  onConfirmTokenAndSave: () => void;
+  onSaveToGithub: () => void;
+}) {
+  return (
+    <>
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t-[2.5px] border-ink bg-card/95 px-4 py-3 shadow-[0_-8px_0_rgba(0,0,0,0.08)] backdrop-blur">
+        <div className="mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-center text-sm font-bold text-foreground/75 sm:text-right">
+            {saveStatus || (isDirty ? "في تغييرات غير محفوظة" : "كل التغييرات محفوظة")}
+          </div>
+          <Button
+            type="button"
+            onClick={onSaveToGithub}
+            disabled={isSaving}
+            className="h-12 min-w-40 border-[2px] border-ink text-lg doodle-shadow-sm"
+          >
+            <Save data-icon="inline-start" />
+            {isSaving ? "جاري الحفظ..." : "حفظ"}
+          </Button>
+        </div>
+      </div>
+
+      {tokenDialogOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 px-4">
+          <section
+            className="w-full max-w-md border-[2.5px] border-ink bg-card p-5 text-center doodle-shadow"
+            style={{ borderRadius: "22px 28px 18px 26px / 24px 18px 28px 20px" }}
+          >
+            <h2 className="mb-3 text-3xl font-bold">
+              <span className="highlight-yellow">GitHub Token</span>
+            </h2>
+            <p className="mb-4 text-sm leading-6 text-foreground/70">
+              اكتب التوكن مرة واحدة على الجهاز ده عشان زر حفظ يقدر يحدث ملفات الداتا على GitHub.
+            </p>
+            <Input
+              type="password"
+              value={tokenDraft}
+              onChange={(event) => onTokenDraftChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") onConfirmTokenAndSave();
+              }}
+              placeholder="GitHub token"
+              className="h-12 border-[2px] border-ink bg-paper text-center"
+              autoFocus
+            />
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <Button
+                type="button"
+                onClick={onConfirmTokenAndSave}
+                disabled={isSaving}
+                className="border-[2px] border-ink doodle-shadow-sm"
+              >
+                <Save data-icon="inline-start" />
+                حفظ
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onCloseTokenDialog}
+                disabled={isSaving}
+                className="border-[2px] border-ink bg-paper doodle-shadow-sm"
+              >
+                رجوع
+              </Button>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
+function StatsView({
+  data,
+  stats,
+  onLogout,
+}: {
+  data: StudioData;
+  stats: ReturnType<typeof createStats>;
+  onLogout: () => void;
+}) {
+  const best = stats.memberStats[0];
+  const worst = stats.memberStats[stats.memberStats.length - 1];
+  const fastest = [...stats.memberStats]
+    .filter((item) => item.avgHours !== null)
+    .sort((a, b) => (a.avgHours ?? 0) - (b.avgHours ?? 0))[0];
+
+  return (
+    <div className="min-h-screen text-foreground" dir="rtl">
+      <div className="mx-auto max-w-6xl px-5 py-10 md:py-14">
+        <header className="mb-8 text-center">
+          <Logo />
+          <h1 className="mb-2 mt-4 text-5xl font-bold leading-tight">
+            <span className="highlight-yellow">Statistics</span>
+          </h1>
+          <p className="text-lg text-foreground/75">شاشة قراءة فقط: مين شغال ومين محتاج متابعة.</p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onLogout}
+            className="mt-4 border-[2px] border-ink bg-paper doodle-shadow-sm"
+          >
+            <LogOut data-icon="inline-start" />
+            خروج
+          </Button>
+        </header>
+
+        <section className="mb-7 grid gap-3 md:grid-cols-3">
+          <div className="border-[2.5px] border-ink bg-card p-4 text-center doodle-shadow">
+            <div className="text-sm text-foreground/60">أفضل أداء</div>
+            <strong>{best?.member.name ?? "N/A"}</strong>
+          </div>
+          <div className="border-[2.5px] border-ink bg-card p-4 text-center doodle-shadow">
+            <div className="text-sm text-foreground/60">الأبطأ/الأقل</div>
+            <strong>{worst?.member.name ?? "N/A"}</strong>
+          </div>
+          <div className="border-[2.5px] border-ink bg-card p-4 text-center doodle-shadow">
+            <div className="text-sm text-foreground/60">أسرع تسليم</div>
+            <strong>{fastest?.member.name ?? "N/A"}</strong>
+          </div>
+        </section>
+
+        <section
+          className="border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+          style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
+        >
+          <SectionTitle title="كل الأشخاص" help="نقاط، قبول، رفض، وسرعة التسليم لكل عضو." />
+          <div className="grid gap-3 md:grid-cols-2">
+            {stats.allMemberStats.map((item) => (
+              <div key={item.member.id} className="border-[2px] border-ink bg-paper p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <strong>{item.member.name}</strong>
+                  {item.member.repoUrl && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() =>
+                        window.open(item.member.repoUrl, "_blank", "noopener,noreferrer")
+                      }
+                      className="border-[2px] border-ink"
+                    >
+                      Repo
+                    </Button>
+                  )}
+                </div>
+                <MemberDetails item={item} />
+              </div>
+            ))}
+          </div>
         </section>
       </div>
     </div>
@@ -872,22 +1534,32 @@ function encodeBase64(value: string) {
   return window.btoa(binary);
 }
 
+async function fetchStudioData() {
+  const response = await fetch(`${import.meta.env.BASE_URL}team-data.json?ts=${Date.now()}`, {
+    cache: "no-store",
+  });
+  return sanitizeData((await response.json()) as StudioData);
+}
+
 function Index() {
   const [data, setData] = useState<StudioData>(DEFAULT_DATA);
   const [activeMember, setActiveMember] = useState<ActiveMember | null>(null);
   const [activeAdmin, setActiveAdmin] = useState(false);
+  const [activeStats, setActiveStats] = useState(false);
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
   const [githubToken, setGithubToken] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
+  const [refreshStatus, setRefreshStatus] = useState("");
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
+  const [tokenDraft, setTokenDraft] = useState("");
 
   useEffect(() => {
     let mounted = true;
 
     async function loadData() {
-      const response = await fetch(`${import.meta.env.BASE_URL}team-data.json?ts=${Date.now()}`, {
-        cache: "no-store",
-      });
-      const initialData = sanitizeData((await response.json()) as StudioData);
+      const initialData = await fetchStudioData();
 
       if (!mounted) return;
       setData(initialData);
@@ -896,6 +1568,12 @@ function Index() {
       const hasAdminSession = window.localStorage.getItem(ADMIN_SESSION_KEY) === "true";
       if (hasAdminSession) {
         setActiveAdmin(true);
+        return;
+      }
+
+      const hasStatsSession = window.localStorage.getItem(STATS_SESSION_KEY) === "true";
+      if (hasStatsSession) {
+        setActiveStats(true);
         return;
       }
 
@@ -931,25 +1609,42 @@ function Index() {
     setData((current) =>
       sanitizeData({ ...updater(current), meta: { updatedAt: new Date().toISOString() } }),
     );
-    setSaveStatus("");
+    setIsDirty(true);
+    setSaveStatus("في تغييرات غير محفوظة");
+  }
+
+  async function refreshData() {
+    const freshData = await fetchStudioData();
+    setData(freshData);
+    setRefreshStatus("تم تحديث الداتا.");
   }
 
   function loginMember(member: Member, displayName: string) {
     setActiveAdmin(false);
+    setActiveStats(false);
     setActiveMember({ member, displayName });
   }
 
   function loginAdmin() {
     setActiveMember(null);
+    setActiveStats(false);
     setActiveAdmin(true);
+  }
+
+  function loginStats() {
+    setActiveMember(null);
+    setActiveAdmin(false);
+    setActiveStats(true);
   }
 
   function logout() {
     window.localStorage.removeItem(ACTIVE_MEMBER_KEY);
     window.localStorage.removeItem(ACTIVE_DISPLAY_NAME_KEY);
     window.localStorage.removeItem(ADMIN_SESSION_KEY);
+    window.localStorage.removeItem(STATS_SESSION_KEY);
     setActiveMember(null);
     setActiveAdmin(false);
+    setActiveStats(false);
   }
 
   function addTask(task: Omit<StudioTask, "id" | "createdAt">) {
@@ -1057,26 +1752,48 @@ function Index() {
     }));
   }
 
-  function updateAnnouncement(value: string) {
-    updateData((current) => ({ ...current, announcement: value }));
+  function updateSettings(settings: Partial<StudioSettings>) {
+    updateData((current) => ({
+      ...current,
+      settings: { ...(current.settings ?? DEFAULT_SETTINGS), ...settings },
+    }));
   }
 
-  function updateGithubToken(value: string) {
-    setGithubToken(value);
-    if (value.trim()) {
-      window.localStorage.setItem(GITHUB_TOKEN_KEY, value.trim());
-    } else {
-      window.localStorage.removeItem(GITHUB_TOKEN_KEY);
-    }
+  function addRepoUpdate(memberId: string) {
+    updateData((current) => ({
+      ...current,
+      repoUpdates: [
+        {
+          id: `repo-${Date.now()}`,
+          memberId,
+          createdAt: new Date().toISOString(),
+          seen: false,
+        },
+        ...(current.repoUpdates ?? []),
+      ],
+    }));
+    setRefreshStatus("اتسجل تنبيه الريبو. لازم الأدمن يحفظ GitHub عشان يظهر على جهاز تاني.");
   }
 
-  async function saveToGithub() {
-    const token = githubToken.trim();
+  function markRepoUpdateSeen(updateId: string) {
+    updateData((current) => ({
+      ...current,
+      repoUpdates: (current.repoUpdates ?? []).map((update) =>
+        update.id === updateId ? { ...update, seen: true } : update,
+      ),
+    }));
+  }
+
+  async function saveToGithub(tokenOverride?: string) {
+    const token = (tokenOverride ?? githubToken).trim();
     if (!token) {
-      setSaveStatus("حط GitHub token الأول عشان أقدر أحفظ team-data.json.");
+      setTokenDraft("");
+      setTokenDialogOpen(true);
+      setSaveStatus("محتاج GitHub token أول مرة عشان أحفظ.");
       return;
     }
 
+    setIsSaving(true);
     setSaveStatus("جاري الحفظ على GitHub...");
     try {
       const nextData = sanitizeData({ ...data, meta: { updatedAt: new Date().toISOString() } });
@@ -1108,11 +1825,34 @@ function Index() {
         if (!saveResponse.ok) throw new Error(`GitHub رفض حفظ ${path}. راجع صلاحيات التوكن.`);
       }
 
+      setGithubToken(token);
+      window.localStorage.setItem(GITHUB_TOKEN_KEY, token);
+      setTokenDraft("");
+      setTokenDialogOpen(false);
       setData(nextData);
-      setSaveStatus("تم الحفظ على GitHub. التحديث هيظهر للفريق بعد refresh بسيط.");
+      setIsDirty(false);
+      setSaveStatus("تم الحفظ. التحديث هيظهر للفريق بعد refresh بسيط.");
     } catch (error) {
-      setSaveStatus(error instanceof Error ? error.message : "حصل خطأ أثناء الحفظ.");
+      setGithubToken("");
+      window.localStorage.removeItem(GITHUB_TOKEN_KEY);
+      setTokenDialogOpen(true);
+      setSaveStatus(
+        error instanceof Error
+          ? `${error.message} اكتب التوكن مرة تانية.`
+          : "حصل خطأ أثناء الحفظ. اكتب التوكن مرة تانية.",
+      );
+    } finally {
+      setIsSaving(false);
     }
+  }
+
+  function confirmTokenAndSave() {
+    const nextToken = tokenDraft.trim();
+    if (!nextToken) {
+      setSaveStatus("اكتب GitHub token الأول.");
+      return;
+    }
+    void saveToGithub(nextToken);
   }
 
   if (activeAdmin) {
@@ -1120,19 +1860,29 @@ function Index() {
       <AdminView
         data={data}
         stats={stats}
-        githubToken={githubToken}
         saveStatus={saveStatus}
+        isDirty={isDirty}
+        isSaving={isSaving}
+        tokenDialogOpen={tokenDialogOpen}
+        tokenDraft={tokenDraft}
         onLogout={logout}
         onAddTask={addTask}
         onRemoveTask={removeTask}
         onManualApprove={manualApprove}
         onReviewAnswer={reviewAnswer}
         onUpdateMember={updateMember}
-        onUpdateAnnouncement={updateAnnouncement}
-        onGithubTokenChange={updateGithubToken}
-        onSaveToGithub={saveToGithub}
+        onUpdateSettings={updateSettings}
+        onMarkRepoUpdateSeen={markRepoUpdateSeen}
+        onTokenDraftChange={setTokenDraft}
+        onCloseTokenDialog={() => setTokenDialogOpen(false)}
+        onConfirmTokenAndSave={confirmTokenAndSave}
+        onSaveToGithub={() => void saveToGithub()}
       />
     );
+  }
+
+  if (activeStats) {
+    return <StatsView data={data} stats={stats} onLogout={logout} />;
   }
 
   if (activeMember) {
@@ -1142,14 +1892,23 @@ function Index() {
         activeMember={activeMember}
         stats={stats}
         draftAnswers={draftAnswers}
+        refreshStatus={refreshStatus}
         onDraftChange={(key, value) => setDraftAnswers((current) => ({ ...current, [key]: value }))}
         onSubmitAnswer={submitAnswer}
         onLogout={logout}
+        onRefreshData={refreshData}
+        onUpdateMember={updateMember}
+        onRepoUpdate={addRepoUpdate}
       />
     );
   }
 
   return (
-    <LoginScreen members={data.members} onMemberLogin={loginMember} onAdminLogin={loginAdmin} />
+    <LoginScreen
+      data={data}
+      onMemberLogin={loginMember}
+      onAdminLogin={loginAdmin}
+      onStatsLogin={loginStats}
+    />
   );
 }
