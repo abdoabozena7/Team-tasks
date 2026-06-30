@@ -8,6 +8,8 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
+    "worker:dev": "wrangler dev --config wrangler.jsonc",
+    "worker:deploy": "wrangler deploy --config wrangler.jsonc",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

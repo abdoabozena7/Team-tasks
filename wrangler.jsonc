@@ -1,7 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tanstack-start-app",
+  "name": "hivo-studio-api",
   "compatibility_date": "2025-09-24",
-  "compatibility_flags": ["nodejs_compat"],
-  "main": "@tanstack/react-start/server-entry",
+  "main": "src/worker.ts",
+  "vars": {
+    "GITHUB_OWNER": "abdoabozena7",
+    "GITHUB_REPO": "Team-tasks",
+    "GITHUB_BRANCH": "main",
+    "GITHUB_DATA_PATH": "team-data.json",
+    "GITHUB_PUBLIC_DATA_PATH": "public/team-data.json",
+    "CORS_ORIGIN": "*"
+  },
 }

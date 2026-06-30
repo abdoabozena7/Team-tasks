@@ -162,6 +162,7 @@ const DEFAULT_STATS_PASSWORD = "6789";
 const ACTIVE_MEMBER_KEY = "hivo-studio-active-member";
 const ACTIVE_DISPLAY_NAME_KEY = "hivo-studio-active-display-name";
 const ADMIN_SESSION_KEY = "hivo-studio-admin";
+const ADMIN_AUTH_KEY = "hivo-studio-admin-auth";
 const STATS_SESSION_KEY = "hivo-studio-stats";
 const GITHUB_TOKEN_KEY = "hivo-studio-github-token";
 const REFRESHED_SESSION_KEY = "hivo-studio-refreshed-this-session";
@@ -173,6 +174,7 @@ const GITHUB_OWNER = "abdoabozena7";
 const GITHUB_REPO = "Team-tasks";
 const GITHUB_BRANCH = "main";
 const GITHUB_DATA_PATHS = ["team-data.json", "public/team-data.json"];
+const HIVO_API_URL = (import.meta.env.VITE_HIVO_API_URL ?? "").replace(/\/+$/, "");
 
 const DEFAULT_SETTINGS: StudioSettings = {
   adminPassword: DEFAULT_ADMIN_PASSWORD,
@@ -518,7 +520,7 @@ function LoginScreen({
 }: {
   data: StudioData;
   onMemberLogin: (member: Member, displayName: string) => void;
-  onAdminLogin: () => void;
+  onAdminLogin: (password: string) => void;
   onStatsLogin: () => void;
 }) {
   const [name, setName] = useState("");
@@ -531,10 +533,11 @@ function LoginScreen({
 
     if (displayName === settings.adminPassword) {
       window.localStorage.setItem(ADMIN_SESSION_KEY, "true");
+      window.localStorage.setItem(ADMIN_AUTH_KEY, displayName);
       window.localStorage.removeItem(STATS_SESSION_KEY);
       window.localStorage.removeItem(ACTIVE_MEMBER_KEY);
       window.localStorage.removeItem(ACTIVE_DISPLAY_NAME_KEY);
-      onAdminLogin();
+      onAdminLogin(displayName);
       return;
     }
 
@@ -1140,7 +1143,21 @@ function AdminView({
   const [manualApproveMembers, setManualApproveMembers] = useState<Record<string, string>>({});
   const [progressMembers, setProgressMembers] = useState<Record<string, string>>({});
   const [progressNotes, setProgressNotes] = useState<Record<string, string>>({});
-  const safeAdminQueue = adminQueue ?? emptyQueue();
+  const safeAdminQueue: AdminQueue = {
+    submissions: data.tasks.flatMap((task) =>
+      Object.values(data.responses[task.id] ?? {})
+        .filter((response) => response.status === "submitted")
+        .map((response) => ({
+          id: `${task.id}:${response.memberId}`,
+          taskId: task.id,
+          memberId: response.memberId,
+          memberName: response.memberName,
+          answer: response.answer,
+          submittedAt: response.submittedAt,
+        })),
+    ),
+    progressUpdates: [],
+  };
   const unseenUpdates = data.repoUpdates?.filter((update) => !update.seen) ?? [];
 
   function submitTask() {
@@ -1880,13 +1897,9 @@ function AdminView({
               placeholder="Stats password"
               className="border-[2px] border-ink bg-paper"
             />
-            <Input
-              value={data.settings?.backendUrl ?? ""}
-              onChange={(event) => onUpdateSettings({ backendUrl: event.target.value })}
-              placeholder="Backend URL for website submissions"
-              className="border-[2px] border-ink bg-paper md:col-span-2 ltr:text-left"
-              dir="ltr"
-            />
+            <div className="rounded-md border-[2px] border-ink bg-paper px-3 py-2 text-sm font-bold md:col-span-2 ltr:text-left">
+              API: {HIVO_API_URL || "not configured"}
+            </div>
           </div>
         </section>
 
@@ -1906,13 +1919,6 @@ function AdminView({
         saveStatus={saveStatus}
         isDirty={isDirty}
         isSaving={isSaving}
-        adminQueue={adminQueue}
-        queueStatus={queueStatus}
-        tokenDialogOpen={tokenDialogOpen}
-        tokenDraft={tokenDraft}
-        onTokenDraftChange={onTokenDraftChange}
-        onCloseTokenDialog={onCloseTokenDialog}
-        onConfirmTokenAndSave={onConfirmTokenAndSave}
         onSaveToGithub={onSaveToGithub}
       />
     </div>
@@ -1923,89 +1929,30 @@ function SaveBar({
   saveStatus,
   isDirty,
   isSaving,
-  tokenDialogOpen,
-  tokenDraft,
-  onTokenDraftChange,
-  onCloseTokenDialog,
-  onConfirmTokenAndSave,
   onSaveToGithub,
 }: {
   saveStatus: string;
   isDirty: boolean;
   isSaving: boolean;
-  tokenDialogOpen: boolean;
-  tokenDraft: string;
-  onTokenDraftChange: (value: string) => void;
-  onCloseTokenDialog: () => void;
-  onConfirmTokenAndSave: () => void;
   onSaveToGithub: () => void;
 }) {
   return (
-    <>
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t-[2.5px] border-ink bg-card/95 px-4 py-3 shadow-[0_-8px_0_rgba(0,0,0,0.08)] backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-center text-sm font-bold text-foreground/75 sm:text-right">
-            {saveStatus || (isDirty ? "في تغييرات غير محفوظة" : "كل التغييرات محفوظة")}
-          </div>
-          <Button
-            type="button"
-            onClick={onSaveToGithub}
-            disabled={isSaving}
-            className="h-12 min-w-40 border-[2px] border-ink text-lg doodle-shadow-sm"
-          >
-            <Save data-icon="inline-start" />
-            {isSaving ? "جاري الحفظ..." : "حفظ"}
-          </Button>
+    <div className="fixed inset-x-0 bottom-0 z-40 border-t-[2.5px] border-ink bg-card/95 px-4 py-3 shadow-[0_-8px_0_rgba(0,0,0,0.08)] backdrop-blur">
+      <div className="mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-center text-sm font-bold text-foreground/75 sm:text-right">
+          {saveStatus || (isDirty ? "Unsaved changes" : "All changes saved")}
         </div>
+        <Button
+          type="button"
+          onClick={onSaveToGithub}
+          disabled={isSaving}
+          className="h-12 min-w-40 border-[2px] border-ink text-lg doodle-shadow-sm"
+        >
+          <Save data-icon="inline-start" />
+          {isSaving ? "Saving..." : "Save"}
+        </Button>
       </div>
-
-      {tokenDialogOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 px-4">
-          <section
-            className="w-full max-w-md border-[2.5px] border-ink bg-card p-5 text-center doodle-shadow"
-            style={{ borderRadius: "22px 28px 18px 26px / 24px 18px 28px 20px" }}
-          >
-            <h2 className="mb-3 text-3xl font-bold">
-              <span className="highlight-yellow">GitHub Token</span>
-            </h2>
-            <p className="mb-4 text-sm leading-6 text-foreground/70">
-              اكتب التوكن مرة واحدة على الجهاز ده عشان زر حفظ يقدر يحدث ملفات الداتا على GitHub.
-            </p>
-            <Input
-              type="password"
-              value={tokenDraft}
-              onChange={(event) => onTokenDraftChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") onConfirmTokenAndSave();
-              }}
-              placeholder="GitHub token"
-              className="h-12 border-[2px] border-ink bg-paper text-center"
-              autoFocus
-            />
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              <Button
-                type="button"
-                onClick={onConfirmTokenAndSave}
-                disabled={isSaving}
-                className="border-[2px] border-ink doodle-shadow-sm"
-              >
-                <Save data-icon="inline-start" />
-                حفظ
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onCloseTokenDialog}
-                disabled={isSaving}
-                className="border-[2px] border-ink bg-paper doodle-shadow-sm"
-              >
-                رجوع
-              </Button>
-            </div>
-          </section>
-        </div>
-      )}
-    </>
+    </div>
   );
 }
 
@@ -2231,10 +2178,56 @@ function encodeBase64(value: string) {
 }
 
 async function fetchStudioData() {
+  if (HIVO_API_URL) {
+    const response = await fetch(`${HIVO_API_URL}/api/data?ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error("Backend data is not available.");
+    return sanitizeData((await response.json()) as StudioData);
+  }
+
   const response = await fetch(`${import.meta.env.BASE_URL}team-data.json?ts=${Date.now()}`, {
     cache: "no-store",
   });
   return sanitizeData((await response.json()) as StudioData);
+}
+
+async function postApi<TResponse>(path: string, body: unknown, adminPassword?: string) {
+  if (!HIVO_API_URL) {
+    throw new Error("Backend URL is not configured. Set VITE_HIVO_API_URL before using shared saves.");
+  }
+
+  const response = await fetch(`${HIVO_API_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(adminPassword ? { "x-admin-password": adminPassword } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? "Backend rejected the save.");
+  }
+
+  return (await response.json()) as TResponse;
+}
+
+async function postSubmission(item: QueuedSubmission) {
+  return sanitizeData(await postApi<StudioData>("/api/submissions", item));
+}
+
+async function postProgressUpdate(item: QueuedProgressUpdate) {
+  return sanitizeData(await postApi<StudioData>("/api/progress-updates", item));
+}
+
+async function postAdminMutation(
+  adminPassword: string,
+  action: string,
+  payload: Record<string, unknown>,
+) {
+  return sanitizeData(await postApi<StudioData>("/api/admin/mutate", { action, payload }, adminPassword));
 }
 
 function normalizeBackendUrl(value?: string) {
@@ -2306,6 +2299,7 @@ function Index() {
   );
   const [sentState, setSentState] = useState<Record<string, string>>(() => readMemberSentState());
   const [githubToken, setGithubToken] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
   const [refreshStatus, setRefreshStatus] = useState("");
   const [queueStatus, setQueueStatus] = useState("");
@@ -2328,6 +2322,7 @@ function Index() {
 
       const hasAdminSession = window.localStorage.getItem(ADMIN_SESSION_KEY) === "true";
       if (hasAdminSession) {
+        setAdminPassword(window.localStorage.getItem(ADMIN_AUTH_KEY) ?? "");
         setActiveAdmin(true);
         return;
       }
@@ -2367,22 +2362,16 @@ function Index() {
   const stats = useMemo(() => createStats(data), [data]);
 
   const refreshAdminQueue = useCallback(async () => {
+    setQueueStatus("Syncing data...");
     try {
-      const nextQueue = await fetchAdminQueue(data.settings?.backendUrl);
-      setAdminQueue((current) =>
-        data.settings?.backendUrl ? nextQueue : mergeQueue(current, nextQueue),
-      );
-      setQueueStatus(
-        data.settings?.backendUrl
-          ? "تم تحديث queue من backend."
-          : "تم قراءة queue المحلي. أضف Backend URL عشان يستقبل من أجهزة الفريق.",
-      );
+      const freshData = await fetchStudioData();
+      setData(freshData);
+      setIsDirty(false);
+      setQueueStatus("Data refreshed from the shared backend.");
     } catch (error) {
-      setQueueStatus(
-        error instanceof Error ? error.message : "مش قادر أقرأ queue التسليمات حاليًا.",
-      );
+      setQueueStatus(error instanceof Error ? error.message : "Could not refresh shared data.");
     }
-  }, [data.settings?.backendUrl]);
+  }, []);
 
   useEffect(() => {
     if (!activeAdmin) return;
@@ -2397,6 +2386,28 @@ function Index() {
     setSaveStatus("في تغييرات غير محفوظة");
   }
 
+  async function saveCurrentData() {
+    if (!adminPassword) {
+      setSaveStatus("سجل دخول الأدمن مرة تانية عشان نقدر نحفظ.");
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("جاري مزامنة البيانات...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "replaceData", { data });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("تم الحفظ على GitHub.");
+    } catch (error) {
+      setSaveStatus(
+        error instanceof Error ? `فشل الحفظ: ${error.message}` : "فشل الحفظ، التغيير لم يتم اعتماده.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function refreshData() {
     const freshData = await fetchStudioData();
     setData(freshData);
@@ -2409,9 +2420,10 @@ function Index() {
     setActiveMember({ member, displayName });
   }
 
-  function loginAdmin() {
+  function loginAdmin(password: string) {
     setActiveMember(null);
     setActiveStats(false);
+    setAdminPassword(password);
     setActiveAdmin(true);
   }
 
@@ -2425,7 +2437,9 @@ function Index() {
     window.localStorage.removeItem(ACTIVE_MEMBER_KEY);
     window.localStorage.removeItem(ACTIVE_DISPLAY_NAME_KEY);
     window.localStorage.removeItem(ADMIN_SESSION_KEY);
+    window.localStorage.removeItem(ADMIN_AUTH_KEY);
     window.localStorage.removeItem(STATS_SESSION_KEY);
+    setAdminPassword("");
     setActiveMember(null);
     setActiveAdmin(false);
     setActiveStats(false);
@@ -2478,41 +2492,19 @@ function Index() {
 
     setIsSubmitting(true);
     try {
-      const mode = await submitQueuedItem(data.settings?.backendUrl, "submissions", item);
-      if (mode === "local") {
-        setAdminQueue((current) => ({ ...current, submissions: [item, ...current.submissions] }));
-      }
-      updateData((current) => ({
-        ...current,
-        responses: {
-          ...current.responses,
-          [task.id]: {
-            ...(current.responses[task.id] ?? {}),
-            [activeMember.member.id]: {
-              memberId: activeMember.member.id,
-              memberName: activeMember.displayName,
-              answer,
-              status: "submitted",
-              submittedAt: item.submittedAt,
-            },
-          },
-        },
-      }));
+      const nextData = await postSubmission(item);
+      setData(nextData);
+      setIsDirty(false);
       writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
       setSentState((current) => {
         const next = { ...current, [key]: "pending" };
         writeMemberSentState(next);
         return next;
       });
-      setRefreshStatus(
-        mode === "backend"
-          ? "تم إرسال التسليم للمراجعة. مستني قرار الأدمن."
-          : "تم تسجيل التسليم في queue محلي على الجهاز ده. أضف Backend URL عشان يوصّل من أجهزة الفريق.",
-      );
-      if (activeAdmin) void refreshAdminQueue();
+      setRefreshStatus("Submission saved centrally and is waiting for admin review.");
     } catch (error) {
       setRefreshStatus(
-        error instanceof Error ? error.message : "حصل خطأ أثناء إرسال التسليم للمراجعة.",
+        error instanceof Error ? error.message : "Submission failed. Nothing was approved.",
       );
     } finally {
       setIsSubmitting(false);
@@ -2536,69 +2528,47 @@ function Index() {
 
     setIsSubmitting(true);
     try {
-      const mode = await submitQueuedItem(data.settings?.backendUrl, "progress-updates", item);
-      if (mode === "local") {
-        setAdminQueue((current) => ({
-          ...current,
-          progressUpdates: [item, ...current.progressUpdates],
-        }));
-      }
-      updateData((current) => ({
-        ...current,
-        progressUpdates: {
-          ...(current.progressUpdates ?? {}),
-          [task.id]: [
-            {
-              id: item.id,
-              taskId: item.taskId,
-              memberId: item.memberId,
-              memberName: item.memberName,
-              note: item.note,
-              createdAt: item.createdAt,
-            },
-            ...((current.progressUpdates ?? {})[task.id] ?? []),
-          ],
-        },
-      }));
+      const nextData = await postProgressUpdate(item);
+      setData(nextData);
+      setIsDirty(false);
       writeMemberDrafts({ ...readMemberDrafts(), [key]: note });
       setSentState((current) => {
         const next = { ...current, [key]: "sent" };
         writeMemberSentState(next);
         return next;
       });
-      setRefreshStatus(
-        mode === "backend"
-          ? "تم إرسال المتابعة للأدمن. لا تتحسب نقاط."
-          : "تم تسجيل المتابعة في queue محلي على الجهاز ده. أضف Backend URL عشان توصل من أجهزة الفريق.",
-      );
-      if (activeAdmin) void refreshAdminQueue();
+      setRefreshStatus("Progress update saved centrally. It does not count as points.");
     } catch (error) {
-      setRefreshStatus(error instanceof Error ? error.message : "حصل خطأ أثناء إرسال المتابعة.");
+      setRefreshStatus(error instanceof Error ? error.message : "Progress update failed.");
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  function reviewAnswer(taskId: string, memberId: string, status: "approved" | "rejected") {
-    updateData((current) => {
-      const response = current.responses[taskId]?.[memberId];
-      if (!response) return current;
+  async function reviewAnswer(taskId: string, memberId: string, status: "approved" | "rejected") {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return;
+    }
 
-      return {
-        ...current,
-        responses: {
-          ...current.responses,
-          [taskId]: {
-            ...current.responses[taskId],
-            [memberId]: {
-              ...response,
-              status,
-              reviewedAt: new Date().toISOString(),
-            },
-          },
-        },
-      };
-    });
+    setIsSaving(true);
+    setSaveStatus("Syncing data...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "reviewAnswer", {
+        taskId,
+        memberId,
+        status,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Saved to GitHub.");
+    } catch (error) {
+      setSaveStatus(
+        error instanceof Error ? `Save failed: ${error.message}` : "Save failed. Nothing was approved.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function removeQueuedSubmission(id: string) {
@@ -2619,92 +2589,66 @@ function Index() {
     }));
   }
 
-  function approveQueuedSubmission(item: QueuedSubmission) {
-    updateData((current) => ({
-      ...current,
-      responses: {
-        ...current.responses,
-        [item.taskId]: {
-          ...(current.responses[item.taskId] ?? {}),
-          [item.memberId]: {
-            memberId: item.memberId,
-            memberName: item.memberName,
-            answer: item.answer,
-            status: "approved",
-            submittedAt: item.submittedAt,
-            reviewedAt: new Date().toISOString(),
-          },
-        },
-      },
-    }));
-    removeQueuedSubmission(item.id);
+  async function approveQueuedSubmission(item: QueuedSubmission) {
+    await reviewAnswer(item.taskId, item.memberId, "approved");
   }
 
-  function rejectQueuedSubmission(item: QueuedSubmission) {
-    updateData((current) => ({
-      ...current,
-      responses: {
-        ...current.responses,
-        [item.taskId]: {
-          ...(current.responses[item.taskId] ?? {}),
-          [item.memberId]: {
-            memberId: item.memberId,
-            memberName: item.memberName,
-            answer: item.answer,
-            status: "rejected",
-            submittedAt: item.submittedAt,
-            reviewedAt: new Date().toISOString(),
-          },
-        },
-      },
-    }));
-    removeQueuedSubmission(item.id);
+  async function rejectQueuedSubmission(item: QueuedSubmission) {
+    await reviewAnswer(item.taskId, item.memberId, "rejected");
   }
 
-  function manualApprove(task: StudioTask, memberId: string) {
-    const member = data.members.find((item) => item.id === memberId);
-    if (!member) return;
+  async function manualApprove(task: StudioTask, memberId: string) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return;
+    }
+    if (!memberId) return;
 
-    updateData((current) => ({
-      ...current,
-      responses: {
-        ...current.responses,
-        [task.id]: {
-          ...(current.responses[task.id] ?? {}),
-          [member.id]: {
-            memberId: member.id,
-            memberName: member.name,
-            answer: "تم التسليم خارج الموقع وتم اعتماده يدويًا.",
-            status: "approved",
-            submittedAt: new Date().toISOString(),
-            reviewedAt: new Date().toISOString(),
-          },
-        },
-      },
-    }));
+    setIsSaving(true);
+    setSaveStatus("Syncing data...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "manualApprove", {
+        taskId: task.id,
+        memberId,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Saved to GitHub.");
+    } catch (error) {
+      setSaveStatus(
+        error instanceof Error ? `Save failed: ${error.message}` : "Save failed. Nothing was approved.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function addProgressUpdate(task: StudioTask, memberId: string, note: string) {
-    const member = data.members.find((item) => item.id === memberId);
+  async function addProgressUpdate(task: StudioTask, memberId: string, note: string) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return;
+    }
     const cleanNote = note.trim();
-    if (!member || !cleanNote) return;
+    if (!memberId || !cleanNote) return;
 
-    const update: TaskProgressUpdate = {
-      id: `progress-${Date.now()}`,
-      taskId: task.id,
-      memberId: member.id,
-      memberName: member.name,
-      note: cleanNote,
-      createdAt: new Date().toISOString(),
-    };
-
-    updateData((current) => ({
-      ...current,
-      progressUpdates: {
-        ...(current.progressUpdates ?? {}),
-        [task.id]: [update, ...((current.progressUpdates ?? {})[task.id] ?? [])],
-      },
-    }));
+    setIsSaving(true);
+    setSaveStatus("Syncing data...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "addProgressUpdate", {
+        taskId: task.id,
+        memberId,
+        note: cleanNote,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Progress saved to GitHub.");
+    } catch (error) {
+      setSaveStatus(
+        error instanceof Error ? `Save failed: ${error.message}` : "Save failed. Nothing was approved.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function saveQueuedProgress(item: QueuedProgressUpdate) {
@@ -2865,7 +2809,7 @@ function Index() {
         onTokenDraftChange={setTokenDraft}
         onCloseTokenDialog={() => setTokenDialogOpen(false)}
         onConfirmTokenAndSave={confirmTokenAndSave}
-        onSaveToGithub={() => void saveToGithub()}
+        onSaveToGithub={() => void saveCurrentData()}
       />
     );
   }
