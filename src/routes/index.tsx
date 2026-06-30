@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   Bell,
@@ -8,7 +8,6 @@ import {
   Eye,
   EyeOff,
   LogOut,
-  MessageCircle,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -77,6 +76,30 @@ type TaskProgressUpdate = {
 type StudioSettings = {
   adminPassword: string;
   statsPassword: string;
+  backendUrl?: string;
+};
+
+type QueuedSubmission = {
+  id: string;
+  taskId: string;
+  memberId: string;
+  memberName: string;
+  answer: string;
+  submittedAt: string;
+};
+
+type QueuedProgressUpdate = {
+  id: string;
+  taskId: string;
+  memberId: string;
+  memberName: string;
+  note: string;
+  createdAt: string;
+};
+
+type AdminQueue = {
+  submissions: QueuedSubmission[];
+  progressUpdates: QueuedProgressUpdate[];
 };
 
 type RepoUpdate = {
@@ -144,6 +167,8 @@ const GITHUB_TOKEN_KEY = "hivo-studio-github-token";
 const REFRESHED_SESSION_KEY = "hivo-studio-refreshed-this-session";
 const NICKNAME_HINT_KEY = "hivo-studio-nickname-hint";
 const MEMBER_DRAFTS_KEY = "hivo-studio-member-drafts";
+const MEMBER_SENT_STATE_KEY = "hivo-studio-member-sent-state";
+const LOCAL_QUEUE_KEY = "hivo-studio-local-admin-queue";
 const GITHUB_OWNER = "abdoabozena7";
 const GITHUB_REPO = "Team-tasks";
 const GITHUB_BRANCH = "main";
@@ -152,6 +177,7 @@ const GITHUB_DATA_PATHS = ["team-data.json", "public/team-data.json"];
 const DEFAULT_SETTINGS: StudioSettings = {
   adminPassword: DEFAULT_ADMIN_PASSWORD,
   statsPassword: DEFAULT_STATS_PASSWORD,
+  backendUrl: "",
 };
 
 const DEFAULT_DATA: StudioData = {
@@ -202,6 +228,7 @@ function sanitizeData(data: StudioData): StudioData {
     settings: {
       adminPassword: data.settings?.adminPassword || DEFAULT_ADMIN_PASSWORD,
       statsPassword: data.settings?.statsPassword || DEFAULT_STATS_PASSWORD,
+      backendUrl: data.settings?.backendUrl ?? "",
     },
     members: (data.members ?? []).map((member) => ({
       ...member,
@@ -251,26 +278,77 @@ function writeMemberDrafts(drafts: Record<string, string>) {
   window.localStorage.setItem(MEMBER_DRAFTS_KEY, JSON.stringify(drafts));
 }
 
-function createWhatsAppMessage(task: StudioTask, member: ActiveMember, answer: string) {
-  return [
-    "Hivo Studio task answer",
-    `Name: ${member.displayName}`,
-    `Task: ${task.title}`,
-    `Points: ${task.points || 1}`,
-    "",
-    answer.trim(),
-  ].join("\n");
+function readMemberSentState() {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const raw = window.localStorage.getItem(MEMBER_SENT_STATE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, string>;
+  } catch {
+    return {};
+  }
 }
 
-function createWhatsAppProgressMessage(task: StudioTask, member: ActiveMember, note: string) {
-  return [
-    "Hivo Studio progress update",
-    `Name: ${member.displayName}`,
-    `Task: ${task.title}`,
-    "Type: progress only - no points",
-    "",
-    note.trim(),
-  ].join("\n");
+function writeMemberSentState(state: Record<string, string>) {
+  window.localStorage.setItem(MEMBER_SENT_STATE_KEY, JSON.stringify(state));
+}
+
+function emptyQueue(): AdminQueue {
+  return { submissions: [], progressUpdates: [] };
+}
+
+function readLocalQueue() {
+  if (typeof window === "undefined") return emptyQueue();
+
+  try {
+    const raw = window.localStorage.getItem(LOCAL_QUEUE_KEY);
+    if (!raw) return emptyQueue();
+    const parsed = JSON.parse(raw) as Partial<AdminQueue>;
+    return {
+      submissions: parsed.submissions ?? [],
+      progressUpdates: parsed.progressUpdates ?? [],
+    };
+  } catch {
+    return emptyQueue();
+  }
+}
+
+function writeLocalQueue(queue: AdminQueue) {
+  window.localStorage.setItem(LOCAL_QUEUE_KEY, JSON.stringify(queue));
+}
+
+function mergeQueue(current: AdminQueue, next: AdminQueue): AdminQueue {
+  const submissionIds = new Set<string>();
+  const progressIds = new Set<string>();
+  return {
+    submissions: [...next.submissions, ...current.submissions].filter((item) => {
+      if (submissionIds.has(item.id)) return false;
+      submissionIds.add(item.id);
+      return true;
+    }),
+    progressUpdates: [...next.progressUpdates, ...current.progressUpdates].filter((item) => {
+      if (progressIds.has(item.id)) return false;
+      progressIds.add(item.id);
+      return true;
+    }),
+  };
+}
+
+function removeLocalSubmission(id: string) {
+  const queue = readLocalQueue();
+  writeLocalQueue({
+    ...queue,
+    submissions: queue.submissions.filter((item) => item.id !== id),
+  });
+}
+
+function removeLocalProgressUpdate(id: string) {
+  const queue = readLocalQueue();
+  writeLocalQueue({
+    ...queue,
+    progressUpdates: queue.progressUpdates.filter((item) => item.id !== id),
+  });
 }
 
 function getResponse(data: StudioData, taskId: string, memberId: string) {
@@ -353,14 +431,25 @@ function createStats(data: StudioData) {
     return b.completed - a.completed;
   });
   const taskMetrics = data.tasks.map((task) => {
+    const visibleMemberIds = new Set(
+      data.members
+        .filter((member) => !member.hidden && taskIsForMember(task, member.id))
+        .map((member) => member.id),
+    );
     const expected =
       task.scope === "member"
         ? task.memberId
-          ? 1
+          ? visibleMemberIds.has(task.memberId)
+            ? 1
+            : 0
           : 0
         : data.members.filter((member) => !member.hidden).length;
-    const responses = Object.values(data.responses[task.id] ?? {});
-    const progressUpdates = data.progressUpdates?.[task.id] ?? [];
+    const responses = Object.values(data.responses[task.id] ?? {}).filter((response) =>
+      visibleMemberIds.has(response.memberId),
+    );
+    const progressUpdates = (data.progressUpdates?.[task.id] ?? []).filter((update) =>
+      visibleMemberIds.has(update.memberId),
+    );
     return {
       task,
       expected,
@@ -635,12 +724,12 @@ function MemberView({
   activeMember,
   stats,
   draftAnswers,
+  sentState,
   refreshStatus,
   onDraftChange,
-  onSaveDraft,
-  onCopyAnswer,
-  onSaveProgressDraft,
-  onCopyProgressUpdate,
+  isSubmitting,
+  onSubmitFinal,
+  onSubmitProgress,
   onLogout,
   onRefreshData,
 }: {
@@ -648,18 +737,16 @@ function MemberView({
   activeMember: ActiveMember;
   stats: ReturnType<typeof createStats>;
   draftAnswers: Record<string, string>;
+  sentState: Record<string, string>;
   refreshStatus: string;
   onDraftChange: (key: string, value: string) => void;
-  onSaveDraft: (task: StudioTask) => void;
-  onCopyAnswer: (task: StudioTask) => void;
-  onSaveProgressDraft: (task: StudioTask) => void;
-  onCopyProgressUpdate: (task: StudioTask) => void;
+  isSubmitting: boolean;
+  onSubmitFinal: (task: StudioTask) => void;
+  onSubmitProgress: (task: StudioTask) => void;
   onLogout: () => void;
   onRefreshData: () => Promise<void>;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [nicknameDraft, setNicknameDraft] = useState("");
-  const [repoDraft, setRepoDraft] = useState(activeMember.member.repoUrl ?? "");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedOnce, setRefreshedOnce] = useState(
     window.sessionStorage.getItem(REFRESHED_SESSION_KEY) === "true",
@@ -678,36 +765,6 @@ function MemberView({
     } finally {
       setRefreshing(false);
     }
-  }
-
-  async function copySettingsRequest(kind: string, value: string) {
-    const text = [
-      "Hivo Studio settings request",
-      `Name: ${activeMember.displayName}`,
-      `Member: ${activeMember.member.name}`,
-      `${kind}: ${value}`,
-    ].join("\n");
-
-    await navigator.clipboard.writeText(text);
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
-  }
-
-  function addNickname() {
-    const nickname = nicknameDraft.trim();
-    if (!nickname) return;
-    void copySettingsRequest("New nickname", nickname);
-    setNicknameDraft("");
-  }
-
-  function saveRepoUrl() {
-    const repoUrl = repoDraft.trim();
-    if (!repoUrl) return;
-    void copySettingsRequest("Repo URL", repoUrl);
-  }
-
-  function requestRepoUpdate() {
-    const repoUrl = activeMember.member.repoUrl || repoDraft.trim() || "No repo saved";
-    void copySettingsRequest("Repo updated", repoUrl);
   }
 
   function closeHint() {
@@ -826,6 +883,8 @@ function MemberView({
               const existing = getResponse(data, task.id, activeMember.member.id);
               const key = responseKey(task.id, activeMember.member.id);
               const taskProgressKey = progressKey(task.id, activeMember.member.id);
+              const finalSent = sentState[key];
+              const progressSent = sentState[taskProgressKey];
               const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
                 (update) => update.memberId === activeMember.member.id,
               );
@@ -854,6 +913,11 @@ function MemberView({
                             : "مستني المراجعة"}
                       </span>
                     )}
+                    {!existing && finalSent && (
+                      <span className="border-[2px] border-ink bg-yellow-100 px-3 py-1 text-sm font-bold doodle-shadow-sm">
+                        مستني مراجعة الأدمن
+                      </span>
+                    )}
                   </div>
                   <p className="mb-4 text-[17px] leading-[1.8]">{task.question}</p>
                   <Textarea
@@ -864,28 +928,18 @@ function MemberView({
                     className="min-h-32 border-[2px] border-ink bg-paper text-base"
                   />
                   <p className="mt-2 text-sm font-bold text-red-700">
-                    محفوظ على جهازك فقط. عشان يتراجع رسميًا ابعته واتساب، والأدمن هو اللي يعتمده
-                    ويحفظه للفريق.
+                    ده تسليم رسمي. بعد ما تبعته هيظهر مستني مراجعة الأدمن، والدرجات تتحسب بعد القبول
+                    فقط.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button
                       type="button"
-                      onClick={() => onSaveDraft(task)}
-                      disabled={!canAnswer}
+                      onClick={() => onSubmitFinal(task)}
+                      disabled={!canAnswer || isSubmitting}
                       className="border-[2px] border-ink doodle-shadow-sm"
                     >
                       <Save data-icon="inline-start" />
-                      حفظ الإجابة على الجهاز
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={() => onCopyAnswer(task)}
-                      disabled={!canAnswer}
-                      variant="outline"
-                      className="border-[2px] border-ink bg-paper doodle-shadow-sm"
-                    >
-                      <MessageCircle data-icon="inline-start" />
-                      نسخ للواتساب
+                      تسليم للمراجعة
                     </Button>
                   </div>
 
@@ -911,6 +965,11 @@ function MemberView({
                         ))}
                       </div>
                     )}
+                    {progressSent && (
+                      <p className="mb-3 border-[2px] border-ink bg-yellow-100 p-2 text-sm font-bold">
+                        تم إرسال متابعة للأدمن
+                      </p>
+                    )}
                     <Textarea
                       value={draftAnswers[taskProgressKey] ?? ""}
                       onChange={(event) => onDraftChange(taskProgressKey, event.target.value)}
@@ -918,25 +977,17 @@ function MemberView({
                       className="min-h-24 border-[2px] border-ink bg-yellow-50 text-base"
                     />
                     <p className="mt-2 text-sm font-bold text-yellow-800">
-                      محفوظ على جهازك فقط لحد ما تبعته واتساب أو الأدمن يسجله رسميًا.
+                      ده تحديث متابعة فقط، لا يتحسب نقاط ولا يقفل التاسك.
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
                         type="button"
-                        onClick={() => onSaveProgressDraft(task)}
+                        onClick={() => onSubmitProgress(task)}
+                        disabled={isSubmitting}
                         className="border-[2px] border-ink bg-yellow-100 doodle-shadow-sm"
                       >
                         <Save data-icon="inline-start" />
-                        حفظ تحديث المتابعة
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => onCopyProgressUpdate(task)}
-                        variant="outline"
-                        className="border-[2px] border-ink bg-paper doodle-shadow-sm"
-                      >
-                        <MessageCircle data-icon="inline-start" />
-                        نسخ متابعة للواتساب
+                        إرسال متابعة
                       </Button>
                     </div>
                   </div>
@@ -987,42 +1038,27 @@ function MemberView({
               ))}
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-              <Input
-                value={nicknameDraft}
-                onChange={(event) => setNicknameDraft(event.target.value)}
-                placeholder="New nickname"
-                className="border-[2px] border-ink bg-paper"
-              />
-              <Button type="button" onClick={addNickname} className="border-[2px] border-ink">
-                إضافة
-              </Button>
+            <div className="mt-3 border-[2px] border-ink bg-paper p-3 text-sm leading-6">
+              <strong>التعديل الرسمي من الأدمن فقط.</strong>
+              <p>
+                لو عايز تضيف nickname أو تغير لينك الريبو، كلم الأدمن وهو يحفظه من لوحة الإدارة عشان
+                يظهر لكل الأجهزة.
+              </p>
+              {activeMember.member.repoUrl ? (
+                <Button
+                  type="button"
+                  onClick={() =>
+                    window.open(activeMember.member.repoUrl, "_blank", "noopener,noreferrer")
+                  }
+                  className="mt-3 border-[2px] border-ink doodle-shadow-sm"
+                >
+                  <ExternalLink data-icon="inline-start" />
+                  فتح الريبو بتاعي
+                </Button>
+              ) : (
+                <p className="mt-2 font-bold text-red-700">لا يوجد ريبو محفوظ رسميًا.</p>
+              )}
             </div>
-            <p className="mt-2 text-xs leading-5 text-foreground/60">
-              الـ nickname والريبو بيتحفظوا على جهازك فورًا. عشان يظهروا لكل الناس لازم الأدمن يضغط
-              حفظ.
-            </p>
-
-            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
-              <Input
-                value={repoDraft}
-                onChange={(event) => setRepoDraft(event.target.value)}
-                placeholder="GitHub repo link"
-                className="border-[2px] border-ink bg-paper"
-              />
-              <Button type="button" onClick={saveRepoUrl} className="border-[2px] border-ink">
-                حفظ اللينك
-              </Button>
-            </div>
-
-            <Button
-              type="button"
-              onClick={requestRepoUpdate}
-              className="mt-3 w-full border-[2px] border-ink doodle-shadow-sm"
-            >
-              <Bell data-icon="inline-start" />
-              Update GitHub Repo
-            </Button>
 
             <Button
               type="button"
@@ -1045,17 +1081,24 @@ function AdminView({
   saveStatus,
   isDirty,
   isSaving,
+  adminQueue,
+  queueStatus,
   tokenDialogOpen,
   tokenDraft,
   onLogout,
   onAddTask,
   onRemoveTask,
   onManualApprove,
+  onApproveQueuedSubmission,
+  onRejectQueuedSubmission,
+  onSaveQueuedProgress,
+  onDismissQueuedProgress,
   onAddProgressUpdate,
   onReviewAnswer,
   onUpdateMember,
   onUpdateSettings,
   onMarkRepoUpdateSeen,
+  onRefreshAdminQueue,
   onTokenDraftChange,
   onCloseTokenDialog,
   onConfirmTokenAndSave,
@@ -1066,17 +1109,24 @@ function AdminView({
   saveStatus: string;
   isDirty: boolean;
   isSaving: boolean;
+  adminQueue: AdminQueue;
+  queueStatus: string;
   tokenDialogOpen: boolean;
   tokenDraft: string;
   onLogout: () => void;
   onAddTask: (task: Omit<StudioTask, "id" | "createdAt">) => void;
   onRemoveTask: (taskId: string) => void;
   onManualApprove: (task: StudioTask, memberId: string) => void;
+  onApproveQueuedSubmission: (item: QueuedSubmission) => void;
+  onRejectQueuedSubmission: (item: QueuedSubmission) => void;
+  onSaveQueuedProgress: (item: QueuedProgressUpdate) => void;
+  onDismissQueuedProgress: (id: string) => void;
   onAddProgressUpdate: (task: StudioTask, memberId: string, note: string) => void;
   onReviewAnswer: (taskId: string, memberId: string, status: "approved" | "rejected") => void;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
   onMarkRepoUpdateSeen: (updateId: string) => void;
+  onRefreshAdminQueue: () => void;
   onTokenDraftChange: (value: string) => void;
   onCloseTokenDialog: () => void;
   onConfirmTokenAndSave: () => void;
@@ -1090,6 +1140,7 @@ function AdminView({
   const [manualApproveMembers, setManualApproveMembers] = useState<Record<string, string>>({});
   const [progressMembers, setProgressMembers] = useState<Record<string, string>>({});
   const [progressNotes, setProgressNotes] = useState<Record<string, string>>({});
+  const safeAdminQueue = adminQueue ?? emptyQueue();
   const unseenUpdates = data.repoUpdates?.filter((update) => !update.seen) ?? [];
 
   function submitTask() {
@@ -1146,6 +1197,123 @@ function AdminView({
               <div className="text-sm text-foreground/65">{label}</div>
             </div>
           ))}
+        </section>
+
+        <section
+          className="mb-7 border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+          style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
+        >
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <SectionTitle
+              title="مراجعات الموقع"
+              help="تسليمات ومتابعات وصلت من أعضاء التيم من الويبسايت. القبول فقط يحسب نقاط."
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onRefreshAdminQueue}
+              className="border-[2px] border-ink bg-paper doodle-shadow-sm"
+            >
+              <RefreshCw data-icon="inline-start" />
+              تحديث queue
+            </Button>
+          </div>
+          {queueStatus && (
+            <p className="mb-3 text-sm font-bold text-foreground/65">{queueStatus}</p>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="border-[2px] border-ink bg-paper p-3">
+              <h3 className="mb-3 text-xl font-bold">تسليمات مستنية مراجعة</h3>
+              {safeAdminQueue.submissions.length === 0 ? (
+                <p className="text-sm text-foreground/60">مفيش تسليمات من الموقع حاليًا.</p>
+              ) : (
+                <div className="grid gap-3">
+                  {safeAdminQueue.submissions.map((item) => {
+                    const task = data.tasks.find((candidate) => candidate.id === item.taskId);
+                    return (
+                      <div key={item.id} className="border-[2px] border-ink bg-card p-3">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                          <strong>{item.memberName}</strong>
+                          <span className="text-xs text-foreground/55">
+                            {new Date(item.submittedAt).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-sm font-bold text-foreground/65">
+                          {task?.title ?? item.taskId}
+                        </p>
+                        <p className="mt-2 whitespace-pre-wrap leading-7">{item.answer}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            onClick={() => onApproveQueuedSubmission(item)}
+                            className="border-[2px] border-ink doodle-shadow-sm"
+                          >
+                            <Check data-icon="inline-start" />
+                            قبول وحساب
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => onRejectQueuedSubmission(item)}
+                            className="border-[2px] border-ink bg-paper doodle-shadow-sm"
+                          >
+                            <RotateCcw data-icon="inline-start" />
+                            رفض
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="border-[2px] border-ink bg-yellow-50 p-3">
+              <h3 className="mb-3 text-xl font-bold">متابعات بدون درجات</h3>
+              {safeAdminQueue.progressUpdates.length === 0 ? (
+                <p className="text-sm text-foreground/60">مفيش متابعات من الموقع حاليًا.</p>
+              ) : (
+                <div className="grid gap-3">
+                  {safeAdminQueue.progressUpdates.map((item) => {
+                    const task = data.tasks.find((candidate) => candidate.id === item.taskId);
+                    return (
+                      <div key={item.id} className="border-[2px] border-ink bg-card p-3">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                          <strong>{item.memberName}</strong>
+                          <span className="text-xs text-foreground/55">
+                            {new Date(item.createdAt).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-sm font-bold text-foreground/65">
+                          {task?.title ?? item.taskId}
+                        </p>
+                        <p className="mt-2 whitespace-pre-wrap leading-7">{item.note}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            onClick={() => onSaveQueuedProgress(item)}
+                            className="border-[2px] border-ink bg-yellow-100 doodle-shadow-sm"
+                          >
+                            <Check data-icon="inline-start" />
+                            حفظ كمتابعة
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => onDismissQueuedProgress(item.id)}
+                            className="border-[2px] border-ink bg-paper doodle-shadow-sm"
+                          >
+                            تجاهل
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </section>
 
         <section
@@ -1399,7 +1567,7 @@ function AdminView({
                       className="border-[2px] border-ink doodle-shadow-sm"
                     >
                       <Check data-icon="inline-start" />
-                      اعتماد واتساب
+                      اعتماد يدوي
                     </Button>
                   </div>
 
@@ -1712,6 +1880,13 @@ function AdminView({
               placeholder="Stats password"
               className="border-[2px] border-ink bg-paper"
             />
+            <Input
+              value={data.settings?.backendUrl ?? ""}
+              onChange={(event) => onUpdateSettings({ backendUrl: event.target.value })}
+              placeholder="Backend URL for website submissions"
+              className="border-[2px] border-ink bg-paper md:col-span-2 ltr:text-left"
+              dir="ltr"
+            />
           </div>
         </section>
 
@@ -1731,6 +1906,8 @@ function AdminView({
         saveStatus={saveStatus}
         isDirty={isDirty}
         isSaving={isSaving}
+        adminQueue={adminQueue}
+        queueStatus={queueStatus}
         tokenDialogOpen={tokenDialogOpen}
         tokenDraft={tokenDraft}
         onTokenDraftChange={onTokenDraftChange}
@@ -2002,7 +2179,7 @@ function StatsView({
             help="نقاط، تسليم، قبول، رفض، pending، نسبة التسليم، وسرعة كل عضو."
           />
           <div className="grid gap-3 md:grid-cols-2">
-            {stats.allMemberStats.map((item) => (
+            {stats.memberStats.map((item) => (
               <div
                 key={item.member.id}
                 className={`border-[2px] border-ink bg-paper p-3 ${
@@ -2060,6 +2237,65 @@ async function fetchStudioData() {
   return sanitizeData((await response.json()) as StudioData);
 }
 
+function normalizeBackendUrl(value?: string) {
+  return (value ?? "").trim().replace(/\/+$/, "");
+}
+
+async function submitQueuedItem<TItem extends QueuedSubmission | QueuedProgressUpdate>(
+  backendUrl: string | undefined,
+  path: "submissions" | "progress-updates",
+  item: TItem,
+) {
+  const baseUrl = normalizeBackendUrl(backendUrl);
+
+  if (!baseUrl) {
+    const queue = readLocalQueue();
+    if (path === "submissions") {
+      writeLocalQueue({ ...queue, submissions: [item as QueuedSubmission, ...queue.submissions] });
+    } else {
+      writeLocalQueue({
+        ...queue,
+        progressUpdates: [item as QueuedProgressUpdate, ...queue.progressUpdates],
+      });
+    }
+    return "local";
+  }
+
+  const response = await fetch(`${baseUrl}/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(item),
+  });
+  if (!response.ok) throw new Error("Backend rejected the submission.");
+  return "backend";
+}
+
+async function fetchAdminQueue(backendUrl?: string) {
+  const baseUrl = normalizeBackendUrl(backendUrl);
+  if (!baseUrl) return readLocalQueue();
+
+  const response = await fetch(`${baseUrl}/admin-queue?ts=${Date.now()}`, { cache: "no-store" });
+  if (!response.ok) throw new Error("Backend queue is not available.");
+  const data = (await response.json()) as Partial<AdminQueue>;
+  return {
+    submissions: data.submissions ?? [],
+    progressUpdates: data.progressUpdates ?? [],
+  };
+}
+
+async function deleteQueuedItem(
+  backendUrl: string | undefined,
+  path: "submissions" | "progress-updates",
+  id: string,
+) {
+  const baseUrl = normalizeBackendUrl(backendUrl);
+  if (!baseUrl) return;
+
+  await fetch(`${baseUrl}/${path}/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {
+    // Some simple backends may clear items server-side during approval instead.
+  });
+}
+
 function Index() {
   const [data, setData] = useState<StudioData>(DEFAULT_DATA);
   const [activeMember, setActiveMember] = useState<ActiveMember | null>(null);
@@ -2068,9 +2304,13 @@ function Index() {
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>(() =>
     readMemberDrafts(),
   );
+  const [sentState, setSentState] = useState<Record<string, string>>(() => readMemberSentState());
   const [githubToken, setGithubToken] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
   const [refreshStatus, setRefreshStatus] = useState("");
+  const [queueStatus, setQueueStatus] = useState("");
+  const [adminQueue, setAdminQueue] = useState<AdminQueue>(emptyQueue());
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
@@ -2125,6 +2365,29 @@ function Index() {
   }, [activeMember, data.members]);
 
   const stats = useMemo(() => createStats(data), [data]);
+
+  const refreshAdminQueue = useCallback(async () => {
+    try {
+      const nextQueue = await fetchAdminQueue(data.settings?.backendUrl);
+      setAdminQueue((current) =>
+        data.settings?.backendUrl ? nextQueue : mergeQueue(current, nextQueue),
+      );
+      setQueueStatus(
+        data.settings?.backendUrl
+          ? "تم تحديث queue من backend."
+          : "تم قراءة queue المحلي. أضف Backend URL عشان يستقبل من أجهزة الفريق.",
+      );
+    } catch (error) {
+      setQueueStatus(
+        error instanceof Error ? error.message : "مش قادر أقرأ queue التسليمات حاليًا.",
+      );
+    }
+  }, [data.settings?.backendUrl]);
+
+  useEffect(() => {
+    if (!activeAdmin) return;
+    void refreshAdminQueue();
+  }, [activeAdmin, refreshAdminQueue]);
 
   function updateData(updater: (current: StudioData) => StudioData) {
     setData((current) =>
@@ -2198,54 +2461,122 @@ function Index() {
     });
   }
 
-  function submitAnswer(task: StudioTask) {
+  async function submitFinalSubmission(task: StudioTask) {
     if (!activeMember) return;
     const key = responseKey(task.id, activeMember.member.id);
     const answer = draftAnswers[key]?.trim();
     if (!answer) return;
-    writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
-    setRefreshStatus("تم حفظ الإجابة على جهازك فقط. ابعتها واتساب عشان الأدمن يراجعها.");
+
+    const item: QueuedSubmission = {
+      id: `submission-${Date.now()}`,
+      taskId: task.id,
+      memberId: activeMember.member.id,
+      memberName: activeMember.displayName,
+      answer,
+      submittedAt: new Date().toISOString(),
+    };
+
+    setIsSubmitting(true);
+    try {
+      const mode = await submitQueuedItem(data.settings?.backendUrl, "submissions", item);
+      if (mode === "local") {
+        setAdminQueue((current) => ({ ...current, submissions: [item, ...current.submissions] }));
+      }
+      updateData((current) => ({
+        ...current,
+        responses: {
+          ...current.responses,
+          [task.id]: {
+            ...(current.responses[task.id] ?? {}),
+            [activeMember.member.id]: {
+              memberId: activeMember.member.id,
+              memberName: activeMember.displayName,
+              answer,
+              status: "submitted",
+              submittedAt: item.submittedAt,
+            },
+          },
+        },
+      }));
+      writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
+      setSentState((current) => {
+        const next = { ...current, [key]: "pending" };
+        writeMemberSentState(next);
+        return next;
+      });
+      setRefreshStatus(
+        mode === "backend"
+          ? "تم إرسال التسليم للمراجعة. مستني قرار الأدمن."
+          : "تم تسجيل التسليم في queue محلي على الجهاز ده. أضف Backend URL عشان يوصّل من أجهزة الفريق.",
+      );
+      if (activeAdmin) void refreshAdminQueue();
+    } catch (error) {
+      setRefreshStatus(
+        error instanceof Error ? error.message : "حصل خطأ أثناء إرسال التسليم للمراجعة.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
-  async function copyAnswerToWhatsApp(task: StudioTask) {
-    if (!activeMember) return;
-    const key = responseKey(task.id, activeMember.member.id);
-    const answer = draftAnswers[key]?.trim();
-    if (!answer) return;
-    const message = createWhatsAppMessage(task, activeMember, answer);
-    await navigator.clipboard.writeText(message);
-    writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
-    setRefreshStatus("تم نسخ الإجابة. افتح واتساب وابعتها للأدمن عشان يعتمدها رسميًا.");
-    window.open(
-      `https://wa.me/?text=${encodeURIComponent(message)}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
-  }
-
-  function saveProgressDraft(task: StudioTask) {
+  async function submitProgressUpdate(task: StudioTask) {
     if (!activeMember) return;
     const key = progressKey(task.id, activeMember.member.id);
     const note = draftAnswers[key]?.trim();
     if (!note) return;
-    writeMemberDrafts({ ...readMemberDrafts(), [key]: note });
-    setRefreshStatus("تم حفظ تحديث المتابعة على جهازك فقط. ابعته واتساب عشان الأدمن يسجله.");
-  }
 
-  async function copyProgressToWhatsApp(task: StudioTask) {
-    if (!activeMember) return;
-    const key = progressKey(task.id, activeMember.member.id);
-    const note = draftAnswers[key]?.trim();
-    if (!note) return;
-    const message = createWhatsAppProgressMessage(task, activeMember, note);
-    await navigator.clipboard.writeText(message);
-    writeMemberDrafts({ ...readMemberDrafts(), [key]: note });
-    setRefreshStatus("تم نسخ تحديث المتابعة. ابعته للأدمن عشان يتسجل رسميًا بدون درجات.");
-    window.open(
-      `https://wa.me/?text=${encodeURIComponent(message)}`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+    const item: QueuedProgressUpdate = {
+      id: `progress-${Date.now()}`,
+      taskId: task.id,
+      memberId: activeMember.member.id,
+      memberName: activeMember.displayName,
+      note,
+      createdAt: new Date().toISOString(),
+    };
+
+    setIsSubmitting(true);
+    try {
+      const mode = await submitQueuedItem(data.settings?.backendUrl, "progress-updates", item);
+      if (mode === "local") {
+        setAdminQueue((current) => ({
+          ...current,
+          progressUpdates: [item, ...current.progressUpdates],
+        }));
+      }
+      updateData((current) => ({
+        ...current,
+        progressUpdates: {
+          ...(current.progressUpdates ?? {}),
+          [task.id]: [
+            {
+              id: item.id,
+              taskId: item.taskId,
+              memberId: item.memberId,
+              memberName: item.memberName,
+              note: item.note,
+              createdAt: item.createdAt,
+            },
+            ...((current.progressUpdates ?? {})[task.id] ?? []),
+          ],
+        },
+      }));
+      writeMemberDrafts({ ...readMemberDrafts(), [key]: note });
+      setSentState((current) => {
+        const next = { ...current, [key]: "sent" };
+        writeMemberSentState(next);
+        return next;
+      });
+      setRefreshStatus(
+        mode === "backend"
+          ? "تم إرسال المتابعة للأدمن. لا تتحسب نقاط."
+          : "تم تسجيل المتابعة في queue محلي على الجهاز ده. أضف Backend URL عشان توصل من أجهزة الفريق.",
+      );
+      if (activeAdmin) void refreshAdminQueue();
+    } catch (error) {
+      setRefreshStatus(error instanceof Error ? error.message : "حصل خطأ أثناء إرسال المتابعة.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function reviewAnswer(taskId: string, memberId: string, status: "approved" | "rejected") {
@@ -2268,6 +2599,66 @@ function Index() {
         },
       };
     });
+  }
+
+  function removeQueuedSubmission(id: string) {
+    removeLocalSubmission(id);
+    void deleteQueuedItem(data.settings?.backendUrl, "submissions", id);
+    setAdminQueue((current) => ({
+      ...current,
+      submissions: current.submissions.filter((item) => item.id !== id),
+    }));
+  }
+
+  function removeQueuedProgress(id: string) {
+    removeLocalProgressUpdate(id);
+    void deleteQueuedItem(data.settings?.backendUrl, "progress-updates", id);
+    setAdminQueue((current) => ({
+      ...current,
+      progressUpdates: current.progressUpdates.filter((item) => item.id !== id),
+    }));
+  }
+
+  function approveQueuedSubmission(item: QueuedSubmission) {
+    updateData((current) => ({
+      ...current,
+      responses: {
+        ...current.responses,
+        [item.taskId]: {
+          ...(current.responses[item.taskId] ?? {}),
+          [item.memberId]: {
+            memberId: item.memberId,
+            memberName: item.memberName,
+            answer: item.answer,
+            status: "approved",
+            submittedAt: item.submittedAt,
+            reviewedAt: new Date().toISOString(),
+          },
+        },
+      },
+    }));
+    removeQueuedSubmission(item.id);
+  }
+
+  function rejectQueuedSubmission(item: QueuedSubmission) {
+    updateData((current) => ({
+      ...current,
+      responses: {
+        ...current.responses,
+        [item.taskId]: {
+          ...(current.responses[item.taskId] ?? {}),
+          [item.memberId]: {
+            memberId: item.memberId,
+            memberName: item.memberName,
+            answer: item.answer,
+            status: "rejected",
+            submittedAt: item.submittedAt,
+            reviewedAt: new Date().toISOString(),
+          },
+        },
+      },
+    }));
+    removeQueuedSubmission(item.id);
   }
 
   function manualApprove(task: StudioTask, memberId: string) {
@@ -2314,6 +2705,26 @@ function Index() {
         [task.id]: [update, ...((current.progressUpdates ?? {})[task.id] ?? [])],
       },
     }));
+  }
+
+  function saveQueuedProgress(item: QueuedProgressUpdate) {
+    const update: TaskProgressUpdate = {
+      id: item.id,
+      taskId: item.taskId,
+      memberId: item.memberId,
+      memberName: item.memberName,
+      note: item.note,
+      createdAt: item.createdAt,
+    };
+
+    updateData((current) => ({
+      ...current,
+      progressUpdates: {
+        ...(current.progressUpdates ?? {}),
+        [item.taskId]: [update, ...((current.progressUpdates ?? {})[item.taskId] ?? [])],
+      },
+    }));
+    removeQueuedProgress(item.id);
   }
 
   function updateMember(memberId: string, updates: Partial<Member>) {
@@ -2441,11 +2852,16 @@ function Index() {
         onAddTask={addTask}
         onRemoveTask={removeTask}
         onManualApprove={manualApprove}
+        onApproveQueuedSubmission={approveQueuedSubmission}
+        onRejectQueuedSubmission={rejectQueuedSubmission}
+        onSaveQueuedProgress={saveQueuedProgress}
+        onDismissQueuedProgress={removeQueuedProgress}
         onAddProgressUpdate={addProgressUpdate}
         onReviewAnswer={reviewAnswer}
         onUpdateMember={updateMember}
         onUpdateSettings={updateSettings}
         onMarkRepoUpdateSeen={markRepoUpdateSeen}
+        onRefreshAdminQueue={refreshAdminQueue}
         onTokenDraftChange={setTokenDraft}
         onCloseTokenDialog={() => setTokenDialogOpen(false)}
         onConfirmTokenAndSave={confirmTokenAndSave}
@@ -2465,7 +2881,9 @@ function Index() {
         activeMember={activeMember}
         stats={stats}
         draftAnswers={draftAnswers}
+        sentState={sentState}
         refreshStatus={refreshStatus}
+        isSubmitting={isSubmitting}
         onDraftChange={(key, value) => {
           setDraftAnswers((current) => {
             const next = { ...current, [key]: value };
@@ -2473,10 +2891,8 @@ function Index() {
             return next;
           });
         }}
-        onSaveDraft={submitAnswer}
-        onCopyAnswer={copyAnswerToWhatsApp}
-        onSaveProgressDraft={saveProgressDraft}
-        onCopyProgressUpdate={copyProgressToWhatsApp}
+        onSubmitFinal={submitFinalSubmission}
+        onSubmitProgress={submitProgressUpdate}
         onLogout={logout}
         onRefreshData={refreshData}
       />

@@ -3,7 +3,8 @@
   "announcement": "",
   "settings": {
     "adminPassword": "5678",
-    "statsPassword": "6789"
+    "statsPassword": "6789",
+    "backendUrl": ""
   },
   "members": [
     {
