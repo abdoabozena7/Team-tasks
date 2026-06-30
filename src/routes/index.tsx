@@ -8,6 +8,7 @@ import {
   Eye,
   EyeOff,
   LogOut,
+  MessageCircle,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -131,7 +132,7 @@ const STATS_SESSION_KEY = "hivo-studio-stats";
 const GITHUB_TOKEN_KEY = "hivo-studio-github-token";
 const REFRESHED_SESSION_KEY = "hivo-studio-refreshed-this-session";
 const NICKNAME_HINT_KEY = "hivo-studio-nickname-hint";
-const MEMBER_LOCAL_CHANGES_KEY = "hivo-studio-member-local-changes";
+const MEMBER_DRAFTS_KEY = "hivo-studio-member-drafts";
 const GITHUB_OWNER = "abdoabozena7";
 const GITHUB_REPO = "Team-tasks";
 const GITHUB_BRANCH = "main";
@@ -153,12 +154,6 @@ const DEFAULT_DATA: StudioData = {
   meta: { updatedAt: new Date().toISOString() },
 };
 
-type MemberLocalChanges = {
-  members: Record<string, { aliases?: string[]; repoUrl?: string }>;
-  responses: Record<string, Record<string, TaskResponse>>;
-  repoUpdates: RepoUpdate[];
-};
-
 function normalizeName(value: string) {
   return value
     .trim()
@@ -171,95 +166,6 @@ function normalizeName(value: string) {
 
 function uniqueText(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
-}
-
-function emptyLocalChanges(): MemberLocalChanges {
-  return { members: {}, responses: {}, repoUpdates: [] };
-}
-
-function readLocalChanges() {
-  if (typeof window === "undefined") return emptyLocalChanges();
-
-  try {
-    const raw = window.localStorage.getItem(MEMBER_LOCAL_CHANGES_KEY);
-    if (!raw) return emptyLocalChanges();
-    const parsed = JSON.parse(raw) as Partial<MemberLocalChanges>;
-    return {
-      members: parsed.members ?? {},
-      responses: parsed.responses ?? {},
-      repoUpdates: parsed.repoUpdates ?? [],
-    };
-  } catch {
-    return emptyLocalChanges();
-  }
-}
-
-function writeLocalChanges(changes: MemberLocalChanges) {
-  window.localStorage.setItem(MEMBER_LOCAL_CHANGES_KEY, JSON.stringify(changes));
-}
-
-function clearLocalChanges() {
-  window.localStorage.removeItem(MEMBER_LOCAL_CHANGES_KEY);
-}
-
-function applyLocalChanges(data: StudioData) {
-  const changes = readLocalChanges();
-  return sanitizeData({
-    ...data,
-    members: data.members.map((member) => {
-      const localMember = changes.members[member.id];
-      if (!localMember) return member;
-      return {
-        ...member,
-        aliases: uniqueText([...member.aliases, ...(localMember.aliases ?? [])]),
-        repoUrl: localMember.repoUrl ?? member.repoUrl,
-      };
-    }),
-    responses: {
-      ...data.responses,
-      ...Object.fromEntries(
-        Object.entries(changes.responses).map(([taskId, taskResponses]) => [
-          taskId,
-          { ...(data.responses[taskId] ?? {}), ...taskResponses },
-        ]),
-      ),
-    },
-    repoUpdates: uniqueRepoUpdates([...(changes.repoUpdates ?? []), ...(data.repoUpdates ?? [])]),
-  });
-}
-
-function uniqueRepoUpdates(updates: RepoUpdate[]) {
-  const seen = new Set<string>();
-  return updates.filter((update) => {
-    if (seen.has(update.id)) return false;
-    seen.add(update.id);
-    return true;
-  });
-}
-
-function saveLocalMemberChanges(memberId: string, updates: Partial<Member>) {
-  const changes = readLocalChanges();
-  const current = changes.members[memberId] ?? {};
-  changes.members[memberId] = {
-    aliases: updates.aliases ? uniqueText(updates.aliases) : current.aliases,
-    repoUrl: updates.repoUrl ?? current.repoUrl,
-  };
-  writeLocalChanges(changes);
-}
-
-function saveLocalResponse(taskId: string, response: TaskResponse) {
-  const changes = readLocalChanges();
-  changes.responses[taskId] = {
-    ...(changes.responses[taskId] ?? {}),
-    [response.memberId]: response,
-  };
-  writeLocalChanges(changes);
-}
-
-function saveLocalRepoUpdate(update: RepoUpdate) {
-  const changes = readLocalChanges();
-  changes.repoUpdates = uniqueRepoUpdates([update, ...changes.repoUpdates]);
-  writeLocalChanges(changes);
 }
 
 function findMemberByName(name: string, members: Member[]) {
@@ -310,6 +216,33 @@ function taskIsForMember(task: StudioTask, memberId: string) {
 
 function responseKey(taskId: string, memberId: string) {
   return `${taskId}:${memberId}`;
+}
+
+function readMemberDrafts() {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const raw = window.localStorage.getItem(MEMBER_DRAFTS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function writeMemberDrafts(drafts: Record<string, string>) {
+  window.localStorage.setItem(MEMBER_DRAFTS_KEY, JSON.stringify(drafts));
+}
+
+function createWhatsAppMessage(task: StudioTask, member: ActiveMember, answer: string) {
+  return [
+    "Hivo Studio task answer",
+    `Name: ${member.displayName}`,
+    `Task: ${task.title}`,
+    `Points: ${task.points || 1}`,
+    "",
+    answer.trim(),
+  ].join("\n");
 }
 
 function getResponse(data: StudioData, taskId: string, memberId: string) {
@@ -674,11 +607,10 @@ function MemberView({
   draftAnswers,
   refreshStatus,
   onDraftChange,
-  onSubmitAnswer,
+  onSaveDraft,
+  onCopyAnswer,
   onLogout,
   onRefreshData,
-  onUpdateMember,
-  onRepoUpdate,
 }: {
   data: StudioData;
   activeMember: ActiveMember;
@@ -686,11 +618,10 @@ function MemberView({
   draftAnswers: Record<string, string>;
   refreshStatus: string;
   onDraftChange: (key: string, value: string) => void;
-  onSubmitAnswer: (task: StudioTask) => void;
+  onSaveDraft: (task: StudioTask) => void;
+  onCopyAnswer: (task: StudioTask) => void;
   onLogout: () => void;
   onRefreshData: () => Promise<void>;
-  onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
-  onRepoUpdate: (memberId: string) => void;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState("");
@@ -715,17 +646,34 @@ function MemberView({
     }
   }
 
+  async function copySettingsRequest(kind: string, value: string) {
+    const text = [
+      "Hivo Studio settings request",
+      `Name: ${activeMember.displayName}`,
+      `Member: ${activeMember.member.name}`,
+      `${kind}: ${value}`,
+    ].join("\n");
+
+    await navigator.clipboard.writeText(text);
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+  }
+
   function addNickname() {
     const nickname = nicknameDraft.trim();
     if (!nickname) return;
-    onUpdateMember(activeMember.member.id, {
-      aliases: uniqueText([...activeMember.member.aliases, nickname]),
-    });
+    void copySettingsRequest("New nickname", nickname);
     setNicknameDraft("");
   }
 
   function saveRepoUrl() {
-    onUpdateMember(activeMember.member.id, { repoUrl: repoDraft.trim() });
+    const repoUrl = repoDraft.trim();
+    if (!repoUrl) return;
+    void copySettingsRequest("Repo URL", repoUrl);
+  }
+
+  function requestRepoUpdate() {
+    const repoUrl = activeMember.member.repoUrl || repoDraft.trim() || "No repo saved";
+    void copySettingsRequest("Repo updated", repoUrl);
   }
 
   function closeHint() {
@@ -877,15 +825,31 @@ function MemberView({
                     placeholder="اكتب إجابتك هنا..."
                     className="min-h-32 border-[2px] border-ink bg-paper text-base"
                   />
-                  <Button
-                    type="button"
-                    onClick={() => onSubmitAnswer(task)}
-                    disabled={!canAnswer}
-                    className="mt-3 border-[2px] border-ink doodle-shadow-sm"
-                  >
-                    <Check data-icon="inline-start" />
-                    إرسال الإجابة
-                  </Button>
+                  <p className="mt-2 text-sm font-bold text-red-700">
+                    محفوظ على جهازك فقط. عشان يتراجع رسميًا ابعته واتساب، والأدمن هو اللي يعتمده
+                    ويحفظه للفريق.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => onSaveDraft(task)}
+                      disabled={!canAnswer}
+                      className="border-[2px] border-ink doodle-shadow-sm"
+                    >
+                      <Save data-icon="inline-start" />
+                      حفظ الإجابة على الجهاز
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => onCopyAnswer(task)}
+                      disabled={!canAnswer}
+                      variant="outline"
+                      className="border-[2px] border-ink bg-paper doodle-shadow-sm"
+                    >
+                      <MessageCircle data-icon="inline-start" />
+                      نسخ للواتساب
+                    </Button>
+                  </div>
                 </article>
               );
             })
@@ -963,7 +927,7 @@ function MemberView({
 
             <Button
               type="button"
-              onClick={() => onRepoUpdate(activeMember.member.id)}
+              onClick={requestRepoUpdate}
               className="mt-3 w-full border-[2px] border-ink doodle-shadow-sm"
             >
               <Bell data-icon="inline-start" />
@@ -1088,6 +1052,40 @@ function AdminView({
               <div className="text-sm text-foreground/65">{label}</div>
             </div>
           ))}
+        </section>
+
+        <section
+          className="mb-7 border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+          style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
+        >
+          <SectionTitle
+            title="Repo Links"
+            help="أزرار مباشرة لفتح ريبوهات الأعضاء. لو العضو ملوش لينك محفوظ هتلاقيها واضحة هنا."
+          />
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {data.members.map((member) => (
+              <div
+                key={member.id}
+                className="flex items-center justify-between gap-2 border-[2px] border-ink bg-paper p-3"
+              >
+                <strong className="truncate">{member.name}</strong>
+                {member.repoUrl ? (
+                  <Button
+                    type="button"
+                    onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}
+                    className="shrink-0 border-[2px] border-ink doodle-shadow-sm"
+                  >
+                    <ExternalLink data-icon="inline-start" />
+                    فتح الريبو
+                  </Button>
+                ) : (
+                  <span className="shrink-0 rounded-full border-[2px] border-ink bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
+                    لا يوجد ريبو
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
         </section>
 
         <section
@@ -1895,7 +1893,7 @@ async function fetchStudioData() {
   const response = await fetch(`${import.meta.env.BASE_URL}team-data.json?ts=${Date.now()}`, {
     cache: "no-store",
   });
-  return applyLocalChanges(sanitizeData((await response.json()) as StudioData));
+  return sanitizeData((await response.json()) as StudioData);
 }
 
 function Index() {
@@ -1903,7 +1901,9 @@ function Index() {
   const [activeMember, setActiveMember] = useState<ActiveMember | null>(null);
   const [activeAdmin, setActiveAdmin] = useState(false);
   const [activeStats, setActiveStats] = useState(false);
-  const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
+  const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>(() =>
+    readMemberDrafts(),
+  );
   const [githubToken, setGithubToken] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
   const [refreshStatus, setRefreshStatus] = useState("");
@@ -2036,25 +2036,24 @@ function Index() {
     const key = responseKey(task.id, activeMember.member.id);
     const answer = draftAnswers[key]?.trim();
     if (!answer) return;
-    const response: TaskResponse = {
-      memberId: activeMember.member.id,
-      memberName: activeMember.displayName,
-      answer,
-      status: "submitted",
-      submittedAt: new Date().toISOString(),
-    };
+    writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
+    setRefreshStatus("تم حفظ الإجابة على جهازك فقط. ابعتها واتساب عشان الأدمن يراجعها.");
+  }
 
-    updateData((current) => ({
-      ...current,
-      responses: {
-        ...current.responses,
-        [task.id]: {
-          ...(current.responses[task.id] ?? {}),
-          [activeMember.member.id]: response,
-        },
-      },
-    }));
-    saveLocalResponse(task.id, response);
+  async function copyAnswerToWhatsApp(task: StudioTask) {
+    if (!activeMember) return;
+    const key = responseKey(task.id, activeMember.member.id);
+    const answer = draftAnswers[key]?.trim();
+    if (!answer) return;
+    const message = createWhatsAppMessage(task, activeMember, answer);
+    await navigator.clipboard.writeText(message);
+    writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
+    setRefreshStatus("تم نسخ الإجابة. افتح واتساب وابعتها للأدمن عشان يعتمدها رسميًا.");
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(message)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
   }
 
   function reviewAnswer(taskId: string, memberId: string, status: "approved" | "rejected") {
@@ -2103,13 +2102,6 @@ function Index() {
   }
 
   function updateMember(memberId: string, updates: Partial<Member>) {
-    if (
-      activeMember?.member.id === memberId &&
-      (updates.aliases || updates.repoUrl !== undefined)
-    ) {
-      saveLocalMemberChanges(memberId, updates);
-    }
-
     updateData((current) => ({
       ...current,
       members: current.members.map((member) =>
@@ -2137,7 +2129,6 @@ function Index() {
       ...current,
       repoUpdates: [update, ...(current.repoUpdates ?? [])],
     }));
-    saveLocalRepoUpdate(update);
     setRefreshStatus("اتسجل تنبيه الريبو. لازم الأدمن يحفظ GitHub عشان يظهر على جهاز تاني.");
   }
 
@@ -2193,7 +2184,6 @@ function Index() {
 
       setGithubToken(token);
       window.localStorage.setItem(GITHUB_TOKEN_KEY, token);
-      clearLocalChanges();
       setTokenDraft("");
       setTokenDialogOpen(false);
       setData(nextData);
@@ -2260,12 +2250,17 @@ function Index() {
         stats={stats}
         draftAnswers={draftAnswers}
         refreshStatus={refreshStatus}
-        onDraftChange={(key, value) => setDraftAnswers((current) => ({ ...current, [key]: value }))}
-        onSubmitAnswer={submitAnswer}
+        onDraftChange={(key, value) => {
+          setDraftAnswers((current) => {
+            const next = { ...current, [key]: value };
+            writeMemberDrafts(next);
+            return next;
+          });
+        }}
+        onSaveDraft={submitAnswer}
+        onCopyAnswer={copyAnswerToWhatsApp}
         onLogout={logout}
         onRefreshData={refreshData}
-        onUpdateMember={updateMember}
-        onRepoUpdate={addRepoUpdate}
       />
     );
   }
