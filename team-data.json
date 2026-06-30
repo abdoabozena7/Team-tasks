@@ -30,8 +30,7 @@
       "aliases": [
         "shoiab",
         "shoaib",
-        "شعيب",
-        "شع"
+        "شعيب"
       ],
       "hidden": false,
       "baseCompleted": 0,
@@ -192,17 +191,17 @@
   ],
   "tasks": [
     {
-      "title": "123",
-      "question": "5321",
-      "points": 5,
+      "title": "gbchm",
+      "question": "dtxfh",
+      "points": 1,
       "scope": "all",
-      "id": "task-1782846239248",
-      "createdAt": "2026-06-30T19:03:59.248Z"
+      "id": "task-1782846378914",
+      "createdAt": "2026-06-30T19:06:18.914Z"
     }
   ],
   "responses": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-06-30T19:04:48.967Z"
+    "updatedAt": "2026-06-30T19:06:45.823Z"
   }
 }
