@@ -131,6 +131,7 @@ const STATS_SESSION_KEY = "hivo-studio-stats";
 const GITHUB_TOKEN_KEY = "hivo-studio-github-token";
 const REFRESHED_SESSION_KEY = "hivo-studio-refreshed-this-session";
 const NICKNAME_HINT_KEY = "hivo-studio-nickname-hint";
+const MEMBER_LOCAL_CHANGES_KEY = "hivo-studio-member-local-changes";
 const GITHUB_OWNER = "abdoabozena7";
 const GITHUB_REPO = "Team-tasks";
 const GITHUB_BRANCH = "main";
@@ -152,6 +153,12 @@ const DEFAULT_DATA: StudioData = {
   meta: { updatedAt: new Date().toISOString() },
 };
 
+type MemberLocalChanges = {
+  members: Record<string, { aliases?: string[]; repoUrl?: string }>;
+  responses: Record<string, Record<string, TaskResponse>>;
+  repoUpdates: RepoUpdate[];
+};
+
 function normalizeName(value: string) {
   return value
     .trim()
@@ -164,6 +171,95 @@ function normalizeName(value: string) {
 
 function uniqueText(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function emptyLocalChanges(): MemberLocalChanges {
+  return { members: {}, responses: {}, repoUpdates: [] };
+}
+
+function readLocalChanges() {
+  if (typeof window === "undefined") return emptyLocalChanges();
+
+  try {
+    const raw = window.localStorage.getItem(MEMBER_LOCAL_CHANGES_KEY);
+    if (!raw) return emptyLocalChanges();
+    const parsed = JSON.parse(raw) as Partial<MemberLocalChanges>;
+    return {
+      members: parsed.members ?? {},
+      responses: parsed.responses ?? {},
+      repoUpdates: parsed.repoUpdates ?? [],
+    };
+  } catch {
+    return emptyLocalChanges();
+  }
+}
+
+function writeLocalChanges(changes: MemberLocalChanges) {
+  window.localStorage.setItem(MEMBER_LOCAL_CHANGES_KEY, JSON.stringify(changes));
+}
+
+function clearLocalChanges() {
+  window.localStorage.removeItem(MEMBER_LOCAL_CHANGES_KEY);
+}
+
+function applyLocalChanges(data: StudioData) {
+  const changes = readLocalChanges();
+  return sanitizeData({
+    ...data,
+    members: data.members.map((member) => {
+      const localMember = changes.members[member.id];
+      if (!localMember) return member;
+      return {
+        ...member,
+        aliases: uniqueText([...member.aliases, ...(localMember.aliases ?? [])]),
+        repoUrl: localMember.repoUrl ?? member.repoUrl,
+      };
+    }),
+    responses: {
+      ...data.responses,
+      ...Object.fromEntries(
+        Object.entries(changes.responses).map(([taskId, taskResponses]) => [
+          taskId,
+          { ...(data.responses[taskId] ?? {}), ...taskResponses },
+        ]),
+      ),
+    },
+    repoUpdates: uniqueRepoUpdates([...(changes.repoUpdates ?? []), ...(data.repoUpdates ?? [])]),
+  });
+}
+
+function uniqueRepoUpdates(updates: RepoUpdate[]) {
+  const seen = new Set<string>();
+  return updates.filter((update) => {
+    if (seen.has(update.id)) return false;
+    seen.add(update.id);
+    return true;
+  });
+}
+
+function saveLocalMemberChanges(memberId: string, updates: Partial<Member>) {
+  const changes = readLocalChanges();
+  const current = changes.members[memberId] ?? {};
+  changes.members[memberId] = {
+    aliases: updates.aliases ? uniqueText(updates.aliases) : current.aliases,
+    repoUrl: updates.repoUrl ?? current.repoUrl,
+  };
+  writeLocalChanges(changes);
+}
+
+function saveLocalResponse(taskId: string, response: TaskResponse) {
+  const changes = readLocalChanges();
+  changes.responses[taskId] = {
+    ...(changes.responses[taskId] ?? {}),
+    [response.memberId]: response,
+  };
+  writeLocalChanges(changes);
+}
+
+function saveLocalRepoUpdate(update: RepoUpdate) {
+  const changes = readLocalChanges();
+  changes.repoUpdates = uniqueRepoUpdates([update, ...changes.repoUpdates]);
+  writeLocalChanges(changes);
 }
 
 function findMemberByName(name: string, members: Member[]) {
@@ -848,6 +944,10 @@ function MemberView({
                 إضافة
               </Button>
             </div>
+            <p className="mt-2 text-xs leading-5 text-foreground/60">
+              الـ nickname والريبو بيتحفظوا على جهازك فورًا. عشان يظهروا لكل الناس لازم الأدمن يضغط
+              حفظ.
+            </p>
 
             <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
               <Input
@@ -1723,7 +1823,7 @@ async function fetchStudioData() {
   const response = await fetch(`${import.meta.env.BASE_URL}team-data.json?ts=${Date.now()}`, {
     cache: "no-store",
   });
-  return sanitizeData((await response.json()) as StudioData);
+  return applyLocalChanges(sanitizeData((await response.json()) as StudioData));
 }
 
 function Index() {
@@ -1801,7 +1901,7 @@ function Index() {
   async function refreshData() {
     const freshData = await fetchStudioData();
     setData(freshData);
-    setRefreshStatus("تم تحديث الداتا.");
+    setRefreshStatus("تم تحديث الداتا، وأي تغييرات محلية على جهازك فضلت محفوظة.");
   }
 
   function loginMember(member: Member, displayName: string) {
@@ -1864,6 +1964,13 @@ function Index() {
     const key = responseKey(task.id, activeMember.member.id);
     const answer = draftAnswers[key]?.trim();
     if (!answer) return;
+    const response: TaskResponse = {
+      memberId: activeMember.member.id,
+      memberName: activeMember.displayName,
+      answer,
+      status: "submitted",
+      submittedAt: new Date().toISOString(),
+    };
 
     updateData((current) => ({
       ...current,
@@ -1871,16 +1978,11 @@ function Index() {
         ...current.responses,
         [task.id]: {
           ...(current.responses[task.id] ?? {}),
-          [activeMember.member.id]: {
-            memberId: activeMember.member.id,
-            memberName: activeMember.displayName,
-            answer,
-            status: "submitted",
-            submittedAt: new Date().toISOString(),
-          },
+          [activeMember.member.id]: response,
         },
       },
     }));
+    saveLocalResponse(task.id, response);
   }
 
   function reviewAnswer(taskId: string, memberId: string, status: "approved" | "rejected") {
@@ -1929,6 +2031,13 @@ function Index() {
   }
 
   function updateMember(memberId: string, updates: Partial<Member>) {
+    if (
+      activeMember?.member.id === memberId &&
+      (updates.aliases || updates.repoUrl !== undefined)
+    ) {
+      saveLocalMemberChanges(memberId, updates);
+    }
+
     updateData((current) => ({
       ...current,
       members: current.members.map((member) =>
@@ -1945,18 +2054,18 @@ function Index() {
   }
 
   function addRepoUpdate(memberId: string) {
+    const update: RepoUpdate = {
+      id: `repo-${Date.now()}`,
+      memberId,
+      createdAt: new Date().toISOString(),
+      seen: false,
+    };
+
     updateData((current) => ({
       ...current,
-      repoUpdates: [
-        {
-          id: `repo-${Date.now()}`,
-          memberId,
-          createdAt: new Date().toISOString(),
-          seen: false,
-        },
-        ...(current.repoUpdates ?? []),
-      ],
+      repoUpdates: [update, ...(current.repoUpdates ?? [])],
     }));
+    saveLocalRepoUpdate(update);
     setRefreshStatus("اتسجل تنبيه الريبو. لازم الأدمن يحفظ GitHub عشان يظهر على جهاز تاني.");
   }
 
@@ -2012,6 +2121,7 @@ function Index() {
 
       setGithubToken(token);
       window.localStorage.setItem(GITHUB_TOKEN_KEY, token);
+      clearLocalChanges();
       setTokenDraft("");
       setTokenDialogOpen(false);
       setData(nextData);
