@@ -95,9 +95,12 @@ type ActiveMember = {
 
 type MemberScore = {
   member: Member;
+  assignedTasks: number;
   submitted: number;
   approved: number;
   rejected: number;
+  pending: number;
+  reviewed: number;
   baseCompleted: number;
   baseApproved: number;
   baseRejected: number;
@@ -106,6 +109,8 @@ type MemberScore = {
   basePoints: number;
   points: number;
   avgHours: number | null;
+  responseRate: number;
+  approvalRate: number;
 };
 
 type TaskMetric = {
@@ -229,9 +234,15 @@ function formatHours(value: number | null) {
   return `${value.toFixed(1)}h`;
 }
 
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0%";
+  return `${Math.round(value)}%`;
+}
+
 function createStats(data: StudioData) {
   const memberStats = data.members.map((member) => {
-    const responses = data.tasks
+    const assignedTasks = data.tasks.filter((task) => taskIsForMember(task, member.id));
+    const responses = assignedTasks
       .map((task) => ({ task, response: getResponse(data, task.id, member.id) }))
       .filter((item): item is { task: StudioTask; response: TaskResponse } =>
         Boolean(item.response),
@@ -252,13 +263,21 @@ function createStats(data: StudioData) {
     const approved = approvedTasks.length + baseApproved;
     const rejected =
       responses.filter((item) => item.response.status === "rejected").length + baseRejected;
-    const submitted = responses.length;
+    const pending = responses.filter((item) => item.response.status === "submitted").length;
+    const submitted = responses.length + baseCompleted;
+    const reviewed = approved + rejected;
+    const responseRate =
+      assignedTasks.length > 0 ? (responses.length / assignedTasks.length) * 100 : 0;
+    const approvalRate = reviewed > 0 ? (approved / reviewed) * 100 : 0;
 
     return {
       member,
+      assignedTasks: assignedTasks.length,
       submitted,
       approved,
       rejected,
+      pending,
+      reviewed,
       baseCompleted,
       baseApproved,
       baseRejected,
@@ -267,6 +286,8 @@ function createStats(data: StudioData) {
       basePoints,
       points: basePoints + taskPoints,
       avgHours,
+      responseRate,
+      approvalRate,
     };
   });
   const visibleStats = memberStats.filter((item) => !item.member.hidden);
@@ -435,11 +456,15 @@ function LoginScreen({
 function MemberDetails({ item }: { item: MemberScore }) {
   return (
     <div className="mt-3 grid gap-2 border-t-[2px] border-ink/30 pt-3 text-sm sm:grid-cols-3">
+      <span>المطلوب: {item.assignedTasks}</span>
       <span>مسلم: {item.submitted}</span>
+      <span>مستني مراجعة: {item.pending}</span>
       <span>مقبول: {item.approved}</span>
       <span>مرفوض: {item.rejected}</span>
       <span>نقاط: {item.points}</span>
       <span>تاسكات محسوبة: {item.completed}</span>
+      <span>نسبة التسليم: {formatPercent(item.responseRate)}</span>
+      <span>نسبة القبول: {formatPercent(item.approvalRate)}</span>
       <span>متوسط السرعة: {formatHours(item.avgHours)}</span>
     </div>
   );
@@ -1451,11 +1476,68 @@ function StatsView({
   stats: ReturnType<typeof createStats>;
   onLogout: () => void;
 }) {
-  const best = stats.memberStats[0];
-  const worst = stats.memberStats[stats.memberStats.length - 1];
-  const fastest = [...stats.memberStats]
+  const visibleStats = stats.memberStats;
+  const best = visibleStats[0];
+  const worst = visibleStats[visibleStats.length - 1];
+  const fastest = [...visibleStats]
     .filter((item) => item.avgHours !== null)
     .sort((a, b) => (a.avgHours ?? 0) - (b.avgHours ?? 0))[0];
+  const slowest = [...visibleStats]
+    .filter((item) => item.avgHours !== null)
+    .sort((a, b) => (b.avgHours ?? 0) - (a.avgHours ?? 0))[0];
+  const topPoints = [...visibleStats].sort((a, b) => b.points - a.points)[0];
+  const mostRejected = [...visibleStats].sort((a, b) => b.rejected - a.rejected)[0];
+  const mostPending = [...visibleStats].sort((a, b) => b.pending - a.pending)[0];
+  const lowestResponseRate = [...visibleStats]
+    .filter((item) => item.assignedTasks > 0)
+    .sort((a, b) => a.responseRate - b.responseRate)[0];
+  const totalSubmitted = visibleStats.reduce((sum, item) => sum + item.submitted, 0);
+  const totalRejected = visibleStats.reduce((sum, item) => sum + item.rejected, 0);
+
+  const insightCards = [
+    {
+      label: "أفضل أداء",
+      value: best?.member.name ?? "N/A",
+      detail: best ? `${best.points} pts / ${best.completed} tasks` : "لسه مفيش بيانات",
+    },
+    {
+      label: "أعلى نقاط",
+      value: topPoints?.member.name ?? "N/A",
+      detail: topPoints ? `${topPoints.points} pts` : "لسه مفيش نقاط",
+    },
+    {
+      label: "أسرع تسليم",
+      value: fastest?.member.name ?? "N/A",
+      detail: fastest ? formatHours(fastest.avgHours) : "مفيش تسليمات متوقتة",
+    },
+    {
+      label: "أبطأ تسليم",
+      value: slowest?.member.name ?? "N/A",
+      detail: slowest ? formatHours(slowest.avgHours) : "مفيش تسليمات متوقتة",
+    },
+    {
+      label: "أكثر رفض",
+      value: mostRejected?.member.name ?? "N/A",
+      detail: mostRejected ? `${mostRejected.rejected} rejected` : "مفيش رفض",
+    },
+    {
+      label: "أكثر Pending",
+      value: mostPending?.member.name ?? "N/A",
+      detail: mostPending ? `${mostPending.pending} pending` : "مفيش انتظار",
+    },
+    {
+      label: "أقل تسليم",
+      value: lowestResponseRate?.member.name ?? "N/A",
+      detail: lowestResponseRate
+        ? `${formatPercent(lowestResponseRate.responseRate)} submitted`
+        : "مفيش تاسكات مفتوحة",
+    },
+    {
+      label: "الأضعف في الليدر بورد",
+      value: worst?.member.name ?? "N/A",
+      detail: worst ? `${worst.points} pts / ${worst.completed} tasks` : "لسه مفيش بيانات",
+    },
+  ];
 
   return (
     <div className="min-h-screen text-foreground" dir="rtl">
@@ -1465,7 +1547,9 @@ function StatsView({
           <h1 className="mb-2 mt-4 text-5xl font-bold leading-tight">
             <span className="highlight-yellow">Statistics</span>
           </h1>
-          <p className="text-lg text-foreground/75">شاشة قراءة فقط: مين شغال ومين محتاج متابعة.</p>
+          <p className="text-lg text-foreground/75">
+            شاشة قراءة فقط: مين شغال، مين سريع، ومين محتاج متابعة.
+          </p>
           <Button
             type="button"
             variant="outline"
@@ -1477,18 +1561,70 @@ function StatsView({
           </Button>
         </header>
 
-        <section className="mb-7 grid gap-3 md:grid-cols-3">
-          <div className="border-[2.5px] border-ink bg-card p-4 text-center doodle-shadow">
-            <div className="text-sm text-foreground/60">أفضل أداء</div>
-            <strong>{best?.member.name ?? "N/A"}</strong>
-          </div>
-          <div className="border-[2.5px] border-ink bg-card p-4 text-center doodle-shadow">
-            <div className="text-sm text-foreground/60">الأبطأ/الأقل</div>
-            <strong>{worst?.member.name ?? "N/A"}</strong>
-          </div>
-          <div className="border-[2.5px] border-ink bg-card p-4 text-center doodle-shadow">
-            <div className="text-sm text-foreground/60">أسرع تسليم</div>
-            <strong>{fastest?.member.name ?? "N/A"}</strong>
+        <section className="mb-7 grid gap-3 md:grid-cols-4">
+          {[
+            ["التاسكات", data.tasks.length],
+            ["إجمالي التسليم", totalSubmitted],
+            ["Pending", stats.pendingTotal],
+            ["Rejected", totalRejected],
+          ].map(([label, value]) => (
+            <div
+              key={label}
+              className="border-[2.5px] border-ink bg-card p-4 text-center doodle-shadow"
+              style={{ borderRadius: "16px 20px 14px 18px / 18px 14px 20px 16px" }}
+            >
+              <div className="text-3xl font-bold">{value}</div>
+              <div className="text-sm text-foreground/65">{label}</div>
+            </div>
+          ))}
+        </section>
+
+        <section className="mb-7 grid gap-3 md:grid-cols-4">
+          {insightCards.map((card) => (
+            <div
+              key={card.label}
+              className="border-[2.5px] border-ink bg-card p-4 doodle-shadow"
+              style={{ borderRadius: "16px 20px 14px 18px / 18px 14px 20px 16px" }}
+            >
+              <div className="text-sm text-foreground/60">{card.label}</div>
+              <strong className="mt-1 block text-lg">{card.value}</strong>
+              <div className="mt-1 text-xs text-foreground/60">{card.detail}</div>
+            </div>
+          ))}
+        </section>
+
+        <section
+          className="mb-7 border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+          style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
+        >
+          <SectionTitle
+            title="إحصائيات التاسكات"
+            help="لكل تاسك: كام إجابة وصلت من أصل المطلوب، وكام اتقبل أو اترفض."
+          />
+          <div className="grid gap-3 md:grid-cols-2">
+            {stats.taskMetrics.length === 0 ? (
+              <p className="text-sm text-foreground/60">لسه مفيش تاسكات.</p>
+            ) : (
+              stats.taskMetrics.map((item) => (
+                <div key={item.task.id} className="border-[2px] border-ink bg-paper p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <strong>{item.task.title}</strong>
+                    <span className="rounded-full border-[2px] border-ink bg-card px-2 py-1 text-sm font-bold">
+                      {item.received}/{item.expected}
+                    </span>
+                  </div>
+                  <div className="grid gap-2 text-sm sm:grid-cols-4">
+                    <span>Pending: {item.submitted}</span>
+                    <span>Accepted: {item.approved}</span>
+                    <span>Rejected: {item.rejected}</span>
+                    <span>
+                      Rate:{" "}
+                      {formatPercent(item.expected > 0 ? (item.received / item.expected) * 100 : 0)}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </section>
 
@@ -1496,24 +1632,42 @@ function StatsView({
           className="border-[2.5px] border-ink bg-card p-5 doodle-shadow"
           style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
         >
-          <SectionTitle title="كل الأشخاص" help="نقاط، قبول، رفض، وسرعة التسليم لكل عضو." />
+          <SectionTitle
+            title="كل الأشخاص"
+            help="نقاط، تسليم، قبول، رفض، pending، نسبة التسليم، وسرعة كل عضو."
+          />
           <div className="grid gap-3 md:grid-cols-2">
             {stats.allMemberStats.map((item) => (
-              <div key={item.member.id} className="border-[2px] border-ink bg-paper p-3">
+              <div
+                key={item.member.id}
+                className={`border-[2px] border-ink bg-paper p-3 ${
+                  item.member.hidden ? "opacity-55" : ""
+                }`}
+              >
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <strong>{item.member.name}</strong>
-                  {item.member.repoUrl && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() =>
-                        window.open(item.member.repoUrl, "_blank", "noopener,noreferrer")
-                      }
-                      className="border-[2px] border-ink"
-                    >
-                      Repo
-                    </Button>
-                  )}
+                  <div>
+                    <strong>{item.member.name}</strong>
+                    {item.member.hidden && (
+                      <span className="ms-2 text-xs text-foreground/55">hidden</span>
+                    )}
+                    {item.member.publicFlag && (
+                      <div className="text-xs font-bold text-red-600">{item.member.publicFlag}</div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {item.member.repoUrl && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() =>
+                          window.open(item.member.repoUrl, "_blank", "noopener,noreferrer")
+                        }
+                        className="border-[2px] border-ink"
+                      >
+                        Repo
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <MemberDetails item={item} />
               </div>
