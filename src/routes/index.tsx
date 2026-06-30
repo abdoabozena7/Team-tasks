@@ -1,21 +1,44 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Archive,
+  Activity,
   BarChart3,
   Bell,
+  CalendarClock,
   Check,
+  ChevronDown,
+  ClipboardList,
   ExternalLink,
   Eye,
   EyeOff,
+  FolderOpen,
+  ListChecks,
   LogOut,
+  Menu,
   Plus,
   RefreshCw,
   RotateCcw,
   Save,
+  Search,
   Settings,
   Star,
   Trash2,
+  Users,
+  X,
 } from "lucide-react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +76,9 @@ type StudioTask = {
   scope: "all" | "member";
   memberId?: string;
   createdAt: string;
+  startAt?: string;
+  deadlineAt?: string;
+  status?: "active" | "archived";
 };
 
 type TaskResponse = {
@@ -244,7 +270,13 @@ function sanitizeData(data: StudioData): StudioData {
       publicFlag: member.publicFlag ?? "",
       repoUrl: member.repoUrl ?? "",
     })),
-    tasks: data.tasks ?? [],
+    tasks: (data.tasks ?? []).map((task) => ({
+      ...task,
+      points: sanitizeNumber(task.points) || 1,
+      startAt: task.startAt ?? task.createdAt,
+      deadlineAt: task.deadlineAt ?? "",
+      status: task.status === "archived" ? "archived" : "active",
+    })),
     responses: data.responses ?? {},
     progressUpdates: data.progressUpdates ?? {},
     repoUpdates: data.repoUpdates ?? [],
@@ -254,6 +286,14 @@ function sanitizeData(data: StudioData): StudioData {
 
 function taskIsForMember(task: StudioTask, memberId: string) {
   return task.scope === "all" || task.memberId === memberId;
+}
+
+function taskStatus(task: StudioTask) {
+  return task.status === "archived" ? "archived" : "active";
+}
+
+function isActiveTask(task: StudioTask) {
+  return taskStatus(task) === "active";
 }
 
 function responseKey(taskId: string, memberId: string) {
@@ -377,8 +417,9 @@ function formatPercent(value: number) {
 }
 
 function createStats(data: StudioData) {
+  const activeTasks = data.tasks.filter(isActiveTask);
   const memberStats = data.members.map((member) => {
-    const assignedTasks = data.tasks.filter((task) => taskIsForMember(task, member.id));
+    const assignedTasks = activeTasks.filter((task) => taskIsForMember(task, member.id));
     const responses = assignedTasks
       .map((task) => ({ task, response: getResponse(data, task.id, member.id) }))
       .filter((item): item is { task: StudioTask; response: TaskResponse } =>
@@ -432,7 +473,7 @@ function createStats(data: StudioData) {
     if (b.points !== a.points) return b.points - a.points;
     return b.completed - a.completed;
   });
-  const taskMetrics = data.tasks.map((task) => {
+  const taskMetrics = activeTasks.map((task) => {
     const visibleMemberIds = new Set(
       data.members
         .filter((member) => !member.hidden && taskIsForMember(task, member.id))
@@ -477,6 +518,8 @@ function createStats(data: StudioData) {
     allMemberStats: memberStats,
     memberStats: rankedMembers,
     taskMetrics,
+    activeTasks,
+    archivedTasks: data.tasks.filter((task) => taskStatus(task) === "archived"),
     leader,
     worst,
     approvedTotal,
@@ -757,7 +800,9 @@ function MemberView({
   const [showNicknameHint, setShowNicknameHint] = useState(
     window.localStorage.getItem(NICKNAME_HINT_KEY) !== "seen",
   );
-  const memberTasks = data.tasks.filter((task) => taskIsForMember(task, activeMember.member.id));
+  const memberTasks = data.tasks.filter(
+    (task) => isActiveTask(task) && taskIsForMember(task, activeMember.member.id),
+  );
 
   async function refreshMemberData() {
     setRefreshing(true);
@@ -1078,7 +1123,950 @@ function MemberView({
   );
 }
 
+type AdminSection = "overview" | "tasks" | "members" | "logs" | "archive" | "settings";
+
+function formatDateTime(value?: string) {
+  if (!value) return "Not set";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not set";
+  return date.toLocaleString();
+}
+
+function toDateTimeInputValue(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function fromDateTimeInputValue(value: string) {
+  return value ? new Date(value).toISOString() : "";
+}
+
+function statusTone(status?: TaskResponse["status"]) {
+  if (status === "approved") return "bg-emerald-50 text-emerald-950 border-emerald-700";
+  if (status === "rejected") return "bg-red-50 text-red-700 border-red-700";
+  if (status === "submitted") return "bg-yellow-50 text-yellow-800 border-yellow-700";
+  return "bg-zinc-50 text-foreground/65 border-ink/30";
+}
+
+function CompactMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border border-ink/10 bg-white px-4 py-3">
+      <div className="text-2xl font-bold leading-none">{value}</div>
+      <div className="mt-1 text-xs font-medium text-foreground/55">{label}</div>
+    </div>
+  );
+}
+
 function AdminView({
+  data,
+  stats,
+  saveStatus,
+  isDirty,
+  isSaving,
+  adminQueue,
+  queueStatus,
+  tokenDialogOpen,
+  tokenDraft,
+  onLogout,
+  onAddTask,
+  onUpdateTask,
+  onRemoveTask,
+  onManualApprove,
+  onApproveQueuedSubmission,
+  onRejectQueuedSubmission,
+  onSaveQueuedProgress,
+  onDismissQueuedProgress,
+  onAddProgressUpdate,
+  onReviewAnswer,
+  onUpdateMember,
+  onUpdateSettings,
+  onMarkRepoUpdateSeen,
+  onRefreshAdminQueue,
+  onTokenDraftChange,
+  onCloseTokenDialog,
+  onConfirmTokenAndSave,
+  onSaveToGithub,
+}: {
+  data: StudioData;
+  stats: ReturnType<typeof createStats>;
+  saveStatus: string;
+  isDirty: boolean;
+  isSaving: boolean;
+  adminQueue: AdminQueue;
+  queueStatus: string;
+  tokenDialogOpen: boolean;
+  tokenDraft: string;
+  onLogout: () => void;
+  onAddTask: (task: Omit<StudioTask, "id" | "createdAt">) => void;
+  onUpdateTask: (taskId: string, updates: Partial<StudioTask>) => void;
+  onRemoveTask: (taskId: string) => void;
+  onManualApprove: (task: StudioTask, memberId: string) => void;
+  onApproveQueuedSubmission: (item: QueuedSubmission) => void;
+  onRejectQueuedSubmission: (item: QueuedSubmission) => void;
+  onSaveQueuedProgress: (item: QueuedProgressUpdate) => void;
+  onDismissQueuedProgress: (id: string) => void;
+  onAddProgressUpdate: (task: StudioTask, memberId: string, note: string) => void;
+  onReviewAnswer: (taskId: string, memberId: string, status: "approved" | "rejected") => void;
+  onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
+  onUpdateSettings: (settings: Partial<StudioSettings>) => void;
+  onMarkRepoUpdateSeen: (updateId: string) => void;
+  onRefreshAdminQueue: () => void;
+  onTokenDraftChange: (value: string) => void;
+  onCloseTokenDialog: () => void;
+  onConfirmTokenAndSave: () => void;
+  onSaveToGithub: () => void;
+}) {
+  const [section, setSection] = useState<AdminSection>("overview");
+  const [navOpen, setNavOpen] = useState(false);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskQuestion, setTaskQuestion] = useState("");
+  const [taskPoints, setTaskPoints] = useState(1);
+  const [taskScope, setTaskScope] = useState<"all" | "member">("all");
+  const [taskMemberId, setTaskMemberId] = useState("");
+  const [taskStartAt, setTaskStartAt] = useState("");
+  const [taskDeadlineAt, setTaskDeadlineAt] = useState("");
+  const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [selectedMemberId, setSelectedMemberId] = useState(data.members[0]?.id ?? "");
+  const [manualApproveMembers, setManualApproveMembers] = useState<Record<string, string>>({});
+  const [progressMembers, setProgressMembers] = useState<Record<string, string>>({});
+  const [progressNotes, setProgressNotes] = useState<Record<string, string>>({});
+  const [logMode, setLogMode] = useState<"task" | "member">("task");
+  const [query, setQuery] = useState("");
+
+  const activeTasks = data.tasks.filter(isActiveTask);
+  const archivedTasks = data.tasks.filter((task) => taskStatus(task) === "archived");
+  const visibleArchive = archivedTasks.filter((task) =>
+    `${task.title} ${task.question}`.toLowerCase().includes(query.toLowerCase()),
+  );
+  const selectedTask =
+    data.tasks.find((task) => task.id === selectedTaskId) ?? activeTasks[0] ?? archivedTasks[0];
+  const selectedMember =
+    data.members.find((member) => member.id === selectedMemberId) ?? data.members[0];
+  const pendingSubmissions = data.tasks.flatMap((task) =>
+    Object.values(data.responses[task.id] ?? {})
+      .filter((response) => response.status === "submitted")
+      .map((response) => ({
+        id: `${task.id}:${response.memberId}`,
+        taskId: task.id,
+        memberId: response.memberId,
+        memberName: response.memberName,
+        answer: response.answer,
+        submittedAt: response.submittedAt,
+      })),
+  );
+  const queuedProgress = adminQueue.progressUpdates;
+  const unseenUpdates = data.repoUpdates?.filter((update) => !update.seen) ?? [];
+  const reviewedTotal = stats.memberStats.reduce((sum, item) => sum + item.reviewed, 0);
+  const submittedTotal = stats.memberStats.reduce((sum, item) => sum + item.submitted, 0);
+  const completionRate =
+    stats.taskMetrics.reduce((sum, item) => sum + item.expected, 0) > 0
+      ? Math.round(
+          (stats.taskMetrics.reduce((sum, item) => sum + item.received, 0) /
+            stats.taskMetrics.reduce((sum, item) => sum + item.expected, 0)) *
+            100,
+        )
+      : 0;
+  const reviewChartData = [
+    { name: "Approved", value: stats.memberStats.reduce((sum, item) => sum + item.approved, 0) },
+    { name: "Pending", value: stats.pendingTotal },
+    { name: "Rejected", value: stats.memberStats.reduce((sum, item) => sum + item.rejected, 0) },
+  ];
+
+  function go(nextSection: AdminSection) {
+    setSection(nextSection);
+    setNavOpen(false);
+  }
+
+  function submitTask() {
+    if (!taskTitle.trim() || !taskQuestion.trim()) return;
+    if (taskScope === "member" && !taskMemberId) return;
+
+    onAddTask({
+      title: taskTitle.trim(),
+      question: taskQuestion.trim(),
+      points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
+      scope: taskScope,
+      memberId: taskScope === "member" ? taskMemberId : undefined,
+      startAt: fromDateTimeInputValue(taskStartAt) || new Date().toISOString(),
+      deadlineAt: fromDateTimeInputValue(taskDeadlineAt),
+      status: "active",
+    });
+    setTaskTitle("");
+    setTaskQuestion("");
+    setTaskPoints(1);
+    setTaskScope("all");
+    setTaskMemberId("");
+    setTaskStartAt("");
+    setTaskDeadlineAt("");
+  }
+
+  function assignedMembers(task: StudioTask) {
+    return data.members.filter((member) => taskIsForMember(task, member.id));
+  }
+
+  function taskMetric(task: StudioTask) {
+    const members = assignedMembers(task);
+    const responses = Object.values(data.responses[task.id] ?? {});
+    return {
+      expected: members.filter((member) => !member.hidden).length,
+      received: responses.length,
+      approved: responses.filter((response) => response.status === "approved").length,
+      rejected: responses.filter((response) => response.status === "rejected").length,
+      pending: responses.filter((response) => response.status === "submitted").length,
+    };
+  }
+
+  function renderTaskRows(tasks: StudioTask[]) {
+    if (tasks.length === 0) {
+      return <p className="rounded-lg border border-dashed border-ink/20 bg-white p-6 text-sm text-foreground/55">No tasks here yet.</p>;
+    }
+
+    return (
+      <div className="grid gap-2">
+        {tasks.map((task) => {
+          const metric = taskMetric(task);
+          const isSelected = selectedTask?.id === task.id;
+          return (
+            <button
+              key={task.id}
+              type="button"
+              onClick={() => setSelectedTaskId(task.id)}
+              className={`rounded-lg border p-3 text-start transition hover:border-ink/40 hover:bg-white ${
+                isSelected ? "border-ink bg-white shadow-sm" : "border-ink/10 bg-white/70"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-lg font-bold">{task.title}</div>
+                  <div className="mt-1 text-xs text-foreground/55">
+                    {task.scope === "all"
+                      ? "All team"
+                      : data.members.find((member) => member.id === task.memberId)?.name ?? "One member"}{" "}
+                    | {task.points || 1} pts | deadline {formatDateTime(task.deadlineAt)}
+                  </div>
+                </div>
+                <span className="shrink-0 rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
+                  {metric.received}/{metric.expected}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/60">
+                <span>Pending {metric.pending}</span>
+                <span>Approved {metric.approved}</span>
+                <span>Rejected {metric.rejected}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderTaskDetail(task?: StudioTask) {
+    if (!task) return null;
+    const members = assignedMembers(task);
+    const responses = data.responses[task.id] ?? {};
+    const selectedManualMember = manualApproveMembers[task.id] ?? "";
+    const selectedProgressMember = progressMembers[task.id] ?? "";
+    const progressNote = progressNotes[task.id] ?? "";
+
+    return (
+      <section className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-2xl font-bold">{task.title}</h3>
+              <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
+                {taskStatus(task)}
+              </span>
+            </div>
+            <p className="mt-1 max-w-2xl whitespace-pre-wrap text-sm leading-6 text-foreground/65">
+              {task.question}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
+              <span>Start: {formatDateTime(task.startAt)}</span>
+              <span>Deadline: {formatDateTime(task.deadlineAt)}</span>
+              <span>{task.points || 1} points</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {isActiveTask(task) ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onUpdateTask(task.id, { status: "archived" })}
+                className="border border-ink/20 bg-paper"
+              >
+                <Archive data-icon="inline-start" />
+                Archive
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={() => onUpdateTask(task.id, { status: "active" })}
+                className="border border-ink/20"
+              >
+                <RotateCcw data-icon="inline-start" />
+                Restore
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => onRemoveTask(task.id)}
+              className="border border-red-200 bg-red-50 text-red-700"
+              aria-label="Delete task"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <label className="grid gap-1 text-sm font-bold">
+            Start
+            <Input
+              type="datetime-local"
+              value={toDateTimeInputValue(task.startAt)}
+              onChange={(event) =>
+                onUpdateTask(task.id, { startAt: fromDateTimeInputValue(event.target.value) })
+              }
+              className="border border-ink/20 bg-paper"
+            />
+          </label>
+          <label className="grid gap-1 text-sm font-bold">
+            Deadline
+            <Input
+              type="datetime-local"
+              value={toDateTimeInputValue(task.deadlineAt)}
+              onChange={(event) =>
+                onUpdateTask(task.id, { deadlineAt: fromDateTimeInputValue(event.target.value) })
+              }
+              className="border border-ink/20 bg-paper"
+            />
+          </label>
+        </div>
+
+        <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr]">
+          <div className="rounded-lg border border-ink/10 bg-paper p-3">
+            <div className="mb-3 flex items-center gap-2 font-bold">
+              <Star className="size-4" />
+              Manual approval
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <select
+                value={selectedManualMember}
+                onChange={(event) =>
+                  setManualApproveMembers((current) => ({
+                    ...current,
+                    [task.id]: event.target.value,
+                  }))
+                }
+                className="h-10 rounded-md border border-ink/20 bg-white px-3 text-sm"
+              >
+                <option value="">Choose member</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+              </select>
+              <Button type="button" onClick={() => onManualApprove(task, selectedManualMember)}>
+                <Check data-icon="inline-start" />
+                Approve
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-ink/10 bg-yellow-50 p-3">
+            <div className="mb-3 flex items-center gap-2 font-bold">
+              <Bell className="size-4" />
+              Progress update
+            </div>
+            <div className="grid gap-2">
+              <select
+                value={selectedProgressMember}
+                onChange={(event) =>
+                  setProgressMembers((current) => ({ ...current, [task.id]: event.target.value }))
+                }
+                className="h-10 rounded-md border border-ink/20 bg-white px-3 text-sm"
+              >
+                <option value="">Choose member</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
+              </select>
+              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                <Input
+                  value={progressNote}
+                  onChange={(event) =>
+                    setProgressNotes((current) => ({ ...current, [task.id]: event.target.value }))
+                  }
+                  placeholder="Quick note"
+                  className="border border-ink/20 bg-white"
+                />
+                <Button
+                  type="button"
+                  onClick={() => {
+                    onAddProgressUpdate(task, selectedProgressMember, progressNote);
+                    setProgressNotes((current) => ({ ...current, [task.id]: "" }));
+                  }}
+                  className="bg-yellow-100 text-foreground hover:bg-yellow-200"
+                >
+                  <Plus data-icon="inline-start" />
+                  Add
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          {members.map((member) => {
+            const response = responses[member.id];
+            const progress = (data.progressUpdates?.[task.id] ?? []).filter(
+              (update) => update.memberId === member.id,
+            );
+            return (
+              <details key={member.id} className="rounded-lg border border-ink/10 bg-white p-3">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <strong className="truncate">{member.name}</strong>
+                    <div className="text-xs text-foreground/55">
+                      {response ? `Submitted ${formatDateTime(response.submittedAt)}` : "No final submission"}
+                    </div>
+                  </div>
+                  <span className={`rounded-full border px-2 py-1 text-xs font-bold ${statusTone(response?.status)}`}>
+                    {response?.status ?? "missing"}
+                  </span>
+                </summary>
+                {response && (
+                  <div className="mt-3 rounded-md border border-ink/10 bg-paper p-3">
+                    <p className="whitespace-pre-wrap leading-7">{response.answer}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => onReviewAnswer(task.id, member.id, "approved")}
+                      >
+                        <Check data-icon="inline-start" />
+                        Approve
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onReviewAnswer(task.id, member.id, "rejected")}
+                        className="border border-ink/20 bg-white"
+                      >
+                        <RotateCcw data-icon="inline-start" />
+                        Reject
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {progress.length > 0 && (
+                  <div className="mt-3 grid gap-2">
+                    {progress.map((update) => (
+                      <div key={update.id} className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm">
+                        <p className="whitespace-pre-wrap leading-6">{update.note}</p>
+                        <p className="mt-1 text-xs text-foreground/50">{formatDateTime(update.createdAt)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </details>
+            );
+          })}
+        </div>
+      </section>
+    );
+  }
+
+  function renderMemberLog(member: Member) {
+    const memberTasks = data.tasks.filter((task) => taskIsForMember(task, member.id));
+    return (
+      <div className="grid gap-2">
+        <div className="grid gap-2 sm:grid-cols-4">
+          <CompactMetric label="Old tasks" value={member.baseCompleted ?? 0} />
+          <CompactMetric label="Old approved" value={member.baseApproved ?? 0} />
+          <CompactMetric label="Old rejected" value={member.baseRejected ?? 0} />
+          <CompactMetric label="Old points" value={member.basePoints ?? 0} />
+        </div>
+        {memberTasks.map((task) => {
+          const response = getResponse(data, task.id, member.id);
+          const progress = (data.progressUpdates?.[task.id] ?? []).filter(
+            (update) => update.memberId === member.id,
+          );
+          return (
+            <div key={task.id} className="rounded-lg border border-ink/10 bg-white p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <strong>{task.title}</strong>
+                  <div className="text-xs text-foreground/55">
+                    {taskStatus(task)} | deadline {formatDateTime(task.deadlineAt)}
+                  </div>
+                </div>
+                <span className={`rounded-full border px-2 py-1 text-xs font-bold ${statusTone(response?.status)}`}>
+                  {response?.status ?? "missing"}
+                </span>
+              </div>
+              {response && <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{response.answer}</p>}
+              {progress.length > 0 && (
+                <p className="mt-2 text-xs font-bold text-yellow-800">{progress.length} progress updates</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const navItems: Array<{ id: AdminSection; label: string; icon: typeof BarChart3 }> = [
+    { id: "overview", label: "Overview", icon: BarChart3 },
+    { id: "tasks", label: "Tasks", icon: ClipboardList },
+    { id: "members", label: "Members", icon: Users },
+    { id: "logs", label: "Logs", icon: ListChecks },
+    { id: "archive", label: "Archive", icon: Archive },
+    { id: "settings", label: "Settings", icon: Settings },
+  ];
+
+  const nav = (
+    <nav className="flex h-full flex-col gap-1">
+      <div className="mb-5 flex items-center gap-3 px-2">
+        <Logo size="size-10" />
+        <div>
+          <div className="text-lg font-bold leading-none">Hivo Admin</div>
+          <div className="mt-1 text-xs text-foreground/50">Team operations</div>
+        </div>
+      </div>
+      {navItems.map((item) => {
+        const Icon = item.icon;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => go(item.id)}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-start text-sm font-bold transition ${
+              section === item.id ? "bg-ink text-white" : "text-foreground/70 hover:bg-ink/5"
+            }`}
+          >
+            <Icon className="size-4" />
+            {item.label}
+          </button>
+        );
+      })}
+      <div className="mt-auto rounded-lg border border-ink/10 bg-white p-3 text-xs text-foreground/60">
+        {isDirty ? "Unsaved changes" : "All changes saved"}
+      </div>
+    </nav>
+  );
+
+  return (
+    <div className="min-h-screen bg-[#f7f6f0] text-foreground" dir="rtl">
+      <aside className="fixed inset-y-0 right-0 z-30 hidden w-64 border-l border-ink/10 bg-paper/95 p-4 backdrop-blur lg:block">
+        {nav}
+      </aside>
+
+      {navOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-ink/35"
+            onClick={() => setNavOpen(false)}
+            aria-label="Close navigation"
+          />
+          <aside className="relative mr-auto h-full w-72 border-l border-ink/10 bg-paper p-4 shadow-xl">
+            <button
+              type="button"
+              onClick={() => setNavOpen(false)}
+              className="absolute left-3 top-3 rounded-full border border-ink/10 bg-white p-2"
+              aria-label="Close"
+            >
+              <X className="size-4" />
+            </button>
+            {nav}
+          </aside>
+        </div>
+      )}
+
+      <main className="lg:pr-64">
+        <header className="sticky top-0 z-20 border-b border-ink/10 bg-[#f7f6f0]/90 px-4 py-3 backdrop-blur">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => setNavOpen(true)}
+                className="border border-ink/20 bg-white lg:hidden"
+                aria-label="Open navigation"
+              >
+                <Menu className="size-4" />
+              </Button>
+              <div>
+                <h1 className="text-xl font-bold">{navItems.find((item) => item.id === section)?.label}</h1>
+                <p className="hidden text-xs text-foreground/50 sm:block">
+                  Active tasks stay visible. Archived tasks keep their full log.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onRefreshAdminQueue}
+                className="hidden border border-ink/20 bg-white sm:inline-flex"
+              >
+                <RefreshCw data-icon="inline-start" />
+                Refresh
+              </Button>
+              <Button type="button" onClick={onSaveToGithub} disabled={isSaving}>
+                <Save data-icon="inline-start" />
+                {isSaving ? "Saving" : "Save"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onLogout}
+                className="border border-ink/20 bg-white"
+              >
+                <LogOut className="size-4" />
+              </Button>
+            </div>
+          </div>
+          {(saveStatus || queueStatus) && (
+            <p className="mx-auto mt-2 max-w-7xl text-xs font-bold text-foreground/55">
+              {saveStatus || queueStatus}
+            </p>
+          )}
+        </header>
+
+        <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 pb-24">
+          {section === "overview" && (
+            <>
+              <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                <CompactMetric label="Active tasks" value={activeTasks.length} />
+                <CompactMetric label="Archived" value={archivedTasks.length} />
+                <CompactMetric label="Pending review" value={stats.pendingTotal} />
+                <CompactMetric label="Completion" value={`${completionRate}%`} />
+                <CompactMetric label="Team points" value={stats.pointsTotal} />
+              </section>
+              <section className="grid gap-5 lg:grid-cols-[1.3fr_.7fr]">
+                <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-xl font-bold">Review status</h2>
+                      <p className="text-sm text-foreground/55">Approved, pending, and rejected across active tasks.</p>
+                    </div>
+                    <Activity className="size-5 text-foreground/40" />
+                  </div>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={reviewChartData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="name" />
+                        <YAxis allowDecimals={false} />
+                        <RechartsTooltip />
+                        <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#49b6e5" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+                <div className="grid gap-3">
+                  <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                    <h2 className="text-xl font-bold">Quick read</h2>
+                    <div className="mt-3 grid gap-2 text-sm">
+                      <div className="flex justify-between gap-3"><span>Leader</span><strong>{stats.leader?.member.name ?? "N/A"}</strong></div>
+                      <div className="flex justify-between gap-3"><span>Needs follow-up</span><strong>{stats.worst?.member.name ?? "N/A"}</strong></div>
+                      <div className="flex justify-between gap-3"><span>Submitted</span><strong>{submittedTotal}</strong></div>
+                      <div className="flex justify-between gap-3"><span>Reviewed</span><strong>{reviewedTotal}</strong></div>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                    <h2 className="text-xl font-bold">Pending queue</h2>
+                    <p className="mt-1 text-sm text-foreground/55">{pendingSubmissions.length} final submissions need a decision.</p>
+                    {unseenUpdates.length > 0 && (
+                      <p className="mt-2 text-sm font-bold text-yellow-800">{unseenUpdates.length} repo updates unseen.</p>
+                    )}
+                  </div>
+                </div>
+              </section>
+            </>
+          )}
+
+          {section === "tasks" && (
+            <section className="grid gap-5 xl:grid-cols-[380px_1fr]">
+              <div className="grid gap-4">
+                <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                  <h2 className="text-xl font-bold">New task</h2>
+                  <div className="mt-3 grid gap-3">
+                    <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Task title" className="border border-ink/20 bg-paper" />
+                    <Textarea value={taskQuestion} onChange={(event) => setTaskQuestion(event.target.value)} placeholder="Question or instructions" className="min-h-24 border border-ink/20 bg-paper" />
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Input type="number" min={1} value={taskPoints} onChange={(event) => setTaskPoints(Number(event.target.value))} placeholder="Points" className="border border-ink/20 bg-paper" />
+                      <select
+                        value={taskScope === "all" ? "all" : taskMemberId}
+                        onChange={(event) => {
+                          if (event.target.value === "all") {
+                            setTaskScope("all");
+                            setTaskMemberId("");
+                          } else {
+                            setTaskScope("member");
+                            setTaskMemberId(event.target.value);
+                          }
+                        }}
+                        className="h-10 rounded-md border border-ink/20 bg-paper px-3 text-sm"
+                      >
+                        <option value="all">All team</option>
+                        {data.members.map((member) => (
+                          <option key={member.id} value={member.id}>{member.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="grid gap-1 text-xs font-bold">
+                        Start
+                        <Input type="datetime-local" value={taskStartAt} onChange={(event) => setTaskStartAt(event.target.value)} className="border border-ink/20 bg-paper" />
+                      </label>
+                      <label className="grid gap-1 text-xs font-bold">
+                        Deadline
+                        <Input type="datetime-local" value={taskDeadlineAt} onChange={(event) => setTaskDeadlineAt(event.target.value)} className="border border-ink/20 bg-paper" />
+                      </label>
+                    </div>
+                    <Button type="button" onClick={submitTask}>
+                      <Plus data-icon="inline-start" />
+                      Add task
+                    </Button>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                  <h2 className="mb-3 text-xl font-bold">Active tasks</h2>
+                  {renderTaskRows(activeTasks)}
+                </div>
+              </div>
+              {renderTaskDetail(selectedTask && isActiveTask(selectedTask) ? selectedTask : activeTasks[0])}
+            </section>
+          )}
+
+          {section === "members" && (
+            <section className="grid gap-4">
+              {data.members.map((member) => {
+                const memberScore = stats.allMemberStats.find((item) => item.member.id === member.id);
+                return (
+                  <details key={member.id} className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                    <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <strong className="text-xl">{member.name}</strong>
+                          <span className={`rounded-full border px-2 py-1 text-xs font-bold ${member.hidden ? "border-zinc-300 bg-zinc-100 text-zinc-600" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+                            {member.hidden ? "Hidden" : "Visible"}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
+                          <span>Submitted {memberScore?.submitted ?? 0}</span>
+                          <span>Approved {memberScore?.approved ?? 0}</span>
+                          <span>Rejected {memberScore?.rejected ?? 0}</span>
+                          <span>Points {memberScore?.points ?? 0}</span>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onUpdateMember(member.id, { hidden: !member.hidden });
+                        }}
+                        className="border border-ink/20 bg-paper"
+                      >
+                        {member.hidden ? <Eye data-icon="inline-start" /> : <EyeOff data-icon="inline-start" />}
+                        {member.hidden ? "Show" : "Hide"}
+                      </Button>
+                    </summary>
+                    <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr]">
+                      <div className="grid gap-3">
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          {([
+                            ["Old tasks", "baseCompleted", "bg-white"],
+                            ["Old approved", "baseApproved", "bg-emerald-50"],
+                            ["Old rejected", "baseRejected", "bg-red-50"],
+                            ["Old points", "basePoints", "bg-yellow-50"],
+                          ] as const).map(([label, field, bg]) => (
+                            <label key={field} className="grid gap-1 text-xs font-bold">
+                              {label}
+                              <Input
+                                type="number"
+                                min={0}
+                                value={member[field] ?? 0}
+                                onChange={(event) => onUpdateMember(member.id, { [field]: sanitizeNumber(event.target.value) })}
+                                className={`border border-ink/20 text-center ${bg}`}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                        <Input value={member.publicFlag ?? ""} onChange={(event) => onUpdateMember(member.id, { publicFlag: event.target.value })} placeholder="Public flag" className="border border-ink/20 bg-red-50" />
+                        <Input value={member.adminNote ?? ""} onChange={(event) => onUpdateMember(member.id, { adminNote: event.target.value })} placeholder="Private admin note" className="border border-ink/20 bg-paper" />
+                        <Input value={member.repoUrl ?? ""} onChange={(event) => onUpdateMember(member.id, { repoUrl: event.target.value })} placeholder="Repo URL" dir="ltr" className="border border-ink/20 bg-paper text-left" />
+                        <Input value={member.aliases.join(", ")} onChange={(event) => onUpdateMember(member.id, { aliases: uniqueText(event.target.value.split(",")) })} placeholder="Aliases" className="border border-ink/20 bg-paper" />
+                      </div>
+                      <div>
+                        <h3 className="mb-3 text-lg font-bold">Member log</h3>
+                        {renderMemberLog(member)}
+                      </div>
+                    </div>
+                  </details>
+                );
+              })}
+            </section>
+          )}
+
+          {section === "logs" && (
+            <section className="grid gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink/10 bg-white p-3 shadow-sm">
+                <div className="flex rounded-lg border border-ink/10 bg-paper p-1">
+                  <button type="button" onClick={() => setLogMode("task")} className={`rounded-md px-3 py-2 text-sm font-bold ${logMode === "task" ? "bg-ink text-white" : ""}`}>By task</button>
+                  <button type="button" onClick={() => setLogMode("member")} className={`rounded-md px-3 py-2 text-sm font-bold ${logMode === "member" ? "bg-ink text-white" : ""}`}>By member</button>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-foreground/55">
+                  <Search className="size-4" />
+                  Pick a task or member to inspect the full trail.
+                </div>
+              </div>
+              {logMode === "task" ? (
+                <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
+                  <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">{renderTaskRows(data.tasks)}</div>
+                  {renderTaskDetail(selectedTask)}
+                </div>
+              ) : (
+                <div className="grid gap-5 xl:grid-cols-[300px_1fr]">
+                  <div className="grid gap-2 rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                    {data.members.map((member) => (
+                      <button
+                        key={member.id}
+                        type="button"
+                        onClick={() => setSelectedMemberId(member.id)}
+                        className={`rounded-lg border p-3 text-start font-bold ${selectedMember?.id === member.id ? "border-ink bg-paper" : "border-ink/10 bg-white"}`}
+                      >
+                        {member.name}
+                      </button>
+                    ))}
+                  </div>
+                  {selectedMember && (
+                    <section className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                      <h2 className="mb-3 text-2xl font-bold">{selectedMember.name}</h2>
+                      {renderMemberLog(selectedMember)}
+                    </section>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
+          {section === "archive" && (
+            <section className="grid gap-5 xl:grid-cols-[360px_1fr]">
+              <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                <label className="mb-3 flex items-center gap-2 rounded-lg border border-ink/10 bg-paper px-3 py-2">
+                  <Search className="size-4 text-foreground/40" />
+                  <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search archive" className="w-full bg-transparent text-sm outline-none" />
+                </label>
+                {renderTaskRows(visibleArchive)}
+              </div>
+              {renderTaskDetail(selectedTask && taskStatus(selectedTask) === "archived" ? selectedTask : visibleArchive[0])}
+            </section>
+          )}
+
+          {section === "settings" && (
+            <section className="grid gap-5 lg:grid-cols-2">
+              <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                <h2 className="text-xl font-bold">Access</h2>
+                <div className="mt-3 grid gap-3">
+                  <Input value={data.settings?.adminPassword ?? DEFAULT_ADMIN_PASSWORD} onChange={(event) => onUpdateSettings({ adminPassword: event.target.value })} placeholder="Admin password" className="border border-ink/20 bg-paper" />
+                  <Input value={data.settings?.statsPassword ?? DEFAULT_STATS_PASSWORD} onChange={(event) => onUpdateSettings({ statsPassword: event.target.value })} placeholder="Stats password" className="border border-ink/20 bg-paper" />
+                  <div className="rounded-lg border border-ink/10 bg-paper p-3 text-sm font-bold" dir="ltr">API: {HIVO_API_URL || "not configured"}</div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                <h2 className="text-xl font-bold">Repo updates</h2>
+                <div className="mt-3 grid gap-2">
+                  {unseenUpdates.length === 0 ? (
+                    <p className="text-sm text-foreground/55">No unseen repo updates.</p>
+                  ) : (
+                    unseenUpdates.map((update) => {
+                      const member = data.members.find((item) => item.id === update.memberId);
+                      return (
+                        <div key={update.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ink/10 bg-paper p-3">
+                          <div>
+                            <strong>{member?.name ?? update.memberId}</strong>
+                            <p className="text-xs text-foreground/50">{formatDateTime(update.createdAt)}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            {member?.repoUrl && (
+                              <Button type="button" size="sm" onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}>
+                                <ExternalLink data-icon="inline-start" />
+                                Repo
+                              </Button>
+                            )}
+                            <Button type="button" size="sm" variant="outline" onClick={() => onMarkRepoUpdateSeen(update.id)} className="border border-ink/20 bg-white">Done</Button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+              <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm lg:col-span-2">
+                <h2 className="text-xl font-bold">Queued progress</h2>
+                {queuedProgress.length === 0 ? (
+                  <p className="mt-2 text-sm text-foreground/55">No queued progress updates.</p>
+                ) : (
+                  <div className="mt-3 grid gap-2">
+                    {queuedProgress.map((item) => (
+                      <div key={item.id} className="rounded-lg border border-ink/10 bg-yellow-50 p-3">
+                        <strong>{item.memberName}</strong>
+                        <p className="text-sm">{item.note}</p>
+                        <div className="mt-2 flex gap-2">
+                          <Button type="button" size="sm" onClick={() => onSaveQueuedProgress(item)}>Save</Button>
+                          <Button type="button" size="sm" variant="outline" onClick={() => onDismissQueuedProgress(item.id)} className="border border-ink/20 bg-white">Dismiss</Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
+      </main>
+
+      {tokenDialogOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 px-4">
+          <section className="w-full max-w-md rounded-xl border border-ink/10 bg-white p-5 shadow-xl">
+            <h2 className="text-xl font-bold">GitHub token required</h2>
+            <p className="mt-1 text-sm text-foreground/55">Paste the token once to save changes.</p>
+            <Input
+              value={tokenDraft}
+              onChange={(event) => onTokenDraftChange(event.target.value)}
+              placeholder="ghp_..."
+              className="mt-4 border border-ink/20 bg-paper"
+              dir="ltr"
+            />
+            <div className="mt-4 flex gap-2">
+              <Button type="button" onClick={onConfirmTokenAndSave}>Save</Button>
+              <Button type="button" variant="outline" onClick={onCloseTokenDialog} className="border border-ink/20 bg-white">Cancel</Button>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LegacyAdminView({
   data,
   stats,
   saveStatus,
@@ -1965,6 +2953,156 @@ function StatsView({
   stats: ReturnType<typeof createStats>;
   onLogout: () => void;
 }) {
+  const activeTasks = data.tasks.filter(isActiveTask);
+  const visibleStats = stats.memberStats;
+  const leader = visibleStats[0];
+  const needsFollowUp = [...visibleStats]
+    .filter((item) => item.assignedTasks > 0)
+    .sort((a, b) => {
+      if (a.responseRate !== b.responseRate) return a.responseRate - b.responseRate;
+      return b.pending - a.pending;
+    })[0];
+  const expectedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.expected, 0);
+  const receivedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.received, 0);
+  const completionRate = expectedTotal > 0 ? Math.round((receivedTotal / expectedTotal) * 100) : 0;
+  const approved = visibleStats.reduce((sum, item) => sum + item.approved, 0);
+  const rejected = visibleStats.reduce((sum, item) => sum + item.rejected, 0);
+  const chartData = [
+    { name: "Accepted", value: approved, fill: "#10b981" },
+    { name: "Pending", value: stats.pendingTotal, fill: "#f59e0b" },
+    { name: "Rejected", value: rejected, fill: "#ef4444" },
+  ].filter((item) => item.value > 0);
+  const teamHealth =
+    completionRate >= 80 && stats.pendingTotal <= 2
+      ? "Stable"
+      : completionRate >= 45
+        ? "Needs follow-up"
+        : "At risk";
+
+  return (
+    <div className="min-h-screen bg-[#f7f6f0] text-foreground" dir="rtl">
+      <main className="mx-auto grid max-w-lg gap-4 px-4 py-5 md:max-w-4xl md:grid-cols-2 md:py-8">
+        <header className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm md:col-span-2">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-foreground/50">Hivo Studio</div>
+              <h1 className="mt-1 text-3xl font-bold">Team status</h1>
+              <p className="mt-2 text-sm leading-6 text-foreground/60">
+                Quick read for active tasks only. Archived tasks stay out of the daily score.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onLogout}
+              className="shrink-0 border border-ink/20 bg-paper"
+            >
+              <LogOut className="size-4" />
+            </Button>
+          </div>
+        </header>
+
+        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm md:col-span-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-foreground/50">Team health</div>
+              <div className="mt-1 text-4xl font-bold">{teamHealth}</div>
+            </div>
+            <div className="rounded-full border border-ink/10 bg-paper px-4 py-3 text-2xl font-bold">
+              {completionRate}%
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            <CompactMetric label="Active" value={activeTasks.length} />
+            <CompactMetric label="Pending" value={stats.pendingTotal} />
+            <CompactMetric label="Done" value={receivedTotal} />
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-bold">Review mix</h2>
+          <div className="mt-3 h-56">
+            {chartData.length === 0 ? (
+              <div className="grid h-full place-items-center rounded-xl border border-dashed border-ink/15 text-sm text-foreground/50">
+                No submissions yet
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={chartData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={80} paddingAngle={4}>
+                    {chartData.map((entry) => (
+                      <Cell key={entry.name} fill={entry.fill} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+          <div className="mt-3 grid gap-2 text-sm">
+            {chartData.map((item) => (
+              <div key={item.name} className="flex items-center justify-between gap-3">
+                <span>{item.name}</span>
+                <strong>{item.value}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid gap-3">
+          <div className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
+            <div className="text-sm font-bold text-foreground/50">Top performer</div>
+            <div className="mt-1 text-2xl font-bold">{leader?.member.name ?? "N/A"}</div>
+            <p className="mt-1 text-sm text-foreground/55">
+              {leader ? `${leader.points} points / ${leader.completed} accepted tasks` : "No data yet"}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
+            <div className="text-sm font-bold text-foreground/50">Needs follow-up</div>
+            <div className="mt-1 text-2xl font-bold">{needsFollowUp?.member.name ?? "N/A"}</div>
+            <p className="mt-1 text-sm text-foreground/55">
+              {needsFollowUp
+                ? `${formatPercent(needsFollowUp.responseRate)} submitted / ${needsFollowUp.pending} pending`
+                : "No active assignments"}
+            </p>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm md:col-span-2">
+          <h2 className="text-xl font-bold">Members</h2>
+          <div className="mt-3 grid gap-2">
+            {visibleStats.map((item) => (
+              <details key={item.member.id} className="rounded-xl border border-ink/10 bg-paper p-3">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                  <div>
+                    <strong>{item.member.name}</strong>
+                    {item.member.publicFlag && (
+                      <div className="text-xs font-bold text-red-600">{item.member.publicFlag}</div>
+                    )}
+                  </div>
+                  <span className="rounded-full border border-ink/10 bg-white px-2 py-1 text-xs font-bold">
+                    {item.points} pts
+                  </span>
+                </summary>
+                <MemberDetails item={item} />
+              </details>
+            ))}
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function LegacyStatsView({
+  data,
+  stats,
+  onLogout,
+}: {
+  data: StudioData;
+  stats: ReturnType<typeof createStats>;
+  onLogout: () => void;
+}) {
   const visibleStats = stats.memberStats;
   const best = visibleStats[0];
   const worst = visibleStats[visibleStats.length - 1];
@@ -2454,8 +3592,18 @@ function Index() {
           ...task,
           id: `task-${Date.now()}`,
           createdAt: new Date().toISOString(),
+          status: task.status ?? "active",
         },
       ],
+    }));
+  }
+
+  function updateTask(taskId: string, updates: Partial<StudioTask>) {
+    updateData((current) => ({
+      ...current,
+      tasks: current.tasks.map((task) =>
+        task.id === taskId ? { ...task, ...updates } : task,
+      ),
     }));
   }
 
@@ -2790,10 +3938,13 @@ function Index() {
         saveStatus={saveStatus}
         isDirty={isDirty}
         isSaving={isSaving}
+        adminQueue={adminQueue}
+        queueStatus={queueStatus}
         tokenDialogOpen={tokenDialogOpen}
         tokenDraft={tokenDraft}
         onLogout={logout}
         onAddTask={addTask}
+        onUpdateTask={updateTask}
         onRemoveTask={removeTask}
         onManualApprove={manualApprove}
         onApproveQueuedSubmission={approveQueuedSubmission}

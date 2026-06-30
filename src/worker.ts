@@ -20,6 +20,9 @@ type StudioTask = {
   scope: "all" | "member";
   memberId?: string;
   createdAt: string;
+  startAt?: string;
+  deadlineAt?: string;
+  status?: "active" | "archived";
 };
 
 type TaskResponse = {
@@ -98,7 +101,12 @@ function normalizeData(data: StudioData): StudioData {
       backendUrl: data.settings?.backendUrl ?? "",
     },
     members: data.members ?? [],
-    tasks: data.tasks ?? [],
+    tasks: (data.tasks ?? []).map((task) => ({
+      ...task,
+      startAt: task.startAt ?? task.createdAt,
+      deadlineAt: task.deadlineAt ?? "",
+      status: task.status === "archived" ? "archived" : "active",
+    })),
     responses: data.responses ?? {},
     progressUpdates: data.progressUpdates ?? {},
     repoUpdates: data.repoUpdates ?? [],
