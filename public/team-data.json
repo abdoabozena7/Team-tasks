@@ -33,7 +33,7 @@
         "شعيب"
       ],
       "hidden": false,
-      "baseCompleted": 0,
+      "baseCompleted": 4,
       "basePoints": 0,
       "adminNote": "",
       "baseApproved": 0,
@@ -202,6 +202,6 @@
   "responses": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-06-30T19:06:45.823Z"
+    "updatedAt": "2026-06-30T19:10:46.285Z"
   }
 }
