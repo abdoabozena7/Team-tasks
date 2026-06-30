@@ -65,6 +65,15 @@ type TaskResponse = {
   reviewedAt?: string;
 };
 
+type TaskProgressUpdate = {
+  id: string;
+  taskId: string;
+  memberId: string;
+  memberName: string;
+  note: string;
+  createdAt: string;
+};
+
 type StudioSettings = {
   adminPassword: string;
   statsPassword: string;
@@ -85,6 +94,7 @@ type StudioData = {
   members: Member[];
   tasks: StudioTask[];
   responses: Record<string, Record<string, TaskResponse>>;
+  progressUpdates?: Record<string, TaskProgressUpdate[]>;
   repoUpdates?: RepoUpdate[];
   meta: { updatedAt: string };
 };
@@ -121,6 +131,7 @@ type TaskMetric = {
   approved: number;
   rejected: number;
   submitted: number;
+  progressUpdates: number;
 };
 
 const DEFAULT_ADMIN_PASSWORD = "5678";
@@ -150,6 +161,7 @@ const DEFAULT_DATA: StudioData = {
   members: [],
   tasks: [],
   responses: {},
+  progressUpdates: {},
   repoUpdates: [],
   meta: { updatedAt: new Date().toISOString() },
 };
@@ -205,6 +217,7 @@ function sanitizeData(data: StudioData): StudioData {
     })),
     tasks: data.tasks ?? [],
     responses: data.responses ?? {},
+    progressUpdates: data.progressUpdates ?? {},
     repoUpdates: data.repoUpdates ?? [],
     meta: data.meta ?? DEFAULT_DATA.meta,
   };
@@ -216,6 +229,10 @@ function taskIsForMember(task: StudioTask, memberId: string) {
 
 function responseKey(taskId: string, memberId: string) {
   return `${taskId}:${memberId}`;
+}
+
+function progressKey(taskId: string, memberId: string) {
+  return `progress:${taskId}:${memberId}`;
 }
 
 function readMemberDrafts() {
@@ -242,6 +259,17 @@ function createWhatsAppMessage(task: StudioTask, member: ActiveMember, answer: s
     `Points: ${task.points || 1}`,
     "",
     answer.trim(),
+  ].join("\n");
+}
+
+function createWhatsAppProgressMessage(task: StudioTask, member: ActiveMember, note: string) {
+  return [
+    "Hivo Studio progress update",
+    `Name: ${member.displayName}`,
+    `Task: ${task.title}`,
+    "Type: progress only - no points",
+    "",
+    note.trim(),
   ].join("\n");
 }
 
@@ -332,6 +360,7 @@ function createStats(data: StudioData) {
           : 0
         : data.members.filter((member) => !member.hidden).length;
     const responses = Object.values(data.responses[task.id] ?? {});
+    const progressUpdates = data.progressUpdates?.[task.id] ?? [];
     return {
       task,
       expected,
@@ -339,6 +368,7 @@ function createStats(data: StudioData) {
       approved: responses.filter((response) => response.status === "approved").length,
       rejected: responses.filter((response) => response.status === "rejected").length,
       submitted: responses.filter((response) => response.status === "submitted").length,
+      progressUpdates: progressUpdates.length,
     };
   });
   const leader = rankedMembers[0];
@@ -609,6 +639,8 @@ function MemberView({
   onDraftChange,
   onSaveDraft,
   onCopyAnswer,
+  onSaveProgressDraft,
+  onCopyProgressUpdate,
   onLogout,
   onRefreshData,
 }: {
@@ -620,6 +652,8 @@ function MemberView({
   onDraftChange: (key: string, value: string) => void;
   onSaveDraft: (task: StudioTask) => void;
   onCopyAnswer: (task: StudioTask) => void;
+  onSaveProgressDraft: (task: StudioTask) => void;
+  onCopyProgressUpdate: (task: StudioTask) => void;
   onLogout: () => void;
   onRefreshData: () => Promise<void>;
 }) {
@@ -791,6 +825,10 @@ function MemberView({
             memberTasks.map((task) => {
               const existing = getResponse(data, task.id, activeMember.member.id);
               const key = responseKey(task.id, activeMember.member.id);
+              const taskProgressKey = progressKey(task.id, activeMember.member.id);
+              const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
+                (update) => update.memberId === activeMember.member.id,
+              );
               const canAnswer = !existing || existing.status === "rejected";
 
               return (
@@ -849,6 +887,58 @@ function MemberView({
                       <MessageCircle data-icon="inline-start" />
                       نسخ للواتساب
                     </Button>
+                  </div>
+
+                  <div className="mt-5 border-t-[2px] border-ink/20 pt-4">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <strong className="text-lg">تحديث متابعة بدون درجات</strong>
+                      <span className="rounded-full border-[2px] border-ink bg-yellow-100 px-2 py-1 text-xs font-bold">
+                        لا يتحسب نقاط
+                      </span>
+                    </div>
+                    <p className="mb-3 text-sm leading-6 text-foreground/65">
+                      اكتب وصلت لإيه أو محتاج إيه. ده متابعة بس، مش تسليم نهائي للتاسك.
+                    </p>
+                    {officialProgress.length > 0 && (
+                      <div className="mb-3 grid gap-2">
+                        {officialProgress.map((update) => (
+                          <div key={update.id} className="border-[2px] border-ink bg-yellow-50 p-3">
+                            <p className="whitespace-pre-wrap leading-7">{update.note}</p>
+                            <p className="mt-1 text-xs text-foreground/55">
+                              محفوظ رسميًا: {new Date(update.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <Textarea
+                      value={draftAnswers[taskProgressKey] ?? ""}
+                      onChange={(event) => onDraftChange(taskProgressKey, event.target.value)}
+                      placeholder="اكتب تحديث متابعة سريع..."
+                      className="min-h-24 border-[2px] border-ink bg-yellow-50 text-base"
+                    />
+                    <p className="mt-2 text-sm font-bold text-yellow-800">
+                      محفوظ على جهازك فقط لحد ما تبعته واتساب أو الأدمن يسجله رسميًا.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        onClick={() => onSaveProgressDraft(task)}
+                        className="border-[2px] border-ink bg-yellow-100 doodle-shadow-sm"
+                      >
+                        <Save data-icon="inline-start" />
+                        حفظ تحديث المتابعة
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => onCopyProgressUpdate(task)}
+                        variant="outline"
+                        className="border-[2px] border-ink bg-paper doodle-shadow-sm"
+                      >
+                        <MessageCircle data-icon="inline-start" />
+                        نسخ متابعة للواتساب
+                      </Button>
+                    </div>
                   </div>
                 </article>
               );
@@ -961,6 +1051,7 @@ function AdminView({
   onAddTask,
   onRemoveTask,
   onManualApprove,
+  onAddProgressUpdate,
   onReviewAnswer,
   onUpdateMember,
   onUpdateSettings,
@@ -981,6 +1072,7 @@ function AdminView({
   onAddTask: (task: Omit<StudioTask, "id" | "createdAt">) => void;
   onRemoveTask: (taskId: string) => void;
   onManualApprove: (task: StudioTask, memberId: string) => void;
+  onAddProgressUpdate: (task: StudioTask, memberId: string, note: string) => void;
   onReviewAnswer: (taskId: string, memberId: string, status: "approved" | "rejected") => void;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
@@ -996,6 +1088,8 @@ function AdminView({
   const [taskScope, setTaskScope] = useState<"all" | "member">("all");
   const [taskMemberId, setTaskMemberId] = useState("");
   const [manualApproveMembers, setManualApproveMembers] = useState<Record<string, string>>({});
+  const [progressMembers, setProgressMembers] = useState<Record<string, string>>({});
+  const [progressNotes, setProgressNotes] = useState<Record<string, string>>({});
   const unseenUpdates = data.repoUpdates?.filter((update) => !update.seen) ?? [];
 
   function submitTask() {
@@ -1163,7 +1257,8 @@ function AdminView({
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-foreground/60">
-                    pending {item.submitted} • accepted {item.approved} • rejected {item.rejected}
+                    pending {item.submitted} • accepted {item.approved} • rejected {item.rejected} •
+                    progress {item.progressUpdates}
                   </p>
                 </div>
               ))
@@ -1245,6 +1340,9 @@ function AdminView({
             data.tasks.map((task) => {
               const responses = Object.values(data.responses[task.id] ?? {});
               const selectedManualMember = manualApproveMembers[task.id] ?? "";
+              const selectedProgressMember = progressMembers[task.id] ?? "";
+              const progressNote = progressNotes[task.id] ?? "";
+              const taskProgressUpdates = data.progressUpdates?.[task.id] ?? [];
 
               return (
                 <article
@@ -1303,6 +1401,72 @@ function AdminView({
                       <Check data-icon="inline-start" />
                       اعتماد واتساب
                     </Button>
+                  </div>
+
+                  <div className="mb-3 border-[2px] border-ink bg-yellow-50 p-3">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <Bell data-icon="inline-start" />
+                      <strong>متابعة بدون درجات</strong>
+                      <span className="rounded-full border-[2px] border-ink bg-card px-2 py-1 text-xs font-bold">
+                        لا تدخل في النقاط
+                      </span>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-[180px_1fr_auto]">
+                      <select
+                        value={selectedProgressMember}
+                        onChange={(event) =>
+                          setProgressMembers((current) => ({
+                            ...current,
+                            [task.id]: event.target.value,
+                          }))
+                        }
+                        className="h-10 min-w-44 rounded-md border-[2px] border-ink bg-card px-3 text-base"
+                      >
+                        <option value="">اختار عضو للمتابعة</option>
+                        {data.members.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.name}
+                          </option>
+                        ))}
+                      </select>
+                      <Input
+                        value={progressNote}
+                        onChange={(event) =>
+                          setProgressNotes((current) => ({
+                            ...current,
+                            [task.id]: event.target.value,
+                          }))
+                        }
+                        placeholder="مثال: خلصت التصميم ولسه الربط"
+                        className="border-[2px] border-ink bg-card"
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => {
+                          onAddProgressUpdate(task, selectedProgressMember, progressNote);
+                          setProgressNotes((current) => ({ ...current, [task.id]: "" }));
+                        }}
+                        className="border-[2px] border-ink bg-yellow-100 doodle-shadow-sm"
+                      >
+                        <Plus data-icon="inline-start" />
+                        تسجيل متابعة
+                      </Button>
+                    </div>
+                    {taskProgressUpdates.length > 0 && (
+                      <div className="mt-3 grid gap-2">
+                        {taskProgressUpdates.map((update) => (
+                          <div key={update.id} className="border-[2px] border-ink bg-card p-3">
+                            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                              <strong>{update.memberName}</strong>
+                              <span className="text-xs text-foreground/55">
+                                {new Date(update.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+                            <p className="whitespace-pre-wrap leading-7">{update.note}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {responses.length === 0 ? (
@@ -2021,12 +2185,15 @@ function Index() {
   function removeTask(taskId: string) {
     updateData((current) => {
       const nextResponses = { ...current.responses };
+      const nextProgressUpdates = { ...(current.progressUpdates ?? {}) };
       delete nextResponses[taskId];
+      delete nextProgressUpdates[taskId];
 
       return {
         ...current,
         tasks: current.tasks.filter((task) => task.id !== taskId),
         responses: nextResponses,
+        progressUpdates: nextProgressUpdates,
       };
     });
   }
@@ -2049,6 +2216,31 @@ function Index() {
     await navigator.clipboard.writeText(message);
     writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
     setRefreshStatus("تم نسخ الإجابة. افتح واتساب وابعتها للأدمن عشان يعتمدها رسميًا.");
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(message)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
+  function saveProgressDraft(task: StudioTask) {
+    if (!activeMember) return;
+    const key = progressKey(task.id, activeMember.member.id);
+    const note = draftAnswers[key]?.trim();
+    if (!note) return;
+    writeMemberDrafts({ ...readMemberDrafts(), [key]: note });
+    setRefreshStatus("تم حفظ تحديث المتابعة على جهازك فقط. ابعته واتساب عشان الأدمن يسجله.");
+  }
+
+  async function copyProgressToWhatsApp(task: StudioTask) {
+    if (!activeMember) return;
+    const key = progressKey(task.id, activeMember.member.id);
+    const note = draftAnswers[key]?.trim();
+    if (!note) return;
+    const message = createWhatsAppProgressMessage(task, activeMember, note);
+    await navigator.clipboard.writeText(message);
+    writeMemberDrafts({ ...readMemberDrafts(), [key]: note });
+    setRefreshStatus("تم نسخ تحديث المتابعة. ابعته للأدمن عشان يتسجل رسميًا بدون درجات.");
     window.open(
       `https://wa.me/?text=${encodeURIComponent(message)}`,
       "_blank",
@@ -2097,6 +2289,29 @@ function Index() {
             reviewedAt: new Date().toISOString(),
           },
         },
+      },
+    }));
+  }
+
+  function addProgressUpdate(task: StudioTask, memberId: string, note: string) {
+    const member = data.members.find((item) => item.id === memberId);
+    const cleanNote = note.trim();
+    if (!member || !cleanNote) return;
+
+    const update: TaskProgressUpdate = {
+      id: `progress-${Date.now()}`,
+      taskId: task.id,
+      memberId: member.id,
+      memberName: member.name,
+      note: cleanNote,
+      createdAt: new Date().toISOString(),
+    };
+
+    updateData((current) => ({
+      ...current,
+      progressUpdates: {
+        ...(current.progressUpdates ?? {}),
+        [task.id]: [update, ...((current.progressUpdates ?? {})[task.id] ?? [])],
       },
     }));
   }
@@ -2226,6 +2441,7 @@ function Index() {
         onAddTask={addTask}
         onRemoveTask={removeTask}
         onManualApprove={manualApprove}
+        onAddProgressUpdate={addProgressUpdate}
         onReviewAnswer={reviewAnswer}
         onUpdateMember={updateMember}
         onUpdateSettings={updateSettings}
@@ -2259,6 +2475,8 @@ function Index() {
         }}
         onSaveDraft={submitAnswer}
         onCopyAnswer={copyAnswerToWhatsApp}
+        onSaveProgressDraft={saveProgressDraft}
+        onCopyProgressUpdate={copyProgressToWhatsApp}
         onLogout={logout}
         onRefreshData={refreshData}
       />
