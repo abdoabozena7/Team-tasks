@@ -1358,105 +1358,177 @@ function AdminView({
             title="إدارة الفريق"
             help="الأرقام القديمة، الرسالة الحمراء، الريبو، والإخفاء المؤقت."
           />
-          <div className="flex flex-col gap-3">
-            {data.members.map((member) => (
-              <div
-                key={member.id}
-                className="grid gap-3 border-[2px] border-ink bg-paper p-3 md:grid-cols-[1fr_90px_90px_90px_90px]"
-              >
-                <div>
-                  <strong className={member.hidden ? "text-foreground/45" : ""}>
-                    {member.name}
-                  </strong>
-                  <p className="text-xs text-foreground/60">
-                    {member.hidden ? "مخفي من الليدر بورد" : "ظاهر في المنافسة"}
-                  </p>
-                </div>
-                <Input
-                  type="number"
-                  min={0}
-                  value={member.baseCompleted ?? 0}
-                  onChange={(event) =>
-                    onUpdateMember(member.id, { baseCompleted: sanitizeNumber(event.target.value) })
-                  }
-                  placeholder="قديم"
-                  className="border-[2px] border-ink bg-card"
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  value={member.baseApproved ?? 0}
-                  onChange={(event) =>
-                    onUpdateMember(member.id, { baseApproved: sanitizeNumber(event.target.value) })
-                  }
-                  placeholder="مقبول"
-                  className="border-[2px] border-ink bg-card"
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  value={member.baseRejected ?? 0}
-                  onChange={(event) =>
-                    onUpdateMember(member.id, { baseRejected: sanitizeNumber(event.target.value) })
-                  }
-                  placeholder="مرفوض"
-                  className="border-[2px] border-ink bg-card"
-                />
-                <Input
-                  type="number"
-                  min={0}
-                  value={member.basePoints ?? 0}
-                  onChange={(event) =>
-                    onUpdateMember(member.id, { basePoints: sanitizeNumber(event.target.value) })
-                  }
-                  placeholder="نقط"
-                  className="border-[2px] border-ink bg-card"
-                />
-                <Input
-                  value={member.publicFlag ?? ""}
-                  onChange={(event) =>
-                    onUpdateMember(member.id, { publicFlag: event.target.value })
-                  }
-                  placeholder="رسالة حمراء عامة"
-                  className="border-[2px] border-ink bg-card md:col-span-2"
-                />
-                <Input
-                  value={member.adminNote ?? ""}
-                  onChange={(event) => onUpdateMember(member.id, { adminNote: event.target.value })}
-                  placeholder="رسالة الأدمن للعضو"
-                  className="border-[2px] border-ink bg-card md:col-span-2"
-                />
-                <Input
-                  value={member.repoUrl ?? ""}
-                  onChange={(event) => onUpdateMember(member.id, { repoUrl: event.target.value })}
-                  placeholder="Repo URL"
-                  className="border-[2px] border-ink bg-card md:col-span-2"
-                />
-                <Input
-                  value={member.aliases.join(", ")}
-                  onChange={(event) =>
-                    onUpdateMember(member.id, {
-                      aliases: uniqueText(event.target.value.split(",")),
-                    })
-                  }
-                  placeholder="Nicknames"
-                  className="border-[2px] border-ink bg-card md:col-span-2"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => onUpdateMember(member.id, { hidden: !member.hidden })}
-                  className="border-[2px] border-ink bg-card doodle-shadow-sm"
+          <div className="flex flex-col gap-4">
+            {data.members.map((member) => {
+              const memberScore = stats.allMemberStats.find((item) => item.member.id === member.id);
+
+              return (
+                <article
+                  key={member.id}
+                  className={`border-[2.5px] border-ink bg-paper p-4 transition hover:-translate-y-0.5 hover:bg-white ${
+                    member.hidden ? "opacity-70" : ""
+                  }`}
+                  style={{ borderRadius: "18px 22px 14px 20px / 20px 14px 22px 18px" }}
                 >
-                  {member.hidden ? (
-                    <Eye data-icon="inline-start" />
-                  ) : (
-                    <EyeOff data-icon="inline-start" />
-                  )}
-                  {member.hidden ? "إظهار" : "إخفاء"}
-                </Button>
-              </div>
-            ))}
+                  <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b-[2px] border-ink/20 pb-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <strong
+                          className={`text-2xl leading-none ${member.hidden ? "text-foreground/45" : ""}`}
+                        >
+                          {member.name}
+                        </strong>
+                        <span
+                          className={`rounded-full border-[2px] border-ink px-2 py-1 text-xs font-bold ${
+                            member.hidden
+                              ? "bg-zinc-200 text-foreground/60"
+                              : "bg-emerald-200 text-emerald-950"
+                          }`}
+                        >
+                          {member.hidden ? "مخفي من المنافسة" : "ظاهر في الليدر بورد"}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/65">
+                        <span>مسلم: {memberScore?.submitted ?? 0}</span>
+                        <span>مقبول: {memberScore?.approved ?? 0}</span>
+                        <span>مرفوض: {memberScore?.rejected ?? 0}</span>
+                        <span>نقاط: {memberScore?.points ?? 0}</span>
+                      </div>
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => onUpdateMember(member.id, { hidden: !member.hidden })}
+                      className={`border-[2px] border-ink doodle-shadow-sm ${
+                        member.hidden ? "bg-emerald-100" : "bg-red-50"
+                      }`}
+                    >
+                      {member.hidden ? (
+                        <Eye data-icon="inline-start" />
+                      ) : (
+                        <EyeOff data-icon="inline-start" />
+                      )}
+                      {member.hidden ? "إظهار في الليدر بورد" : "إخفاء مؤقت"}
+                    </Button>
+                  </div>
+
+                  <div className="mb-4">
+                    <p className="mb-2 text-sm font-bold text-foreground/70">
+                      أرقام قديمة تتحسب مع اللي اتقبل على الموقع
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <label className="grid gap-1 text-sm font-bold">
+                        تاسكات قديمة
+                        <Input
+                          type="number"
+                          min={0}
+                          value={member.baseCompleted ?? 0}
+                          onChange={(event) =>
+                            onUpdateMember(member.id, {
+                              baseCompleted: sanitizeNumber(event.target.value),
+                            })
+                          }
+                          className="border-[2px] border-ink bg-card text-center text-lg"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm font-bold">
+                        مقبول قديم
+                        <Input
+                          type="number"
+                          min={0}
+                          value={member.baseApproved ?? 0}
+                          onChange={(event) =>
+                            onUpdateMember(member.id, {
+                              baseApproved: sanitizeNumber(event.target.value),
+                            })
+                          }
+                          className="border-[2px] border-ink bg-emerald-50 text-center text-lg"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm font-bold">
+                        مرفوض قديم
+                        <Input
+                          type="number"
+                          min={0}
+                          value={member.baseRejected ?? 0}
+                          onChange={(event) =>
+                            onUpdateMember(member.id, {
+                              baseRejected: sanitizeNumber(event.target.value),
+                            })
+                          }
+                          className="border-[2px] border-ink bg-red-50 text-center text-lg"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm font-bold">
+                        نقاط قديمة
+                        <Input
+                          type="number"
+                          min={0}
+                          value={member.basePoints ?? 0}
+                          onChange={(event) =>
+                            onUpdateMember(member.id, {
+                              basePoints: sanitizeNumber(event.target.value),
+                            })
+                          }
+                          className="border-[2px] border-ink bg-yellow-50 text-center text-lg"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <label className="grid gap-1 text-sm font-bold">
+                      رسالة حمراء تظهر جنب الاسم لكل التيم
+                      <Input
+                        value={member.publicFlag ?? ""}
+                        onChange={(event) =>
+                          onUpdateMember(member.id, { publicFlag: event.target.value })
+                        }
+                        placeholder="مثال: لسه ما سلمش / راجع الدفع"
+                        className="border-[2px] border-ink bg-red-50"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-bold">
+                      رسالة خاصة للعضو
+                      <Input
+                        value={member.adminNote ?? ""}
+                        onChange={(event) =>
+                          onUpdateMember(member.id, { adminNote: event.target.value })
+                        }
+                        placeholder="رسالة تظهر للعضو لما يدخل باسمه"
+                        className="border-[2px] border-ink bg-card"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-bold">
+                      لينك الريبو
+                      <Input
+                        value={member.repoUrl ?? ""}
+                        onChange={(event) =>
+                          onUpdateMember(member.id, { repoUrl: event.target.value })
+                        }
+                        placeholder="https://github.com/..."
+                        className="border-[2px] border-ink bg-card ltr:text-left"
+                        dir="ltr"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-bold">
+                      الأسماء والـ nicknames
+                      <Input
+                        value={member.aliases.join(", ")}
+                        onChange={(event) =>
+                          onUpdateMember(member.id, {
+                            aliases: uniqueText(event.target.value.split(",")),
+                          })
+                        }
+                        placeholder="name, nickname, اسم عربي"
+                        className="border-[2px] border-ink bg-card"
+                      />
+                    </label>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
 
