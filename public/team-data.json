@@ -16,7 +16,7 @@
         "ابو زينة",
         "أبو زينة"
       ],
-      "hidden": false,
+      "hidden": true,
       "baseCompleted": 9,
       "basePoints": 14,
       "adminNote": "عامل ايه",
@@ -53,7 +53,7 @@
         "كريم",
         "كريم عادل"
       ],
-      "hidden": false,
+      "hidden": true,
       "baseCompleted": 0,
       "basePoints": 0,
       "adminNote": "",
@@ -197,7 +197,10 @@
       "points": 1,
       "scope": "all",
       "id": "task-1782846378914",
-      "createdAt": "2026-06-30T19:06:18.914Z"
+      "createdAt": "2026-06-30T19:06:18.914Z",
+      "startAt": "2026-06-30T19:06:18.914Z",
+      "deadlineAt": "",
+      "status": "active"
     }
   ],
   "responses": {
@@ -223,6 +226,6 @@
   "progressUpdates": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-06-30T22:13:04.572Z"
+    "updatedAt": "2026-06-30T23:18:40.329Z"
   }
 }
