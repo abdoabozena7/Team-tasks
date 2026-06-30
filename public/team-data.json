@@ -1,0 +1,60 @@
+{
+  "projectName": "Hivo Studio",
+  "members": [
+    {
+      "id": "abozena",
+      "name": "Abozena",
+      "aliases": ["abozena", "abo zena", "ابو زينة", "أبو زينة"]
+    },
+    {
+      "id": "shoiab",
+      "name": "shoiab",
+      "aliases": ["shoiab", "shoaib", "شعيب"]
+    },
+    {
+      "id": "kareem-adel",
+      "name": "kareem adel",
+      "aliases": ["kareem adel", "karim adel", "kareem", "karim", "كريم", "كريم عادل"]
+    },
+    {
+      "id": "abo-grir",
+      "name": "Abo grir",
+      "aliases": ["abo grir", "abo grer", "abo greer", "abo grir", "ابو جرير", "أبو جرير"]
+    },
+    {
+      "id": "yossef-sharawy",
+      "name": "yossef sharawy",
+      "aliases": ["yossef sharawy", "youssef sharawy", "youssef shaarawy", "يوسف شعراوي"]
+    },
+    {
+      "id": "renad",
+      "name": "renad",
+      "aliases": ["renad", "ريناد"]
+    },
+    {
+      "id": "tasneem",
+      "name": "tasneem",
+      "aliases": ["tasneem", "tasnim", "تسنيم"]
+    },
+    {
+      "id": "rodina",
+      "name": "rodina",
+      "aliases": ["rodina", "rudina", "رودينا"]
+    },
+    {
+      "id": "fatema",
+      "name": "fatema",
+      "aliases": ["fatema", "fatma", "fatima", "فاطمة"]
+    },
+    {
+      "id": "marihan",
+      "name": "marihan",
+      "aliases": ["marihan", "merihan", "maryhan", "مريهان", "ماريهان"]
+    }
+  ],
+  "tasks": [],
+  "responses": {},
+  "meta": {
+    "updatedAt": "2026-06-30T00:00:00.000Z"
+  }
+}
