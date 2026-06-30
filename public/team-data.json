@@ -16,11 +16,11 @@
         "ابو زينة",
         "أبو زينة"
       ],
-      "hidden": true,
-      "baseCompleted": 0,
-      "basePoints": 0,
+      "hidden": false,
+      "baseCompleted": 9,
+      "basePoints": 14,
       "adminNote": "",
-      "baseApproved": 0,
+      "baseApproved": 13,
       "baseRejected": 0,
       "publicFlag": "",
       "repoUrl": ""
@@ -215,6 +215,6 @@
   "progressUpdates": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-06-30T22:06:13.387Z"
+    "updatedAt": "2026-06-30T22:08:21.358Z"
   }
 }
