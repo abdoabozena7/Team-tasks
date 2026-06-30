@@ -32,6 +32,17 @@ type TaskResponse = {
   status: "submitted" | "approved" | "rejected";
   submittedAt: string;
   reviewedAt?: string;
+  awardedPoints?: number;
+  lateSubmission?: boolean;
+  reviewEvents?: TaskReviewEvent[];
+};
+
+type TaskReviewEvent = {
+  id: string;
+  status: "approved" | "rejected";
+  reviewedAt: string;
+  note?: string;
+  awardedPoints?: number;
 };
 
 type TaskProgressUpdate = {
@@ -124,6 +135,58 @@ function json(env: Env, body: unknown, status = 200) {
 function positiveNumber(value: unknown, fallback: number) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : fallback;
+}
+
+function roundScore(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submittedAt">) {
+  if (!task.deadlineAt) return false;
+  const deadlineTime = new Date(task.deadlineAt).getTime();
+  const submittedTime = new Date(response.submittedAt).getTime();
+  return (
+    Number.isFinite(deadlineTime) &&
+    Number.isFinite(submittedTime) &&
+    submittedTime > deadlineTime
+  );
+}
+
+function calculateAwardedPoints(
+  task: StudioTask,
+  response: Pick<TaskResponse, "submittedAt">,
+  status: TaskResponse["status"],
+) {
+  if (status !== "approved") return 0;
+  const points = positiveNumber(task.points, 1);
+  return roundScore(isSubmissionLate(task, response) ? points / 2 : points);
+}
+
+function withReviewEvent(
+  task: StudioTask,
+  response: TaskResponse,
+  status: "approved" | "rejected",
+  note: string,
+) {
+  const reviewedAt = new Date().toISOString();
+  const lateSubmission = isSubmissionLate(task, response);
+  const awardedPoints = calculateAwardedPoints(task, response, status);
+  const event: TaskReviewEvent = {
+    id: `review-${Date.now()}`,
+    status,
+    reviewedAt,
+    ...(note ? { note } : {}),
+    ...(status === "approved" ? { awardedPoints } : {}),
+  };
+
+  return {
+    ...response,
+    status,
+    reviewedAt,
+    awardedPoints,
+    lateSubmission,
+    reviewEvents: [event, ...(response.reviewEvents ?? [])],
+  };
 }
 
 function normalizeData(data: StudioData): StudioData {
@@ -400,6 +463,7 @@ export default {
         const next = await commitData(env, `Submit ${item.taskId} by ${item.memberId}`, (data) => {
           getTask(data, item.taskId);
           getMember(data, item.memberId);
+          const previous = data.responses[item.taskId]?.[item.memberId];
           const repoUpdate = repoUpdateFromText({
             memberId: item.memberId,
             taskId: item.taskId,
@@ -418,6 +482,9 @@ export default {
                   answer: item.answer,
                   status: "submitted",
                   submittedAt: item.submittedAt || new Date().toISOString(),
+                  awardedPoints: 0,
+                  lateSubmission: false,
+                  reviewEvents: previous?.reviewEvents ?? [],
                 },
               },
             },
@@ -475,6 +542,8 @@ export default {
             const taskId = String(payload.taskId ?? "");
             const memberId = String(payload.memberId ?? "");
             const status = payload.status === "approved" ? "approved" : "rejected";
+            const note = String(payload.note ?? "").trim();
+            const task = getTask(data, taskId);
             const response = data.responses[taskId]?.[memberId];
             if (!response) throw new Error("Response not found.");
             return {
@@ -483,7 +552,7 @@ export default {
                 ...data.responses,
                 [taskId]: {
                   ...data.responses[taskId],
-                  [memberId]: { ...response, status, reviewedAt: new Date().toISOString() },
+                  [memberId]: withReviewEvent(task, response, status, note),
                 },
               },
             };
@@ -492,8 +561,17 @@ export default {
           if (action === "manualApprove") {
             const taskId = String(payload.taskId ?? "");
             const memberId = String(payload.memberId ?? "");
-            getTask(data, taskId);
+            const task = getTask(data, taskId);
             const member = getMember(data, memberId);
+            const submittedAt = new Date().toISOString();
+            const response: TaskResponse = {
+              memberId,
+              memberName: member.name,
+              answer: "Manual approval outside the website.",
+              status: "submitted",
+              submittedAt,
+              reviewEvents: data.responses[taskId]?.[memberId]?.reviewEvents ?? [],
+            };
             return {
               ...data,
               responses: {
@@ -508,6 +586,7 @@ export default {
                     submittedAt: new Date().toISOString(),
                     reviewedAt: new Date().toISOString(),
                   },
+                  [memberId]: withReviewEvent(task, response, "approved", ""),
                 },
               },
             };

@@ -88,6 +88,17 @@ type TaskResponse = {
   status: "submitted" | "approved" | "rejected";
   submittedAt: string;
   reviewedAt?: string;
+  awardedPoints?: number;
+  lateSubmission?: boolean;
+  reviewEvents?: TaskReviewEvent[];
+};
+
+type TaskReviewEvent = {
+  id: string;
+  status: "approved" | "rejected";
+  reviewedAt: string;
+  note?: string;
+  awardedPoints?: number;
 };
 
 type TaskProgressUpdate = {
@@ -453,6 +464,52 @@ function getResponse(data: StudioData, taskId: string, memberId: string) {
   return data.responses[taskId]?.[memberId];
 }
 
+function roundScore(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submittedAt">) {
+  if (!task.deadlineAt) return false;
+  const deadlineTime = new Date(task.deadlineAt).getTime();
+  const submittedTime = new Date(response.submittedAt).getTime();
+  return (
+    Number.isFinite(deadlineTime) &&
+    Number.isFinite(submittedTime) &&
+    submittedTime > deadlineTime
+  );
+}
+
+function calculateAwardedPoints(
+  task: StudioTask,
+  response: Pick<TaskResponse, "submittedAt">,
+  status: TaskResponse["status"],
+) {
+  if (status !== "approved") return 0;
+  const points = sanitizePositiveNumber(task.points, 1);
+  return roundScore(isSubmissionLate(task, response) ? points / 2 : points);
+}
+
+function responseAwardedPoints(task: StudioTask, response?: TaskResponse) {
+  if (!response || response.status !== "approved") return 0;
+  return response.awardedPoints ?? calculateAwardedPoints(task, response, response.status);
+}
+
+function responseIsLate(task: StudioTask, response?: TaskResponse) {
+  if (!response) return false;
+  return response.lateSubmission ?? isSubmissionLate(task, response);
+}
+
+function rejectionCount(response?: TaskResponse) {
+  if (!response) return 0;
+  const eventCount = response.reviewEvents?.filter((event) => event.status === "rejected").length;
+  if (typeof eventCount === "number" && eventCount > 0) return eventCount;
+  return response.status === "rejected" ? 1 : 0;
+}
+
+function latestReviewNote(response?: TaskResponse) {
+  return response?.reviewEvents?.find((event) => event.note?.trim())?.note?.trim() ?? "";
+}
+
 function hoursBetween(start?: string, end?: string) {
   if (!start || !end) return null;
   const startTime = new Date(start).getTime();
@@ -483,7 +540,10 @@ function createStats(data: StudioData) {
         Boolean(item.response),
       );
     const approvedTasks = responses.filter((item) => item.response.status === "approved");
-    const taskPoints = approvedTasks.reduce((sum, item) => sum + (item.task.points || 1), 0);
+    const taskPoints = approvedTasks.reduce(
+      (sum, item) => sum + responseAwardedPoints(item.task, item.response),
+      0,
+    );
     const speedSamples = responses
       .map((item) => hoursBetween(item.task.createdAt, item.response.submittedAt))
       .filter((value): value is number => value !== null);
@@ -501,7 +561,7 @@ function createStats(data: StudioData) {
     );
     const approved = approvedTasks.length + baseApproved;
     const rejected =
-      responses.filter((item) => item.response.status === "rejected").length + baseRejected;
+      responses.reduce((sum, item) => sum + rejectionCount(item.response), 0) + baseRejected;
     const pending = responses.filter((item) => item.response.status === "submitted").length;
     const submitted = responses.length + baseCompleted;
     const reviewed = approved + rejected;
@@ -560,7 +620,7 @@ function createStats(data: StudioData) {
       expected,
       received: responses.length,
       approved: responses.filter((response) => response.status === "approved").length,
-      rejected: responses.filter((response) => response.status === "rejected").length,
+      rejected: responses.reduce((sum, response) => sum + rejectionCount(response), 0),
       submitted: responses.filter((response) => response.status === "submitted").length,
       progressUpdates: progressUpdates.length,
     };
@@ -869,6 +929,7 @@ function MemberView({
   onRefreshData: () => Promise<void>;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [memberTab, setMemberTab] = useState<"tasks" | "log">("tasks");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedOnce, setRefreshedOnce] = useState(
     window.sessionStorage.getItem(REFRESHED_SESSION_KEY) === "true",
@@ -876,8 +937,12 @@ function MemberView({
   const [showNicknameHint, setShowNicknameHint] = useState(
     window.localStorage.getItem(NICKNAME_HINT_KEY) !== "seen",
   );
-  const memberTasks = data.tasks.filter(
-    (task) => isActiveTask(task) && taskIsForMember(task, activeMember.member.id),
+  const memberTasks = data.tasks.filter((task) => {
+    if (!taskIsForMember(task, activeMember.member.id)) return false;
+    return getResponse(data, task.id, activeMember.member.id)?.status !== "approved";
+  });
+  const memberLogTasks = data.tasks.filter((task) =>
+    taskIsForMember(task, activeMember.member.id),
   );
 
   async function refreshMemberData() {
@@ -894,6 +959,92 @@ function MemberView({
   function closeHint() {
     window.localStorage.setItem(NICKNAME_HINT_KEY, "seen");
     setShowNicknameHint(false);
+  }
+
+  function renderMemberTaskLog() {
+    return (
+      <section className="mb-7 grid gap-3">
+        <div className="grid gap-2 sm:grid-cols-4">
+          <CompactMetric label="Old tasks" value={activeMember.member.baseCompleted ?? 0} />
+          <CompactMetric label="Old approved" value={activeMember.member.baseApproved ?? 0} />
+          <CompactMetric label="Old rejected" value={activeMember.member.baseRejected ?? 0} />
+          <CompactMetric label="Old points" value={activeMember.member.basePoints ?? 0} />
+        </div>
+        {memberLogTasks.length === 0 ? (
+          <div
+            className="border-[2.5px] border-ink bg-card p-8 text-center doodle-shadow"
+            style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
+          >
+            <p className="text-xl font-bold">No task history yet.</p>
+          </div>
+        ) : (
+          memberLogTasks.map((task) => {
+            const response = getResponse(data, task.id, activeMember.member.id);
+            const progress = (data.progressUpdates?.[task.id] ?? []).filter(
+              (update) => update.memberId === activeMember.member.id,
+            );
+            const rejects = rejectionCount(response);
+            const awarded = responseAwardedPoints(task, response);
+            const late = responseIsLate(task, response);
+            const note = latestReviewNote(response);
+
+            return (
+              <article
+                key={task.id}
+                className="border-[2.5px] border-ink bg-card p-4 doodle-shadow-sm"
+                style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-bold">{task.title}</h2>
+                    <p className="mt-1 text-sm text-foreground/60">
+                      {taskStatus(task)} | deadline {formatDateTime(task.deadlineAt)}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <span className={`border-[2px] px-3 py-1 text-sm font-bold ${statusTone(response?.status)}`}>
+                      {response?.status ?? "missing"}
+                    </span>
+                    {late && (
+                      <span className="border-[2px] border-yellow-700 bg-yellow-100 px-3 py-1 text-sm font-bold text-yellow-900">
+                        Late - half score
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2 text-sm font-bold text-foreground/65">
+                  <span>Points: {awarded}/{sanitizePositiveNumber(task.points, 1)}</span>
+                  <span>Rejected: {rejects}</span>
+                  {response?.submittedAt && <span>Submitted: {formatDateTime(response.submittedAt)}</span>}
+                  {response?.reviewedAt && <span>Reviewed: {formatDateTime(response.reviewedAt)}</span>}
+                </div>
+                {note && (
+                  <p className="mt-3 border-[2px] border-ink bg-paper p-3 text-sm leading-6">
+                    <strong>Admin note: </strong>
+                    {note}
+                  </p>
+                )}
+                {response?.answer && (
+                  <p className="mt-3 whitespace-pre-wrap border-t-[2px] border-ink/15 pt-3 leading-7">
+                    {response.answer}
+                  </p>
+                )}
+                {progress.length > 0 && (
+                  <div className="mt-3 grid gap-2">
+                    {progress.map((update) => (
+                      <div key={update.id} className="border-[2px] border-ink bg-yellow-50 p-3 text-sm">
+                        <p className="whitespace-pre-wrap leading-6">{update.note}</p>
+                        <p className="mt-1 text-xs text-foreground/55">{formatDateTime(update.createdAt)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </article>
+            );
+          })
+        )}
+      </section>
+    );
   }
 
   return (
@@ -989,6 +1140,24 @@ function MemberView({
           </section>
         )}
 
+        <div className="mb-7 flex rounded-lg border-[2px] border-ink bg-paper p-1">
+          <button
+            type="button"
+            onClick={() => setMemberTab("tasks")}
+            className={`flex-1 rounded-md px-3 py-2 text-sm font-bold ${memberTab === "tasks" ? "bg-ink text-white" : ""}`}
+          >
+            Tasks
+          </button>
+          <button
+            type="button"
+            onClick={() => setMemberTab("log")}
+            className={`flex-1 rounded-md px-3 py-2 text-sm font-bold ${memberTab === "log" ? "bg-ink text-white" : ""}`}
+          >
+            Log
+          </button>
+        </div>
+
+        {memberTab === "log" ? renderMemberTaskLog() : (
         <section className="mb-7 flex flex-col gap-5">
           {memberTasks.length === 0 ? (
             <div
@@ -1128,6 +1297,7 @@ function MemberView({
             })
           )}
         </section>
+        )}
 
         <section
           className="border-[2.5px] border-ink bg-card p-5 doodle-shadow"
@@ -1371,7 +1541,12 @@ function AdminView({
   onSaveQueuedProgress: (item: QueuedProgressUpdate) => void;
   onDismissQueuedProgress: (id: string) => void;
   onAddProgressUpdate: (task: StudioTask, memberId: string, note: string) => void;
-  onReviewAnswer: (taskId: string, memberId: string, status: "approved" | "rejected") => void;
+  onReviewAnswer: (
+    taskId: string,
+    memberId: string,
+    status: "approved" | "rejected",
+    note?: string,
+  ) => void;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
   onMarkRepoUpdateSeen: (updateId: string) => void;
@@ -1400,6 +1575,7 @@ function AdminView({
   const [manualApproveMembers, setManualApproveMembers] = useState<Record<string, string>>({});
   const [progressMembers, setProgressMembers] = useState<Record<string, string>>({});
   const [progressNotes, setProgressNotes] = useState<Record<string, string>>({});
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [logMode, setLogMode] = useState<"task" | "member">("task");
   const [query, setQuery] = useState("");
 
@@ -1502,7 +1678,7 @@ function AdminView({
       expected: members.filter((member) => !member.hidden).length,
       received: responses.length,
       approved: responses.filter((response) => response.status === "approved").length,
-      rejected: responses.filter((response) => response.status === "rejected").length,
+      rejected: responses.reduce((sum, response) => sum + rejectionCount(response), 0),
       pending: responses.filter((response) => response.status === "submitted").length,
     };
   }
@@ -1717,9 +1893,13 @@ function AdminView({
         <div className="mt-5 grid gap-3">
           {members.map((member) => {
             const response = responses[member.id];
+            const reviewNoteKey = `${task.id}:${member.id}`;
+            const reviewNote = reviewNotes[reviewNoteKey] ?? "";
             const progress = (data.progressUpdates?.[task.id] ?? []).filter(
               (update) => update.memberId === member.id,
             );
+            const awarded = responseAwardedPoints(task, response);
+            const late = responseIsLate(task, response);
             return (
               <details
                 key={member.id}
@@ -1747,11 +1927,40 @@ function AdminView({
                 {response && (
                   <div className="mt-3 rounded-md border border-ink/10 bg-paper p-3">
                     <p className="whitespace-pre-wrap leading-7">{response.answer}</p>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
+                      <span className="rounded-full border border-ink/10 bg-white px-2 py-1">
+                        Score {awarded}/{sanitizePositiveNumber(task.points, 1)}
+                      </span>
+                      {late && (
+                        <span className="rounded-full border border-yellow-300 bg-yellow-100 px-2 py-1 text-yellow-900">
+                          Late - half score
+                        </span>
+                      )}
+                      {rejectionCount(response) > 0 && (
+                        <span className="rounded-full border border-red-200 bg-red-50 px-2 py-1 text-red-700">
+                          Rejections {rejectionCount(response)}
+                        </span>
+                      )}
+                    </div>
+                    <Input
+                      value={reviewNote}
+                      onChange={(event) =>
+                        setReviewNotes((current) => ({
+                          ...current,
+                          [reviewNoteKey]: event.target.value,
+                        }))
+                      }
+                      placeholder="Optional review note"
+                      className="mt-3 border border-ink/20 bg-white"
+                    />
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
                         type="button"
                         size="sm"
-                        onClick={() => onReviewAnswer(task.id, member.id, "approved")}
+                        onClick={() => {
+                          onReviewAnswer(task.id, member.id, "approved", reviewNote);
+                          setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                        }}
                       >
                         <Check data-icon="inline-start" />
                         Approve
@@ -1760,7 +1969,10 @@ function AdminView({
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => onReviewAnswer(task.id, member.id, "rejected")}
+                        onClick={() => {
+                          onReviewAnswer(task.id, member.id, "rejected", reviewNote);
+                          setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                        }}
                         className="border border-ink/20 bg-white"
                       >
                         <RotateCcw data-icon="inline-start" />
@@ -1988,6 +2200,9 @@ function AdminView({
           const progress = (data.progressUpdates?.[task.id] ?? []).filter(
             (update) => update.memberId === member.id,
           );
+          const awarded = responseAwardedPoints(task, response);
+          const late = responseIsLate(task, response);
+          const note = latestReviewNote(response);
           return (
             <div key={task.id} className="rounded-lg border border-ink/10 bg-white p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2001,6 +2216,12 @@ function AdminView({
                   {response?.status ?? "missing"}
                 </span>
               </div>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
+                <span>Score {awarded}/{sanitizePositiveNumber(task.points, 1)}</span>
+                <span>Rejections {rejectionCount(response)}</span>
+                {late && <span className="text-yellow-800">Late - half score</span>}
+              </div>
+              {note && <p className="mt-2 rounded-md border border-ink/10 bg-paper p-2 text-sm">Note: {note}</p>}
               {response && <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{response.answer}</p>}
               {progress.length > 0 && (
                 <p className="mt-2 text-xs font-bold text-yellow-800">{progress.length} progress updates</p>
@@ -2567,7 +2788,12 @@ function LegacyAdminView({
   onSaveQueuedProgress: (item: QueuedProgressUpdate) => void;
   onDismissQueuedProgress: (id: string) => void;
   onAddProgressUpdate: (task: StudioTask, memberId: string, note: string) => void;
-  onReviewAnswer: (taskId: string, memberId: string, status: "approved" | "rejected") => void;
+  onReviewAnswer: (
+    taskId: string,
+    memberId: string,
+    status: "approved" | "rejected",
+    note?: string,
+  ) => void;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
   onMarkRepoUpdateSeen: (updateId: string) => void;
@@ -4213,7 +4439,12 @@ function Index() {
     }
   }
 
-  async function reviewAnswer(taskId: string, memberId: string, status: "approved" | "rejected") {
+  async function reviewAnswer(
+    taskId: string,
+    memberId: string,
+    status: "approved" | "rejected",
+    note = "",
+  ) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
       return;
@@ -4226,6 +4457,7 @@ function Index() {
         taskId,
         memberId,
         status,
+        note: note.trim(),
       });
       setData(nextData);
       setIsDirty(false);
