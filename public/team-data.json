@@ -38,7 +38,7 @@
       "basePoints": 0,
       "adminNote": "",
       "baseApproved": 0,
-      "baseRejected": 0,
+      "baseRejected": 4,
       "publicFlag": "",
       "repoUrl": ""
     },
@@ -115,7 +115,7 @@
       "adminNote": "",
       "baseApproved": 0,
       "baseRejected": 0,
-      "publicFlag": "",
+      "publicFlag": "هاي",
       "repoUrl": ""
     },
     {
@@ -200,21 +200,10 @@
       "createdAt": "2026-06-30T19:06:18.914Z"
     }
   ],
-  "responses": {
-    "task-1782846378914": {
-      "kareem-adel": {
-        "memberId": "kareem-adel",
-        "memberName": "kareem adel",
-        "answer": "تم التسليم خارج الموقع وتم اعتماده يدويًا.",
-        "status": "approved",
-        "submittedAt": "2026-06-30T20:54:02.216Z",
-        "reviewedAt": "2026-06-30T20:54:07.615Z"
-      }
-    }
-  },
+  "responses": {},
   "progressUpdates": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-06-30T20:55:43.183Z"
+    "updatedAt": "2026-06-30T21:23:27.162Z"
   }
 }
