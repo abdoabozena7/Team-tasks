@@ -209,7 +209,7 @@
       "points": 1,
       "scope": "all",
       "createdAt": "2026-07-01T07:04:29.398Z",
-      "startAt": "1977-09-05T18:56:00.000Z",
+      "startAt": "1971-02-02T19:26:00.000Z",
       "deadlineAt": "2010-12-09T12:03:00.000Z",
       "status": "active",
       "memberIds": []
@@ -531,6 +531,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T19:13:19.437Z"
+    "updatedAt": "2026-07-01T19:13:21.067Z"
   }
 }
