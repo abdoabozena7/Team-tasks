@@ -1258,13 +1258,20 @@ function MemberView({
   }
 
   function renderMemberTaskLog() {
+    const logAssigned = activeMemberScore?.assignedTasks ?? memberTasks.length;
+    const logSubmitted = activeMemberScore?.submitted ?? memberLogTasks.filter((task) =>
+      Boolean(getResponse(data, task.id, activeMember.member.id)),
+    ).length;
+    const logApproved = activeMemberScore?.approved ?? 0;
+    const logRejected = activeMemberScore?.rejected ?? 0;
+
     return (
       <section className="mb-7 grid gap-3">
-        <div className="grid gap-2 sm:grid-cols-4">
-          <CompactMetric label="Old tasks" value={activeMember.member.baseCompleted ?? 0} />
-          <CompactMetric label="Old approved" value={activeMember.member.baseApproved ?? 0} />
-          <CompactMetric label="Old rejected" value={activeMember.member.baseRejected ?? 0} />
-          <CompactMetric label="Old points" value={activeMember.member.basePoints ?? 0} />
+        <div className="grid grid-cols-4 gap-2">
+          <CompactMetric label="Assigned" value={logAssigned} />
+          <CompactMetric label="Done" value={logSubmitted} />
+          <CompactMetric label="Accepted" value={logApproved} />
+          <CompactMetric label="Rejected" value={logRejected} />
         </div>
         {memberLogTasks.length === 0 ? (
           <div
@@ -1558,19 +1565,19 @@ function MemberView({
                   style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
                 >
                   <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="mb-1 text-sm font-bold text-foreground/60">
+                    <div className="min-w-0 flex-1 text-center">
+                      <p className="mb-1 text-center text-sm font-bold text-foreground/60">
                         <span>{taskAudienceLabel}</span>
                         <span className="mx-1.5">•</span>
                         <span className="text-red-600">{taskPointsLabel}</span>
                       </p>
-                      <div className="mb-2 flex w-full flex-wrap items-center justify-start gap-2 text-xs font-bold" dir="ltr">
+                      <div className="mb-2 flex w-full flex-wrap items-center justify-center gap-2 text-xs font-bold" dir="ltr">
                         <span className="rounded-full border-[2px] border-ink bg-white px-2.5 py-1">
                           deadline: {formatDateTime(task.deadlineAt)}
                         </span>
                       </div>
                       <h2
-                        className={cn("text-xl font-bold leading-tight", textAlignClass(task.title))}
+                        className={cn("text-lg font-bold leading-tight sm:text-xl", textAlignClass(task.title), "text-center")}
                         dir={taskTitleDir}
                       >
                         {task.title}
@@ -1734,27 +1741,29 @@ function MemberView({
         </section>
         )}
 
-        <section
-          className="border-[2.5px] border-ink bg-card p-5 doodle-shadow"
-          style={{
-            borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px",
-            transform: "rotate(-0.3deg)",
-          }}
-        >
-          <div className="mb-4 grid gap-2 md:flex md:flex-wrap md:items-center md:justify-between md:gap-3">
-            <h2 className="text-2xl font-bold" style={{ fontFamily: "Caveat, cursive" }}>
-              <span className="highlight-yellow">الترتيب</span>
-            </h2>
-            <div className="min-w-0 text-base font-bold leading-7 md:text-lg">
-              <span className="highlight-blue">
-                {stats.leader && stats.leader.points > 0
-                  ? `${memberArabicName(stats.leader.member)} متصدر بـ ${formatTaskPointsLabel(stats.leader.points)} عن الكل`
-                  : "لسه مفيش إنجازات محسوبة"}
-              </span>
+        {memberTab === "tasks" && (
+          <section
+            className="border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+            style={{
+              borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px",
+              transform: "rotate(-0.3deg)",
+            }}
+          >
+            <div className="mb-4 grid justify-items-center gap-2 text-center">
+              <h2 className="text-2xl font-bold" style={{ fontFamily: "Caveat, cursive" }}>
+                <span className="highlight-yellow">الترتيب</span>
+              </h2>
+              <div className="min-w-0 text-base font-bold leading-7 md:text-lg">
+                <span className="highlight-blue">
+                  {stats.leader && stats.leader.points > 0
+                    ? `${memberArabicName(stats.leader.member)} متصدر بـ ${formatTaskPointsLabel(stats.leader.points)} عن الكل`
+                    : "لسه مفيش إنجازات محسوبة"}
+                </span>
+              </div>
             </div>
-          </div>
-          <Leaderboard scores={stats.memberStats} />
-        </section>
+            <Leaderboard scores={stats.memberStats} />
+          </section>
+        )}
       </div>
 
       {settingsOpen && (
@@ -2132,11 +2141,31 @@ function clearFeedbackAfterSuccess(
   }, ACTION_SUCCESS_FLASH_MS);
 }
 
-function CompactMetric({ label, value }: { label: string; value: string | number }) {
+function CompactMetric({
+  label,
+  value,
+  horizontal = false,
+}: {
+  label: string;
+  value: string | number;
+  horizontal?: boolean;
+}) {
   return (
-    <div className="rounded-lg border border-ink/10 bg-white px-4 py-3">
-      <div className="text-2xl font-bold leading-none">{value}</div>
-      <div className="mt-1 text-xs font-medium text-foreground/55">{label}</div>
+    <div
+      className={cn(
+        "rounded-lg border border-ink/10 bg-white px-4 py-3",
+        horizontal ? "flex min-h-[84px] items-center justify-between gap-3 text-right" : "text-center",
+      )}
+    >
+      <div className={cn("text-2xl font-bold leading-none", horizontal ? "shrink-0 text-3xl" : "mx-auto")}>{value}</div>
+      <div
+        className={cn(
+          "text-xs font-medium text-foreground/55",
+          horizontal ? "max-w-[9rem] text-sm leading-5 text-foreground/75" : "mt-1 text-center",
+        )}
+      >
+        {label}
+      </div>
     </div>
   );
 }
