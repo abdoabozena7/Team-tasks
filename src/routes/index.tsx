@@ -270,12 +270,14 @@ const GITHUB_OWNER = "abdoabozena7";
 const GITHUB_REPO = "Team-tasks";
 const GITHUB_BRANCH = "main";
 const GITHUB_DATA_PATHS = ["team-data.json", "public/team-data.json"];
-const HIVO_API_URL = (import.meta.env.VITE_HIVO_API_URL ?? "").replace(/\/+$/, "");
+const DEFAULT_HIVO_API_URL = "https://hivo-studio-api.boodyabozena.workers.dev";
+const HIVO_API_URL = (import.meta.env.VITE_HIVO_API_URL || DEFAULT_HIVO_API_URL).replace(/\/+$/, "");
+const HIVO_QUEUE_URL = `${HIVO_API_URL}/api`;
 
 const DEFAULT_SETTINGS: StudioSettings = {
   adminPassword: DEFAULT_ADMIN_PASSWORD,
   statsPassword: DEFAULT_STATS_PASSWORD,
-  backendUrl: "",
+  backendUrl: HIVO_QUEUE_URL,
 };
 
 const DEFAULT_DATA: StudioData = {
@@ -349,7 +351,7 @@ function sanitizeData(data: StudioData): StudioData {
     settings: {
       adminPassword: data.settings?.adminPassword || DEFAULT_ADMIN_PASSWORD,
       statsPassword: data.settings?.statsPassword || DEFAULT_STATS_PASSWORD,
-      backendUrl: data.settings?.backendUrl ?? "",
+      backendUrl: data.settings?.backendUrl || HIVO_QUEUE_URL,
     },
     members: (data.members ?? []).map((member) => ({
       ...member,
