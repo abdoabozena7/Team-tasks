@@ -201,20 +201,7 @@
       "driveUrl": ""
     }
   ],
-  "tasks": [
-    {
-      "id": "task-1782933206243",
-      "title": "Sapiente perspiciati",
-      "question": "A ea et consectetur",
-      "points": 22,
-      "scope": "all",
-      "memberIds": [],
-      "createdAt": "2026-07-01T19:13:26.243Z",
-      "startAt": "2015-02-17T18:50:00.000Z",
-      "deadlineAt": "1971-12-03T22:59:00.000Z",
-      "status": "active"
-    }
-  ],
+  "tasks": [],
   "responses": {},
   "taskSkips": {},
   "progressUpdates": {},
@@ -255,6 +242,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T19:14:17.057Z"
+    "updatedAt": "2026-07-01T19:14:19.852Z"
   }
 }
