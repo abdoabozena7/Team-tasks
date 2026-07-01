@@ -222,6 +222,27 @@
       "startAt": "2026-06-29T19:18:00.000Z",
       "deadlineAt": "2026-07-02T13:00:00.000Z",
       "status": "active"
+    },
+    {
+      "id": "task-1782934576642",
+      "title": "basics of agentic ai (the message on the whatsapp)",
+      "question": "u will answer some questions",
+      "points": 2,
+      "scope": "member",
+      "memberId": "abo-grir",
+      "memberIds": [
+        "abo-grir",
+        "yossef-sharawy",
+        "renad",
+        "tasneem",
+        "rodina",
+        "fatema",
+        "marihan"
+      ],
+      "createdAt": "2026-07-01T19:36:16.642Z",
+      "startAt": "2026-07-01T19:35:00.000Z",
+      "deadlineAt": "2026-07-02T19:35:00.000Z",
+      "status": "active"
     }
   ],
   "responses": {
@@ -297,6 +318,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T19:21:25.270Z"
+    "updatedAt": "2026-07-01T19:36:16.642Z"
   }
 }
