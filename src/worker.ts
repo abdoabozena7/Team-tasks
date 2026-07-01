@@ -34,6 +34,7 @@ type TaskResponse = {
   reviewedAt?: string;
   awardedPoints?: number;
   lateSubmission?: boolean;
+  scoreOverride?: boolean;
   reviewEvents?: TaskReviewEvent[];
 };
 
@@ -43,6 +44,14 @@ type TaskReviewEvent = {
   reviewedAt: string;
   note?: string;
   awardedPoints?: number;
+  scoreOverride?: boolean;
+};
+
+type TaskSkip = {
+  memberId: string;
+  memberName: string;
+  skippedAt: string;
+  note?: string;
 };
 
 type TaskProgressUpdate = {
@@ -93,6 +102,7 @@ type StudioData = {
   members: Member[];
   tasks: StudioTask[];
   responses: Record<string, Record<string, TaskResponse>>;
+  taskSkips?: Record<string, Record<string, TaskSkip>>;
   progressUpdates?: Record<string, TaskProgressUpdate[]>;
   meetings?: Meeting[];
   meetingAttendance?: Record<string, Record<string, MeetingAttendance>>;
@@ -137,8 +147,23 @@ function positiveNumber(value: unknown, fallback: number) {
   return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : fallback;
 }
 
+function nonNegativeNumber(value: unknown, fallback: number) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue >= 0 ? numberValue : fallback;
+}
+
 function roundScore(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function taskWindowDuration(task: StudioTask) {
+  if (!task.deadlineAt) return null;
+  const startTime = new Date(task.startAt || task.createdAt).getTime();
+  const deadlineTime = new Date(task.deadlineAt).getTime();
+  if (!Number.isFinite(startTime) || !Number.isFinite(deadlineTime) || deadlineTime <= startTime) {
+    return null;
+  }
+  return deadlineTime - startTime;
 }
 
 function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submittedAt">) {
@@ -152,12 +177,21 @@ function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submit
   );
 }
 
+function isHardLocked(task: StudioTask, response: Pick<TaskResponse, "submittedAt">) {
+  const duration = taskWindowDuration(task);
+  if (duration === null || !task.deadlineAt) return false;
+  const deadlineTime = new Date(task.deadlineAt).getTime();
+  const submittedTime = new Date(response.submittedAt).getTime();
+  return Number.isFinite(submittedTime) && submittedTime > deadlineTime + duration;
+}
+
 function calculateAwardedPoints(
   task: StudioTask,
   response: Pick<TaskResponse, "submittedAt">,
   status: TaskResponse["status"],
 ) {
   if (status !== "approved") return 0;
+  if (isHardLocked(task, response)) return 0;
   const points = positiveNumber(task.points, 1);
   return roundScore(isSubmissionLate(task, response) ? points / 2 : points);
 }
@@ -167,16 +201,26 @@ function withReviewEvent(
   response: TaskResponse,
   status: "approved" | "rejected",
   note: string,
+  awardedPointsInput?: unknown,
+  overrideLocked = false,
 ) {
   const reviewedAt = new Date().toISOString();
   const lateSubmission = isSubmissionLate(task, response);
-  const awardedPoints = calculateAwardedPoints(task, response, status);
+  const hardLocked = isHardLocked(task, response);
+  if (status === "approved" && hardLocked && !overrideLocked) {
+    throw new Error("This submission is locked after double the deadline. Use override approve.");
+  }
+  const defaultPoints = calculateAwardedPoints(task, response, status);
+  const awardedPoints =
+    status === "approved" ? roundScore(nonNegativeNumber(awardedPointsInput, defaultPoints)) : 0;
+  const scoreOverride = status === "approved" && (overrideLocked || awardedPoints !== defaultPoints);
   const event: TaskReviewEvent = {
     id: `review-${Date.now()}`,
     status,
     reviewedAt,
     ...(note ? { note } : {}),
     ...(status === "approved" ? { awardedPoints } : {}),
+    ...(scoreOverride ? { scoreOverride } : {}),
   };
 
   return {
@@ -185,6 +229,7 @@ function withReviewEvent(
     reviewedAt,
     awardedPoints,
     lateSubmission,
+    scoreOverride,
     reviewEvents: [event, ...(response.reviewEvents ?? [])],
   };
 }
@@ -206,6 +251,7 @@ function normalizeData(data: StudioData): StudioData {
       status: task.status === "archived" ? "archived" : "active",
     })),
     responses: data.responses ?? {},
+    taskSkips: data.taskSkips ?? {},
     progressUpdates: data.progressUpdates ?? {},
     meetings: (data.meetings ?? []).map((meeting) => ({
       ...meeting,
@@ -410,6 +456,25 @@ function mergeProgressUpdates(latest: StudioData, incoming: StudioData) {
   return progressUpdates;
 }
 
+function mergeTaskSkips(latest: StudioData, incoming: StudioData) {
+  const allowedTaskIds = new Set(incoming.tasks.map((task) => task.id));
+  const taskIds = new Set([
+    ...Object.keys(latest.taskSkips ?? {}),
+    ...Object.keys(incoming.taskSkips ?? {}),
+  ]);
+  const taskSkips: NonNullable<StudioData["taskSkips"]> = {};
+
+  for (const taskId of taskIds) {
+    if (!allowedTaskIds.has(taskId)) continue;
+    taskSkips[taskId] = {
+      ...(latest.taskSkips?.[taskId] ?? {}),
+      ...(incoming.taskSkips?.[taskId] ?? {}),
+    };
+  }
+
+  return taskSkips;
+}
+
 function mergeRepoUpdates(latest: StudioData, incoming: StudioData) {
   const byId = new Map<string, NonNullable<StudioData["repoUpdates"]>[number]>();
   for (const update of latest.repoUpdates ?? []) byId.set(update.id, update);
@@ -441,6 +506,7 @@ function mergeAdminReplacement(latest: StudioData, incomingPayload: StudioData) 
   return {
     ...incoming,
     responses: mergeResponses(latest, incoming),
+    taskSkips: mergeTaskSkips(latest, incoming),
     progressUpdates: mergeProgressUpdates(latest, incoming),
     meetingAttendance: mergeMeetingAttendance(latest, incoming),
     repoUpdates: mergeRepoUpdates(latest, incoming),
@@ -543,6 +609,8 @@ export default {
             const memberId = String(payload.memberId ?? "");
             const status = payload.status === "approved" ? "approved" : "rejected";
             const note = String(payload.note ?? "").trim();
+            const overrideLocked = payload.overrideLocked === true;
+            const awardedPoints = payload.awardedPoints;
             const task = getTask(data, taskId);
             const response = data.responses[taskId]?.[memberId];
             if (!response) throw new Error("Response not found.");
@@ -552,7 +620,7 @@ export default {
                 ...data.responses,
                 [taskId]: {
                   ...data.responses[taskId],
-                  [memberId]: withReviewEvent(task, response, status, note),
+                  [memberId]: withReviewEvent(task, response, status, note, awardedPoints, overrideLocked),
                 },
               },
             };
@@ -586,10 +654,46 @@ export default {
                     submittedAt: new Date().toISOString(),
                     reviewedAt: new Date().toISOString(),
                   },
-                  [memberId]: withReviewEvent(task, response, "approved", ""),
+                  [memberId]: withReviewEvent(task, response, "approved", "", payload.awardedPoints, true),
                 },
               },
             };
+          }
+
+          if (action === "skipTaskMember") {
+            const taskId = String(payload.taskId ?? "");
+            const memberId = String(payload.memberId ?? "");
+            getTask(data, taskId);
+            const member = getMember(data, memberId);
+            const note = String(payload.note ?? "").trim();
+            return {
+              ...data,
+              taskSkips: {
+                ...(data.taskSkips ?? {}),
+                [taskId]: {
+                  ...((data.taskSkips ?? {})[taskId] ?? {}),
+                  [memberId]: {
+                    memberId,
+                    memberName: member.name,
+                    skippedAt: new Date().toISOString(),
+                    ...(note ? { note } : {}),
+                  },
+                },
+              },
+            };
+          }
+
+          if (action === "unskipTaskMember") {
+            const taskId = String(payload.taskId ?? "");
+            const memberId = String(payload.memberId ?? "");
+            getTask(data, taskId);
+            getMember(data, memberId);
+            const taskSkips = { ...(data.taskSkips ?? {}) };
+            const taskSkipMembers = { ...(taskSkips[taskId] ?? {}) };
+            delete taskSkipMembers[memberId];
+            if (Object.keys(taskSkipMembers).length > 0) taskSkips[taskId] = taskSkipMembers;
+            else delete taskSkips[taskId];
+            return { ...data, taskSkips };
           }
 
           if (action === "addProgressUpdate") {

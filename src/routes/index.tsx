@@ -90,6 +90,7 @@ type TaskResponse = {
   reviewedAt?: string;
   awardedPoints?: number;
   lateSubmission?: boolean;
+  scoreOverride?: boolean;
   reviewEvents?: TaskReviewEvent[];
 };
 
@@ -99,6 +100,14 @@ type TaskReviewEvent = {
   reviewedAt: string;
   note?: string;
   awardedPoints?: number;
+  scoreOverride?: boolean;
+};
+
+type TaskSkip = {
+  memberId: string;
+  memberName: string;
+  skippedAt: string;
+  note?: string;
 };
 
 type TaskProgressUpdate = {
@@ -175,6 +184,7 @@ type StudioData = {
   members: Member[];
   tasks: StudioTask[];
   responses: Record<string, Record<string, TaskResponse>>;
+  taskSkips?: Record<string, Record<string, TaskSkip>>;
   progressUpdates?: Record<string, TaskProgressUpdate[]>;
   meetings?: Meeting[];
   meetingAttendance?: Record<string, Record<string, MeetingAttendance>>;
@@ -257,6 +267,7 @@ const DEFAULT_DATA: StudioData = {
   members: [],
   tasks: [],
   responses: {},
+  taskSkips: {},
   progressUpdates: {},
   meetings: [],
   meetingAttendance: {},
@@ -335,6 +346,7 @@ function sanitizeData(data: StudioData): StudioData {
       status: task.status === "archived" ? "archived" : "active",
     })),
     responses: data.responses ?? {},
+    taskSkips: data.taskSkips ?? {},
     progressUpdates: data.progressUpdates ?? {},
     meetings: (data.meetings ?? []).map((meeting) => ({
       ...meeting,
@@ -464,8 +476,31 @@ function getResponse(data: StudioData, taskId: string, memberId: string) {
   return data.responses[taskId]?.[memberId];
 }
 
+function getTaskSkip(data: StudioData, taskId: string, memberId: string) {
+  return data.taskSkips?.[taskId]?.[memberId];
+}
+
+function isTaskSkipped(data: StudioData, taskId: string, memberId: string) {
+  return Boolean(getTaskSkip(data, taskId, memberId));
+}
+
 function roundScore(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function sanitizeScore(value: unknown, fallback = 0) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue >= 0 ? roundScore(numberValue) : fallback;
+}
+
+function taskWindowDuration(task: StudioTask) {
+  if (!task.deadlineAt) return null;
+  const startTime = new Date(task.startAt || task.createdAt).getTime();
+  const deadlineTime = new Date(task.deadlineAt).getTime();
+  if (!Number.isFinite(startTime) || !Number.isFinite(deadlineTime) || deadlineTime <= startTime) {
+    return null;
+  }
+  return deadlineTime - startTime;
 }
 
 function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submittedAt">) {
@@ -479,12 +514,21 @@ function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submit
   );
 }
 
+function isHardLocked(task: StudioTask, response: Pick<TaskResponse, "submittedAt">) {
+  const duration = taskWindowDuration(task);
+  if (duration === null || !task.deadlineAt) return false;
+  const deadlineTime = new Date(task.deadlineAt).getTime();
+  const submittedTime = new Date(response.submittedAt).getTime();
+  return Number.isFinite(submittedTime) && submittedTime > deadlineTime + duration;
+}
+
 function calculateAwardedPoints(
   task: StudioTask,
   response: Pick<TaskResponse, "submittedAt">,
   status: TaskResponse["status"],
 ) {
   if (status !== "approved") return 0;
+  if (isHardLocked(task, response)) return 0;
   const points = sanitizePositiveNumber(task.points, 1);
   return roundScore(isSubmissionLate(task, response) ? points / 2 : points);
 }
@@ -533,7 +577,9 @@ function createStats(data: StudioData) {
   const activeTasks = data.tasks.filter(isActiveTask);
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const memberStats = data.members.map((member) => {
-    const assignedTasks = activeTasks.filter((task) => taskIsForMember(task, member.id));
+    const assignedTasks = activeTasks.filter(
+      (task) => taskIsForMember(task, member.id) && !isTaskSkipped(data, task.id, member.id),
+    );
     const responses = assignedTasks
       .map((task) => ({ task, response: getResponse(data, task.id, member.id) }))
       .filter((item): item is { task: StudioTask; response: TaskResponse } =>
@@ -598,7 +644,10 @@ function createStats(data: StudioData) {
   const taskMetrics = activeTasks.map((task) => {
     const visibleMemberIds = new Set(
       data.members
-        .filter((member) => !member.hidden && taskIsForMember(task, member.id))
+        .filter(
+          (member) =>
+            !member.hidden && taskIsForMember(task, member.id) && !isTaskSkipped(data, task.id, member.id),
+        )
         .map((member) => member.id),
     );
     const expected =
@@ -939,6 +988,7 @@ function MemberView({
   );
   const memberTasks = data.tasks.filter((task) => {
     if (!taskIsForMember(task, activeMember.member.id)) return false;
+    if (isTaskSkipped(data, task.id, activeMember.member.id)) return false;
     return getResponse(data, task.id, activeMember.member.id)?.status !== "approved";
   });
   const memberLogTasks = data.tasks.filter((task) =>
@@ -980,6 +1030,7 @@ function MemberView({
         ) : (
           memberLogTasks.map((task) => {
             const response = getResponse(data, task.id, activeMember.member.id);
+            const skipped = getTaskSkip(data, task.id, activeMember.member.id);
             const progress = (data.progressUpdates?.[task.id] ?? []).filter(
               (update) => update.memberId === activeMember.member.id,
             );
@@ -1003,7 +1054,7 @@ function MemberView({
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <span className={`border-[2px] px-3 py-1 text-sm font-bold ${statusTone(response?.status)}`}>
-                      {response?.status ?? "missing"}
+                      {skipped ? "skipped" : response?.status ?? "missing"}
                     </span>
                     {late && (
                       <span className="border-[2px] border-yellow-700 bg-yellow-100 px-3 py-1 text-sm font-bold text-yellow-900">
@@ -1015,6 +1066,7 @@ function MemberView({
                 <div className="mt-3 flex flex-wrap gap-2 text-sm font-bold text-foreground/65">
                   <span>Points: {awarded}/{sanitizePositiveNumber(task.points, 1)}</span>
                   <span>Rejected: {rejects}</span>
+                  {skipped && <span>Skipped: no score impact</span>}
                   {response?.submittedAt && <span>Submitted: {formatDateTime(response.submittedAt)}</span>}
                   {response?.reviewedAt && <span>Reviewed: {formatDateTime(response.reviewedAt)}</span>}
                 </div>
@@ -1398,6 +1450,43 @@ function fromDateTimeInputValue(value: string) {
   return value ? new Date(value).toISOString() : "";
 }
 
+function DateTimeField({
+  label,
+  value,
+  onChange,
+  help,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  help: string;
+  tone?: "neutral" | "deadline";
+}) {
+  return (
+    <label
+      className={`grid gap-2 rounded-xl border p-3 ${
+        tone === "deadline"
+          ? "border-yellow-200 bg-yellow-50"
+          : "border-sky-100 bg-sky-50/70"
+      }`}
+    >
+      <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-foreground/60">
+        <CalendarClock className="size-4" />
+        {label}
+      </span>
+      <Input
+        type="datetime-local"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-11 border border-ink/20 bg-white text-left font-mono text-sm"
+        dir="ltr"
+      />
+      <span className="text-xs leading-5 text-foreground/55">{help}</span>
+    </label>
+  );
+}
+
 function calculateMeetingAttendance(meeting: Meeting, checkedAt = new Date().toISOString()) {
   const startTime = new Date(meeting.startsAt).getTime();
   const checkTime = new Date(checkedAt).getTime();
@@ -1504,6 +1593,8 @@ function AdminView({
   onRecordMeetingAttendance,
   onRemoveTask,
   onManualApprove,
+  onSkipTaskMember,
+  onUnskipTaskMember,
   onApproveQueuedSubmission,
   onRejectQueuedSubmission,
   onSaveQueuedProgress,
@@ -1536,6 +1627,8 @@ function AdminView({
   onRecordMeetingAttendance: (meeting: Meeting, member: Member) => void;
   onRemoveTask: (taskId: string) => void;
   onManualApprove: (task: StudioTask, memberId: string) => void;
+  onSkipTaskMember: (task: StudioTask, memberId: string, note?: string) => void;
+  onUnskipTaskMember: (task: StudioTask, memberId: string) => void;
   onApproveQueuedSubmission: (item: QueuedSubmission) => void;
   onRejectQueuedSubmission: (item: QueuedSubmission) => void;
   onSaveQueuedProgress: (item: QueuedProgressUpdate) => void;
@@ -1546,6 +1639,8 @@ function AdminView({
     memberId: string,
     status: "approved" | "rejected",
     note?: string,
+    awardedPoints?: number,
+    overrideLocked?: boolean,
   ) => void;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
@@ -1556,7 +1651,7 @@ function AdminView({
   onConfirmTokenAndSave: () => void;
   onSaveToGithub: () => void;
 }) {
-  const [section, setSection] = useState<AdminSection>("overview");
+  const [section, setSection] = useState<AdminSection>("tasks");
   const [navOpen, setNavOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskQuestion, setTaskQuestion] = useState("");
@@ -1576,6 +1671,8 @@ function AdminView({
   const [progressMembers, setProgressMembers] = useState<Record<string, string>>({});
   const [progressNotes, setProgressNotes] = useState<Record<string, string>>({});
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [reviewScores, setReviewScores] = useState<Record<string, string>>({});
+  const [skipNotes, setSkipNotes] = useState<Record<string, string>>({});
   const [logMode, setLogMode] = useState<"task" | "member">("task");
   const [query, setQuery] = useState("");
 
@@ -1667,13 +1764,29 @@ function AdminView({
     setMeetingPoints(1);
   }
 
+  function prepareTaskForMember(member: Member) {
+    setTaskScope("member");
+    setTaskMemberId(member.id);
+    setTaskTitle("");
+    setTaskQuestion("");
+    setSection("tasks");
+    setNavOpen(false);
+  }
+
   function assignedMembers(task: StudioTask) {
     return data.members.filter((member) => taskIsForMember(task, member.id));
   }
 
+  function effectiveAssignedMembers(task: StudioTask) {
+    return assignedMembers(task).filter((member) => !isTaskSkipped(data, task.id, member.id));
+  }
+
   function taskMetric(task: StudioTask) {
-    const members = assignedMembers(task);
-    const responses = Object.values(data.responses[task.id] ?? {});
+    const members = effectiveAssignedMembers(task);
+    const memberIds = new Set(members.map((member) => member.id));
+    const responses = Object.values(data.responses[task.id] ?? {}).filter((response) =>
+      memberIds.has(response.memberId),
+    );
     return {
       expected: members.filter((member) => !member.hidden).length,
       received: responses.length,
@@ -1790,28 +1903,19 @@ function AdminView({
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="grid gap-1 text-sm font-bold">
-            Start
-            <Input
-              type="datetime-local"
-              value={toDateTimeInputValue(task.startAt)}
-              onChange={(event) =>
-                onUpdateTask(task.id, { startAt: fromDateTimeInputValue(event.target.value) })
-              }
-              className="border border-ink/20 bg-paper"
-            />
-          </label>
-          <label className="grid gap-1 text-sm font-bold">
-            Deadline
-            <Input
-              type="datetime-local"
-              value={toDateTimeInputValue(task.deadlineAt)}
-              onChange={(event) =>
-                onUpdateTask(task.id, { deadlineAt: fromDateTimeInputValue(event.target.value) })
-              }
-              className="border border-ink/20 bg-paper"
-            />
-          </label>
+          <DateTimeField
+            label="Start"
+            value={toDateTimeInputValue(task.startAt)}
+            onChange={(value) => onUpdateTask(task.id, { startAt: fromDateTimeInputValue(value) })}
+            help="Start controls when this assignment opens."
+          />
+          <DateTimeField
+            label="Deadline"
+            value={toDateTimeInputValue(task.deadlineAt)}
+            onChange={(value) => onUpdateTask(task.id, { deadlineAt: fromDateTimeInputValue(value) })}
+            help="After deadline: default half score. After double time: locked unless overridden."
+            tone="deadline"
+          />
         </div>
 
         <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr]">
@@ -1895,16 +1999,24 @@ function AdminView({
             const response = responses[member.id];
             const reviewNoteKey = `${task.id}:${member.id}`;
             const reviewNote = reviewNotes[reviewNoteKey] ?? "";
+            const scoreValue =
+              reviewScores[reviewNoteKey] ??
+              (response ? String(calculateAwardedPoints(task, response, "approved")) : "");
+            const skipNote = skipNotes[reviewNoteKey] ?? "";
+            const skipped = getTaskSkip(data, task.id, member.id);
             const progress = (data.progressUpdates?.[task.id] ?? []).filter(
               (update) => update.memberId === member.id,
             );
             const awarded = responseAwardedPoints(task, response);
             const late = responseIsLate(task, response);
+            const hardLocked = response ? isHardLocked(task, response) : false;
             return (
               <details
                 key={member.id}
                 className={`rounded-lg border p-3 transition ${
-                  response?.status === "approved"
+                  skipped
+                    ? "border-zinc-200 bg-zinc-50"
+                    : response?.status === "approved"
                     ? "border-emerald-200 bg-emerald-50"
                     : response?.status === "submitted"
                       ? "border-yellow-200 bg-yellow-50"
@@ -1917,13 +2029,59 @@ function AdminView({
                   <div className="min-w-0">
                     <strong className="truncate">{member.name}</strong>
                     <div className="text-xs text-foreground/55">
-                      {response ? `Submitted ${formatDateTime(response.submittedAt)}` : "No final submission"}
+                      {skipped
+                        ? `Skipped ${formatDateTime(skipped.skippedAt)}`
+                        : response
+                          ? `Submitted ${formatDateTime(response.submittedAt)}`
+                          : "No final submission"}
                     </div>
                   </div>
-                  <span className={`rounded-full border px-2 py-1 text-xs font-bold ${statusTone(response?.status)}`}>
-                    {response?.status ?? "missing"}
+                  <span className={`rounded-full border px-2 py-1 text-xs font-bold ${skipped ? "border-zinc-300 bg-zinc-100 text-zinc-600" : statusTone(response?.status)}`}>
+                    {skipped ? "skipped" : response?.status ?? "missing"}
                   </span>
                 </summary>
+                <div className="mt-3 grid gap-2 rounded-md border border-zinc-200 bg-white/70 p-3">
+                  <Input
+                    value={skipNote}
+                    onChange={(event) =>
+                      setSkipNotes((current) => ({
+                        ...current,
+                        [reviewNoteKey]: event.target.value,
+                      }))
+                    }
+                    placeholder="Optional skip note"
+                    className="border border-ink/20 bg-white"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {skipped ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onUnskipTaskMember(task, member.id)}
+                        className="border border-ink/20 bg-white"
+                      >
+                        Restore assignment
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          onSkipTaskMember(task, member.id, skipNote);
+                          setSkipNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                        }}
+                        className="border border-zinc-300 bg-zinc-100 text-zinc-700"
+                      >
+                        Skip member
+                      </Button>
+                    )}
+                    <span className="text-xs leading-8 text-foreground/55">
+                      Skip is a full exemption: no points, no penalties, no completion count.
+                    </span>
+                  </div>
+                </div>
                 {response && (
                   <div className="mt-3 rounded-md border border-ink/10 bg-paper p-3">
                     <p className="whitespace-pre-wrap leading-7">{response.answer}</p>
@@ -1934,6 +2092,11 @@ function AdminView({
                       {late && (
                         <span className="rounded-full border border-yellow-300 bg-yellow-100 px-2 py-1 text-yellow-900">
                           Late - half score
+                        </span>
+                      )}
+                      {hardLocked && (
+                        <span className="rounded-full border border-red-300 bg-red-50 px-2 py-1 text-red-700">
+                          Locked - override required
                         </span>
                       )}
                       {rejectionCount(response) > 0 && (
@@ -1953,24 +2116,71 @@ function AdminView({
                       placeholder="Optional review note"
                       className="mt-3 border border-ink/20 bg-white"
                     />
+                    <label className="mt-3 grid gap-1 text-xs font-bold text-foreground/70">
+                      Awarded score
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={scoreValue}
+                        onChange={(event) =>
+                          setReviewScores((current) => ({
+                            ...current,
+                            [reviewNoteKey]: event.target.value,
+                          }))
+                        }
+                        className="border border-ink/20 bg-white"
+                      />
+                      <span className="font-normal text-foreground/55">
+                        You can award bonus above the task points. Default follows the deadline rule.
+                      </span>
+                    </label>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
                         type="button"
                         size="sm"
+                        disabled={hardLocked}
                         onClick={() => {
-                          onReviewAnswer(task.id, member.id, "approved", reviewNote);
+                          onReviewAnswer(
+                            task.id,
+                            member.id,
+                            "approved",
+                            reviewNote,
+                            sanitizeScore(scoreValue, calculateAwardedPoints(task, response, "approved")),
+                            false,
+                          );
                           setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
                         }}
                       >
                         <Check data-icon="inline-start" />
                         Approve
                       </Button>
+                      {hardLocked && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => {
+                            onReviewAnswer(
+                              task.id,
+                              member.id,
+                              "approved",
+                              reviewNote,
+                              sanitizeScore(scoreValue, 0),
+                              true,
+                            );
+                            setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                          }}
+                          className="bg-red-600 text-white hover:bg-red-700"
+                        >
+                          Override approve
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          onReviewAnswer(task.id, member.id, "rejected", reviewNote);
+                          onReviewAnswer(task.id, member.id, "rejected", reviewNote, 0, false);
                           setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
                         }}
                         className="border border-ink/20 bg-white"
@@ -2081,17 +2291,12 @@ function AdminView({
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <label className="grid gap-1 text-sm font-bold">
-            Start
-            <Input
-              type="datetime-local"
-              value={toDateTimeInputValue(meeting.startsAt)}
-              onChange={(event) =>
-                onUpdateMeeting(meeting.id, { startsAt: fromDateTimeInputValue(event.target.value) })
-              }
-              className="border border-ink/20 bg-paper"
-            />
-          </label>
+          <DateTimeField
+            label="Start"
+            value={toDateTimeInputValue(meeting.startsAt)}
+            onChange={(value) => onUpdateMeeting(meeting.id, { startsAt: fromDateTimeInputValue(value) })}
+            help="Used to calculate late minutes."
+          />
           <label className="grid gap-1 text-sm font-bold">
             Duration minutes
             <Input
@@ -2197,6 +2402,7 @@ function AdminView({
         )}
         {memberTasks.map((task) => {
           const response = getResponse(data, task.id, member.id);
+          const skipped = getTaskSkip(data, task.id, member.id);
           const progress = (data.progressUpdates?.[task.id] ?? []).filter(
             (update) => update.memberId === member.id,
           );
@@ -2212,13 +2418,14 @@ function AdminView({
                     {taskStatus(task)} | deadline {formatDateTime(task.deadlineAt)}
                   </div>
                 </div>
-                <span className={`rounded-full border px-2 py-1 text-xs font-bold ${statusTone(response?.status)}`}>
-                  {response?.status ?? "missing"}
+                <span className={`rounded-full border px-2 py-1 text-xs font-bold ${skipped ? "border-zinc-300 bg-zinc-100 text-zinc-600" : statusTone(response?.status)}`}>
+                  {skipped ? "skipped" : response?.status ?? "missing"}
                 </span>
               </div>
               <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
                 <span>Score {awarded}/{sanitizePositiveNumber(task.points, 1)}</span>
                 <span>Rejections {rejectionCount(response)}</span>
+                {skipped && <span>Skip exemption: no profile impact</span>}
                 {late && <span className="text-yellow-800">Late - half score</span>}
               </div>
               {note && <p className="mt-2 rounded-md border border-ink/10 bg-paper p-2 text-sm">Note: {note}</p>}
@@ -2234,7 +2441,6 @@ function AdminView({
   }
 
   const navItems: Array<{ id: AdminSection; label: string; icon: typeof BarChart3 }> = [
-    { id: "overview", label: "Overview", icon: BarChart3 },
     { id: "tasks", label: "Tasks", icon: ClipboardList },
     { id: "meetings", label: "Meetings", icon: CalendarClock },
     { id: "members", label: "Members", icon: Users },
@@ -2275,8 +2481,8 @@ function AdminView({
   );
 
   return (
-    <div className="min-h-screen bg-[#f7f6f0] text-foreground" dir="rtl">
-      <aside className="fixed inset-y-0 right-0 z-30 hidden w-64 border-l border-ink/10 bg-paper/95 p-4 backdrop-blur lg:block">
+    <div className="min-h-screen bg-[#f7f6f0] text-foreground" dir="ltr">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-ink/10 bg-paper/95 p-4 backdrop-blur lg:block">
         {nav}
       </aside>
 
@@ -2288,7 +2494,7 @@ function AdminView({
             onClick={() => setNavOpen(false)}
             aria-label="Close navigation"
           />
-          <aside className="relative mr-auto h-full w-72 border-l border-ink/10 bg-paper p-4 shadow-xl">
+          <aside className="relative h-full w-72 border-r border-ink/10 bg-paper p-4 shadow-xl">
             <button
               type="button"
               onClick={() => setNavOpen(false)}
@@ -2302,7 +2508,7 @@ function AdminView({
         </div>
       )}
 
-      <main className="lg:pr-64">
+      <main className="lg:pl-64">
         <header className="sticky top-0 z-20 border-b border-ink/10 bg-[#f7f6f0]/90 px-4 py-3 backdrop-blur">
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -2411,13 +2617,27 @@ function AdminView({
           {section === "tasks" && (
             <section className="grid gap-5 xl:grid-cols-[380px_1fr]">
               <div className="grid gap-4">
-                <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
-                  <h2 className="text-xl font-bold">New task</h2>
-                  <div className="mt-3 grid gap-3">
-                    <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Task title" className="border border-ink/20 bg-paper" />
-                    <Textarea value={taskQuestion} onChange={(event) => setTaskQuestion(event.target.value)} placeholder="Question or instructions" className="min-h-24 border border-ink/20 bg-paper" />
+                <div className="rounded-xl border border-sky-100 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-xl font-bold">Create task</h2>
+                      <p className="mt-1 text-sm text-foreground/55">
+                        Choose who gets the task, then set scoring and deadline rules.
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700">
+                      Guided
+                    </span>
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Task title" className="h-11 border border-ink/20 bg-white" />
+                    <Textarea value={taskQuestion} onChange={(event) => setTaskQuestion(event.target.value)} placeholder="Question or instructions" className="min-h-24 border border-ink/20 bg-white" />
                     <div className="grid gap-2 sm:grid-cols-2">
-                      <Input type="number" min={1} value={taskPoints} onChange={(event) => setTaskPoints(Number(event.target.value))} placeholder="Points" className="border border-ink/20 bg-paper" />
+                      <label className="grid gap-1 text-xs font-bold text-foreground/65">
+                        Base points
+                        <Input type="number" min={1} value={taskPoints} onChange={(event) => setTaskPoints(Number(event.target.value))} placeholder="Points" className="h-11 border border-ink/20 bg-white" />
+                        <span className="font-normal text-foreground/50">Admin can still award bonus when approving.</span>
+                      </label>
                       <select
                         value={taskScope === "all" ? "all" : taskMemberId}
                         onChange={(event) => {
@@ -2429,7 +2649,7 @@ function AdminView({
                             setTaskMemberId(event.target.value);
                           }
                         }}
-                        className="h-10 rounded-md border border-ink/20 bg-paper px-3 text-sm"
+                        className="h-11 rounded-md border border-ink/20 bg-white px-3 text-sm"
                       >
                         <option value="all">All team</option>
                         {data.members.map((member) => (
@@ -2438,16 +2658,24 @@ function AdminView({
                       </select>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2">
-                      <label className="grid gap-1 text-xs font-bold">
-                        Start
-                        <Input type="datetime-local" value={taskStartAt} onChange={(event) => setTaskStartAt(event.target.value)} className="border border-ink/20 bg-paper" />
-                      </label>
-                      <label className="grid gap-1 text-xs font-bold">
-                        Deadline
-                        <Input type="datetime-local" value={taskDeadlineAt} onChange={(event) => setTaskDeadlineAt(event.target.value)} className="border border-ink/20 bg-paper" />
-                      </label>
+                      <DateTimeField
+                        label="Start"
+                        value={taskStartAt}
+                        onChange={setTaskStartAt}
+                        help="Start controls when the task opens."
+                      />
+                      <DateTimeField
+                        label="Deadline"
+                        value={taskDeadlineAt}
+                        onChange={setTaskDeadlineAt}
+                        help="After deadline: default half score. After double time: locked unless overridden."
+                        tone="deadline"
+                      />
                     </div>
-                    <Button type="button" onClick={submitTask}>
+                    <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs leading-5 text-yellow-900">
+                      Deadline rule: late submissions default to half score. Submissions after double the task window require override approval.
+                    </div>
+                    <Button type="button" onClick={submitTask} className="h-11 bg-sky-500 text-white hover:bg-sky-600">
                       <Plus data-icon="inline-start" />
                       Add task
                     </Button>
@@ -2465,24 +2693,24 @@ function AdminView({
           {section === "meetings" && (
             <section className="grid gap-5 xl:grid-cols-[380px_1fr]">
               <div className="grid gap-4">
-                <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
-                  <h2 className="text-xl font-bold">New meeting</h2>
-                  <div className="mt-3 grid gap-3">
+                <div className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
+                  <h2 className="text-xl font-bold">Create meeting</h2>
+                  <p className="mt-1 text-sm text-foreground/55">
+                    Attendance points are calculated from check-in time and lateness.
+                  </p>
+                  <div className="mt-4 grid gap-3">
                     <Input
                       value={meetingTitle}
                       onChange={(event) => setMeetingTitle(event.target.value)}
                       placeholder="Meeting title"
-                      className="border border-ink/20 bg-paper"
+                      className="h-11 border border-ink/20 bg-white"
                     />
-                    <label className="grid gap-1 text-xs font-bold">
-                      Start time
-                      <Input
-                        type="datetime-local"
-                        value={meetingStartsAt}
-                        onChange={(event) => setMeetingStartsAt(event.target.value)}
-                        className="border border-ink/20 bg-paper"
-                      />
-                    </label>
+                    <DateTimeField
+                      label="Start time"
+                      value={meetingStartsAt}
+                      onChange={setMeetingStartsAt}
+                      help="Start time is used to calculate late minutes."
+                    />
                     <div className="grid gap-2 sm:grid-cols-2">
                       <Input
                         type="number"
@@ -2490,7 +2718,7 @@ function AdminView({
                         value={meetingDuration}
                         onChange={(event) => setMeetingDuration(Number(event.target.value))}
                         placeholder="Duration minutes"
-                        className="border border-ink/20 bg-paper"
+                        className="h-11 border border-ink/20 bg-white"
                       />
                       <Input
                         type="number"
@@ -2499,10 +2727,10 @@ function AdminView({
                         value={meetingPoints}
                         onChange={(event) => setMeetingPoints(Number(event.target.value))}
                         placeholder="Points"
-                        className="border border-ink/20 bg-paper"
+                        className="h-11 border border-ink/20 bg-white"
                       />
                     </div>
-                    <Button type="button" onClick={submitMeeting}>
+                    <Button type="button" onClick={submitMeeting} className="h-11 bg-emerald-600 text-white hover:bg-emerald-700">
                       <Plus data-icon="inline-start" />
                       Add meeting
                     </Button>
@@ -2557,6 +2785,21 @@ function AdminView({
                     </summary>
                     <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr]">
                       <div className="grid gap-3">
+                        <div className="rounded-lg border border-sky-100 bg-sky-50 p-3">
+                          <div className="font-bold">Individual assignment</div>
+                          <p className="mt-1 text-sm text-foreground/55">
+                            Create a task for this member only. Nobody else will see it.
+                          </p>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => prepareTaskForMember(member)}
+                            className="mt-3 bg-sky-500 text-white hover:bg-sky-600"
+                          >
+                            <Plus data-icon="inline-start" />
+                            Create task for {member.name}
+                          </Button>
+                        </div>
                         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                           {([
                             ["Old tasks", "baseCompleted", "bg-white"],
@@ -2793,6 +3036,8 @@ function LegacyAdminView({
     memberId: string,
     status: "approved" | "rejected",
     note?: string,
+    awardedPoints?: number,
+    overrideLocked?: boolean,
   ) => void;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
@@ -3662,7 +3907,7 @@ function StatsView({
         : "At risk";
 
   return (
-    <div className="min-h-screen bg-[#f7f6f0] text-foreground" dir="rtl">
+    <div className="min-h-screen bg-[#f7f6f0] text-foreground" dir="ltr">
       <main className="mx-auto grid max-w-lg gap-4 px-4 py-5 md:max-w-4xl md:grid-cols-2 md:py-8">
         <header className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm md:col-span-2">
           <div className="flex items-start justify-between gap-3">
@@ -3700,6 +3945,9 @@ function StatsView({
             <CompactMetric label="Pending" value={stats.pendingTotal} />
             <CompactMetric label="Done" value={receivedTotal} />
           </div>
+          <p className="mt-3 text-xs leading-5 text-foreground/55">
+            Active counts tasks still open. Pending means waiting for admin review. Done means final submissions received for active tasks.
+          </p>
         </section>
 
         <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
@@ -3725,11 +3973,17 @@ function StatsView({
           <div className="mt-3 grid gap-2 text-sm">
             {chartData.map((item) => (
               <div key={item.name} className="flex items-center justify-between gap-3">
-                <span>{item.name}</span>
+                <span className="flex items-center gap-2">
+                  <span className="size-2 rounded-full" style={{ backgroundColor: item.fill }} />
+                  {item.name}
+                </span>
                 <strong>{item.value}</strong>
               </div>
             ))}
           </div>
+          <p className="mt-3 text-xs leading-5 text-foreground/55">
+            Accepted adds points, pending adds no points yet, rejected increases the review history only.
+          </p>
         </section>
 
         <section className="grid gap-3">
@@ -3739,6 +3993,7 @@ function StatsView({
             <p className="mt-1 text-sm text-foreground/55">
               {leader ? `${leader.points} points / ${leader.completed} accepted tasks` : "No data yet"}
             </p>
+            <p className="mt-2 text-xs text-foreground/45">Points include task scores, bonuses, and meeting points.</p>
           </div>
           <div className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
             <div className="text-sm font-bold text-foreground/50">Needs follow-up</div>
@@ -3748,11 +4003,13 @@ function StatsView({
                 ? `${formatPercent(needsFollowUp.responseRate)} submitted / ${needsFollowUp.pending} pending`
                 : "No active assignments"}
             </p>
+            <p className="mt-2 text-xs text-foreground/45">Lowest response rate among members with active assignments.</p>
           </div>
           <div className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
             <div className="text-sm font-bold text-foreground/50">Meeting points</div>
             <div className="mt-1 text-2xl font-bold">{Math.round(meetingPointsTotal * 100) / 100}</div>
             <p className="mt-1 text-sm text-foreground/55">Included in leaderboard totals.</p>
+            <p className="mt-2 text-xs text-foreground/45">Late check-ins reduce meeting score gradually.</p>
           </div>
         </section>
 
@@ -4344,14 +4601,17 @@ function Index() {
   function removeTask(taskId: string) {
     updateData((current) => {
       const nextResponses = { ...current.responses };
+      const nextTaskSkips = { ...(current.taskSkips ?? {}) };
       const nextProgressUpdates = { ...(current.progressUpdates ?? {}) };
       delete nextResponses[taskId];
+      delete nextTaskSkips[taskId];
       delete nextProgressUpdates[taskId];
 
       return {
         ...current,
         tasks: current.tasks.filter((task) => task.id !== taskId),
         responses: nextResponses,
+        taskSkips: nextTaskSkips,
         progressUpdates: nextProgressUpdates,
       };
     });
@@ -4444,6 +4704,8 @@ function Index() {
     memberId: string,
     status: "approved" | "rejected",
     note = "",
+    awardedPoints?: number,
+    overrideLocked = false,
   ) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
@@ -4458,6 +4720,8 @@ function Index() {
         memberId,
         status,
         note: note.trim(),
+        awardedPoints,
+        overrideLocked,
       });
       setData(nextData);
       setIsDirty(false);
@@ -4518,6 +4782,55 @@ function Index() {
       setSaveStatus(
         error instanceof Error ? `Save failed: ${error.message}` : "Save failed. Nothing was approved.",
       );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function skipTaskMember(task: StudioTask, memberId: string, note = "") {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return;
+    }
+    if (!memberId) return;
+
+    setIsSaving(true);
+    setSaveStatus("Syncing data...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "skipTaskMember", {
+        taskId: task.id,
+        memberId,
+        note: note.trim(),
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Member skipped for this task.");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function unskipTaskMember(task: StudioTask, memberId: string) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return;
+    }
+    if (!memberId) return;
+
+    setIsSaving(true);
+    setSaveStatus("Syncing data...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "unskipTaskMember", {
+        taskId: task.id,
+        memberId,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Member assignment restored.");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
     } finally {
       setIsSaving(false);
     }
@@ -4702,6 +5015,8 @@ function Index() {
         onRecordMeetingAttendance={recordMeetingAttendance}
         onRemoveTask={removeTask}
         onManualApprove={manualApprove}
+        onSkipTaskMember={skipTaskMember}
+        onUnskipTaskMember={unskipTaskMember}
         onApproveQueuedSubmission={approveQueuedSubmission}
         onRejectQueuedSubmission={rejectQueuedSubmission}
         onSaveQueuedProgress={saveQueuedProgress}
