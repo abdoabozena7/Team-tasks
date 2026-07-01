@@ -58,6 +58,7 @@ type Member = {
   adminNote?: string;
   publicFlag?: string;
   repoUrl?: string;
+  driveUrl?: string;
 };
 
 type StudioTask = {
@@ -67,6 +68,7 @@ type StudioTask = {
   points: number;
   scope: "all" | "member";
   memberId?: string;
+  memberIds?: string[];
   createdAt: string;
   startAt?: string;
   deadlineAt?: string;
@@ -158,6 +160,7 @@ type RepoAttentionRequest = {
   taskId?: string;
   excerpt?: string;
   note?: string;
+  source?: RepoUpdate["source"];
 };
 
 type AdminQueue = {
@@ -170,7 +173,7 @@ type RepoUpdate = {
   memberId: string;
   createdAt: string;
   taskId?: string;
-  source?: "submission" | "progress" | "manual";
+  source?: "submission" | "progress" | "manual" | "drive";
   excerpt?: string;
   note?: string;
   seen?: boolean;
@@ -184,8 +187,10 @@ type MemberProfileRequest = {
   status: "pending" | "approved" | "rejected";
   nickname?: string;
   repoUrl?: string;
+  driveUrl?: string;
   previousAliases?: string[];
   previousRepoUrl?: string;
+  previousDriveUrl?: string;
   reviewedAt?: string;
 };
 
@@ -193,6 +198,7 @@ type MemberProfileRequestInput = {
   memberId: string;
   nickname?: string;
   repoUrl?: string;
+  driveUrl?: string;
 };
 
 type StudioData = {
@@ -365,10 +371,20 @@ function sanitizeData(data: StudioData): StudioData {
       adminNote: member.adminNote ?? "",
       publicFlag: member.publicFlag ?? "",
       repoUrl: member.repoUrl ?? "",
+      driveUrl: member.driveUrl ?? "",
     })),
     tasks: (data.tasks ?? []).map((task) => ({
       ...task,
       points: sanitizeNumber(task.points) || 1,
+      scope: task.scope === "member" ? "member" : "all",
+      memberId:
+        task.scope === "member"
+          ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
+          : undefined,
+      memberIds:
+        task.scope === "member"
+          ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
+          : [],
       startAt: task.startAt ?? task.createdAt,
       deadlineAt: task.deadlineAt ?? "",
       status: task.status === "archived" ? "archived" : "active",
@@ -393,7 +409,9 @@ function sanitizeData(data: StudioData): StudioData {
 }
 
 function taskIsForMember(task: StudioTask, memberId: string) {
-  return task.scope === "all" || task.memberId === memberId;
+  if (task.scope === "all") return true;
+  const memberIds = task.memberIds?.length ? task.memberIds : task.memberId ? [task.memberId] : [];
+  return memberIds.includes(memberId);
 }
 
 function taskStatus(task: StudioTask) {
@@ -679,14 +697,7 @@ function createStats(data: StudioData) {
         )
         .map((member) => member.id),
     );
-    const expected =
-      task.scope === "member"
-        ? task.memberId
-          ? visibleMemberIds.has(task.memberId)
-            ? 1
-            : 0
-          : 0
-        : data.members.filter((member) => !member.hidden).length;
+    const expected = visibleMemberIds.size;
     const responses = Object.values(data.responses[task.id] ?? {}).filter((response) =>
       visibleMemberIds.has(response.memberId),
     );
@@ -997,6 +1008,7 @@ function MemberView({
   onSubmitFinal,
   onSubmitProgress,
   onRepoAttention,
+  onDriveAttention,
   onProfileChangeRequest,
   onLogout,
   onRefreshData,
@@ -1012,6 +1024,7 @@ function MemberView({
   onSubmitFinal: (task: StudioTask) => boolean | Promise<boolean>;
   onSubmitProgress: (task: StudioTask) => boolean | Promise<boolean>;
   onRepoAttention: (task: StudioTask) => boolean | Promise<boolean>;
+  onDriveAttention: (task: StudioTask) => boolean | Promise<boolean>;
   onProfileChangeRequest: (item: MemberProfileRequestInput) => boolean | Promise<boolean>;
   onLogout: () => void;
   onRefreshData: () => Promise<void>;
@@ -1019,6 +1032,7 @@ function MemberView({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [repoDraft, setRepoDraft] = useState(activeMember.member.repoUrl ?? "");
+  const [driveDraft, setDriveDraft] = useState(activeMember.member.driveUrl ?? "");
   const [memberTab, setMemberTab] = useState<"tasks" | "log">("tasks");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedOnce, setRefreshedOnce] = useState(
@@ -1037,7 +1051,9 @@ function MemberView({
     taskIsForMember(task, activeMember.member.id),
   );
   const hasProfileChange =
-    nicknameDraft.trim().length > 0 || repoDraft.trim() !== (activeMember.member.repoUrl ?? "");
+    nicknameDraft.trim().length > 0 ||
+    repoDraft.trim() !== (activeMember.member.repoUrl ?? "") ||
+    driveDraft.trim() !== (activeMember.member.driveUrl ?? "");
   const profileActionKey = `profile:${activeMember.member.id}`;
   const profileFeedback = actionFeedback[profileActionKey];
 
@@ -1045,7 +1061,8 @@ function MemberView({
     if (!settingsOpen) return;
     setNicknameDraft("");
     setRepoDraft(activeMember.member.repoUrl ?? "");
-  }, [activeMember.member.id, activeMember.member.repoUrl, settingsOpen]);
+    setDriveDraft(activeMember.member.driveUrl ?? "");
+  }, [activeMember.member.driveUrl, activeMember.member.id, activeMember.member.repoUrl, settingsOpen]);
 
   async function refreshMemberData() {
     setRefreshing(true);
@@ -1240,7 +1257,7 @@ function MemberView({
                 className="border-[2px] border-ink bg-paper doodle-shadow-sm"
               >
                 <LogOut data-icon="inline-start" />
-                تغيير الاسم
+                <span className="text-sm">تسجيل خروج</span>
               </Button>
             </div>
           </div>
@@ -1307,6 +1324,7 @@ function MemberView({
               const finalFeedback = actionFeedback[key];
               const progressFeedback = actionFeedback[taskProgressKey];
               const repoFeedback = actionFeedback[`repo:${task.id}:${activeMember.member.id}`];
+              const driveFeedback = actionFeedback[`drive:${task.id}:${activeMember.member.id}`];
               const finalAnswer = draftAnswers[key] ?? existing?.answer ?? "";
               const progressNote = draftAnswers[taskProgressKey] ?? "";
               const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
@@ -1476,12 +1494,40 @@ function MemberView({
                         <Bell data-icon="inline-start" />
                         GitHub attention
                       </Button>
+                      <Button
+                        type="button"
+                        data-testid={`drive-attention-${task.id}`}
+                        onClick={() => {
+                          const driveKey = `drive:${task.id}:${activeMember.member.id}`;
+                          void runMemberAction(
+                            driveKey,
+                            () => onDriveAttention(task),
+                            "Drive attention sent.",
+                            "Could not notify admin. Try again.",
+                          );
+                        }}
+                        disabled={isSubmitting}
+                        variant="outline"
+                        className={actionButtonClass(
+                          "border-[2px] border-ink bg-paper doodle-shadow-sm",
+                          driveFeedback,
+                        )}
+                      >
+                        <FolderOpen data-icon="inline-start" />
+                        Drive attention
+                      </Button>
                     </div>
                     <ActionFeedbackLine feedback={progressFeedback} />
                     <ActionFeedbackLine feedback={repoFeedback} />
+                    <ActionFeedbackLine feedback={driveFeedback} />
                     {!activeMember.member.repoUrl && (
                       <p className="mt-2 text-xs font-bold text-yellow-800">
                         Admin may need to add your repo URL, but the alert will still be sent.
+                      </p>
+                    )}
+                    {!activeMember.member.driveUrl && (
+                      <p className="mt-2 text-xs font-bold text-yellow-800">
+                        Admin may need to add your Drive link, but the alert will still be sent.
                       </p>
                     )}
                   </div>
@@ -1541,6 +1587,11 @@ function MemberView({
                   ضيف GitHub repo بتاعك علشان لسه مش مضاف هنا.
                 </p>
               )}
+              {!activeMember.member.driveUrl && (
+                <p className="mt-2 rounded-md border-[2px] border-yellow-700 bg-yellow-100 p-2 font-bold text-yellow-900">
+                  Add your Drive link for files that are not code.
+                </p>
+              )}
               <label className="mt-3 block font-bold" htmlFor="member-nickname">
                 Nickname
               </label>
@@ -1562,6 +1613,20 @@ function MemberView({
                 placeholder="https://github.com/user/repo"
                 className="mt-1 border-[2px] border-ink bg-white text-left"
               />
+              <label className="mt-3 block font-bold" htmlFor="member-drive">
+                Drive link
+              </label>
+              <Input
+                id="member-drive"
+                dir="ltr"
+                value={driveDraft}
+                onChange={(event) => setDriveDraft(event.target.value)}
+                placeholder="https://drive.google.com/..."
+                className="mt-1 border-[2px] border-ink bg-white text-left"
+              />
+              <p className="mt-1 text-xs text-foreground/55">
+                Use this for designs, PDFs, videos, and non-code uploads.
+              </p>
               <p className="mt-1 text-xs text-foreground/55">
                 تقدر تمسح القديم وتبعت غيره، والأدمن لازم يوافق.
               </p>
@@ -1571,7 +1636,7 @@ function MemberView({
                 disabled={isSubmitting}
                 onClick={() => {
                   if (!hasProfileChange) {
-                    blockMemberAction(profileActionKey, ["nickname or GitHub repo change"]);
+                    blockMemberAction(profileActionKey, ["nickname, GitHub repo, or Drive link change"]);
                     return;
                   }
                   void runMemberAction(
@@ -1581,6 +1646,7 @@ function MemberView({
                         memberId: activeMember.member.id,
                         nickname: nicknameDraft.trim(),
                         repoUrl: repoDraft.trim(),
+                        driveUrl: driveDraft.trim(),
                       }),
                     "Profile request sent.",
                     "Could not send profile request. Try again.",
@@ -1608,6 +1674,20 @@ function MemberView({
                 </Button>
               ) : (
                 <p className="mt-2 font-bold text-red-700">لا يوجد ريبو محفوظ رسميًا.</p>
+              )}
+              {activeMember.member.driveUrl ? (
+                <Button
+                  type="button"
+                  onClick={() =>
+                    window.open(activeMember.member.driveUrl, "_blank", "noopener,noreferrer")
+                  }
+                  className="mt-3 border-[2px] border-ink doodle-shadow-sm"
+                >
+                  <FolderOpen data-icon="inline-start" />
+                  Open my Drive
+                </Button>
+              ) : (
+                <p className="mt-2 font-bold text-red-700">No official Drive link saved.</p>
               )}
             </div>
 
@@ -1740,6 +1820,28 @@ function createRepoUpdateFromText({
   text: string;
 }): RepoUpdate | null {
   if (!containsGitHubSignal(text)) return null;
+  return {
+    id: `repo-${source}-${memberId}-${taskId ?? "general"}-${Date.now()}`,
+    memberId,
+    taskId,
+    source,
+    excerpt: text.trim().slice(0, 140),
+    createdAt: new Date().toISOString(),
+    seen: false,
+  };
+}
+
+function createAttentionUpdate({
+  memberId,
+  taskId,
+  source,
+  text,
+}: {
+  memberId: string;
+  taskId?: string;
+  source: RepoUpdate["source"];
+  text: string;
+}): RepoUpdate {
   return {
     id: `repo-${source}-${memberId}-${taskId ?? "general"}-${Date.now()}`,
     memberId,
@@ -1899,7 +2001,7 @@ function AdminView({
   const [taskQuestion, setTaskQuestion] = useState("");
   const [taskPoints, setTaskPoints] = useState(1);
   const [taskScope, setTaskScope] = useState<"all" | "member">("all");
-  const [taskMemberId, setTaskMemberId] = useState("");
+  const [taskMemberIds, setTaskMemberIds] = useState<string[]>([]);
   const [taskStartAt, setTaskStartAt] = useState("");
   const [taskDeadlineAt, setTaskDeadlineAt] = useState("");
   const [meetingTitle, setMeetingTitle] = useState("");
@@ -1916,6 +2018,9 @@ function AdminView({
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [reviewScores, setReviewScores] = useState<Record<string, string>>({});
   const [skipNotes, setSkipNotes] = useState<Record<string, string>>({});
+  const [taskEditDrafts, setTaskEditDrafts] = useState<
+    Record<string, { title: string; question: string; points: string; scope: "all" | "member"; memberIds: string[] }>
+  >({});
   const [logMode, setLogMode] = useState<"task" | "member">("task");
   const [query, setQuery] = useState("");
   const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
@@ -2005,7 +2110,7 @@ function AdminView({
     const missing = [
       !taskTitle.trim() ? "task title" : "",
       !taskQuestion.trim() ? "question or instructions" : "",
-      taskScope === "member" && !taskMemberId ? "member" : "",
+      taskScope === "member" && taskMemberIds.length === 0 ? "at least one member" : "",
     ].filter((field): field is string => Boolean(field));
     if (missing.length > 0) {
       blockAdminAction("admin:add-task", missing);
@@ -2020,7 +2125,8 @@ function AdminView({
           question: taskQuestion.trim(),
           points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
           scope: taskScope,
-          memberId: taskScope === "member" ? taskMemberId : undefined,
+          memberId: taskScope === "member" ? taskMemberIds[0] : undefined,
+          memberIds: taskScope === "member" ? taskMemberIds : [],
           startAt: fromDateTimeInputValue(taskStartAt) || new Date().toISOString(),
           deadlineAt: fromDateTimeInputValue(taskDeadlineAt),
           status: "active",
@@ -2033,7 +2139,7 @@ function AdminView({
     setTaskQuestion("");
     setTaskPoints(1);
     setTaskScope("all");
-    setTaskMemberId("");
+    setTaskMemberIds([]);
     setTaskStartAt("");
     setTaskDeadlineAt("");
   }
@@ -2065,7 +2171,7 @@ function AdminView({
 
   function prepareTaskForMember(member: Member) {
     setTaskScope("member");
-    setTaskMemberId(member.id);
+    setTaskMemberIds([member.id]);
     setTaskTitle("");
     setTaskQuestion("");
     setSection("tasks");
@@ -2078,6 +2184,67 @@ function AdminView({
 
   function effectiveAssignedMembers(task: StudioTask) {
     return assignedMembers(task).filter((member) => !isTaskSkipped(data, task.id, member.id));
+  }
+
+  function selectedMemberIdsForTask(task: StudioTask) {
+    if (task.scope === "all") return data.members.map((member) => member.id);
+    return uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []));
+  }
+
+  function taskAudienceLabel(task: StudioTask) {
+    if (task.scope === "all") return "All team";
+    const memberIds = selectedMemberIdsForTask(task);
+    if (memberIds.length === 1) {
+      return data.members.find((member) => member.id === memberIds[0])?.name ?? "One member";
+    }
+    return `${memberIds.length} members`;
+  }
+
+  function toggleTaskMemberDraft(memberId: string) {
+    setTaskScope("member");
+    setTaskMemberIds((current) =>
+      current.includes(memberId)
+        ? current.filter((id) => id !== memberId)
+        : [...current, memberId],
+    );
+  }
+
+  function taskEditDraft(task: StudioTask) {
+    return (
+      taskEditDrafts[task.id] ?? {
+        title: task.title,
+        question: task.question,
+        points: String(sanitizePositiveNumber(task.points, 1)),
+        scope: task.scope,
+        memberIds: task.scope === "member" ? selectedMemberIdsForTask(task) : [],
+      }
+    );
+  }
+
+  function updateTaskEditDraft(
+    task: StudioTask,
+    updates: Partial<{ title: string; question: string; points: string; scope: "all" | "member"; memberIds: string[] }>,
+  ) {
+    setTaskEditDrafts((current) => ({
+      ...current,
+      [task.id]: { ...taskEditDraft(task), ...updates },
+    }));
+  }
+
+  function resetTaskEditDraft(taskId: string) {
+    setTaskEditDrafts((current) => {
+      const next = { ...current };
+      delete next[taskId];
+      return next;
+    });
+  }
+
+  function toggleTaskEditMember(task: StudioTask, memberId: string) {
+    const draft = taskEditDraft(task);
+    const memberIds = draft.memberIds.includes(memberId)
+      ? draft.memberIds.filter((id) => id !== memberId)
+      : [...draft.memberIds, memberId];
+    updateTaskEditDraft(task, { scope: "member", memberIds });
   }
 
   function taskMetric(task: StudioTask) {
@@ -2118,9 +2285,7 @@ function AdminView({
                 <div className="min-w-0">
                   <div className="truncate text-lg font-bold">{task.title}</div>
                   <div className="mt-1 text-xs text-foreground/55">
-                    {task.scope === "all"
-                      ? "All team"
-                      : data.members.find((member) => member.id === task.memberId)?.name ?? "One member"}{" "}
+                    {taskAudienceLabel(task)}{" "}
                     | {task.points || 1} pts | deadline {formatDateTime(task.deadlineAt)}
                   </div>
                 </div>
@@ -2150,6 +2315,8 @@ function AdminView({
     const progressNote = progressNotes[task.id] ?? "";
     const manualApproveKey = `admin:manual-approve:${task.id}`;
     const addProgressKey = `admin:add-progress:${task.id}`;
+    const saveTaskKey = `admin:save-task:${task.id}`;
+    const editDraft = taskEditDraft(task);
 
     return (
       <section className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
@@ -2218,6 +2385,113 @@ function AdminView({
             help="After deadline: default half score. After double time: locked unless overridden."
             tone="deadline"
           />
+        </div>
+
+        <div className="mt-4 rounded-lg border border-ink/10 bg-paper p-3">
+          <div className="mb-3 flex items-center gap-2 font-bold">
+            <ClipboardList className="size-4" />
+            Edit task
+          </div>
+          <div className="grid gap-3">
+            <Input
+              value={editDraft.title}
+              onChange={(event) => updateTaskEditDraft(task, { title: event.target.value })}
+              placeholder="Task title"
+              className="border border-ink/20 bg-white"
+            />
+            <Textarea
+              value={editDraft.question}
+              onChange={(event) => updateTaskEditDraft(task, { question: event.target.value })}
+              placeholder="Question or instructions"
+              className="min-h-24 border border-ink/20 bg-white"
+            />
+            <div className="grid gap-3 md:grid-cols-[140px_1fr]">
+              <Input
+                type="number"
+                min={1}
+                value={editDraft.points}
+                onChange={(event) => updateTaskEditDraft(task, { points: event.target.value })}
+                placeholder="Points"
+                className="border border-ink/20 bg-white"
+              />
+              <div className="grid gap-2 rounded-md border border-ink/20 bg-white p-2 text-sm">
+                <label className="flex h-8 items-center gap-2 font-bold">
+                  <input
+                    type="checkbox"
+                    checked={editDraft.scope === "all"}
+                    onChange={(event) =>
+                      updateTaskEditDraft(task, {
+                        scope: event.target.checked ? "all" : "member",
+                        memberIds: event.target.checked ? [] : editDraft.memberIds,
+                      })
+                    }
+                  />
+                  All team
+                </label>
+                <div className="max-h-36 overflow-auto border-t border-ink/10 pt-2">
+                  {data.members.map((member) => (
+                    <label key={member.id} className="flex h-8 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        disabled={editDraft.scope === "all"}
+                        checked={editDraft.scope === "all" || editDraft.memberIds.includes(member.id)}
+                        onChange={() => toggleTaskEditMember(task, member.id)}
+                      />
+                      <span className="truncate">{member.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  const cleanMemberIds = uniqueText(editDraft.memberIds).filter((memberId) =>
+                    data.members.some((member) => member.id === memberId),
+                  );
+                  const missing = [
+                    !editDraft.title.trim() ? "task title" : "",
+                    !editDraft.question.trim() ? "question or instructions" : "",
+                    editDraft.scope === "member" && cleanMemberIds.length === 0 ? "at least one member" : "",
+                  ].filter((field): field is string => Boolean(field));
+                  if (missing.length > 0) {
+                    blockAdminAction(saveTaskKey, missing);
+                    return;
+                  }
+                  void runAdminAction(
+                    saveTaskKey,
+                    () =>
+                      onUpdateTask(task.id, {
+                        title: editDraft.title.trim(),
+                        question: editDraft.question.trim(),
+                        points: sanitizePositiveNumber(editDraft.points, sanitizePositiveNumber(task.points, 1)),
+                        scope: editDraft.scope,
+                        memberId: editDraft.scope === "member" ? cleanMemberIds[0] : undefined,
+                        memberIds: editDraft.scope === "member" ? cleanMemberIds : [],
+                      }),
+                    "Task updated.",
+                    "Task update failed. Try again.",
+                  ).then((ok) => {
+                    if (ok) resetTaskEditDraft(task.id);
+                  });
+                }}
+                className={actionButtonClass("", actionFeedback[saveTaskKey])}
+              >
+                <Save data-icon="inline-start" />
+                Save task
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => resetTaskEditDraft(task.id)}
+                className="border border-ink/20 bg-white"
+              >
+                Reset
+              </Button>
+            </div>
+            <ActionFeedbackLine feedback={actionFeedback[saveTaskKey]} />
+          </div>
         </div>
 
         <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr]">
@@ -3034,7 +3308,7 @@ function AdminView({
                   <div>
                     <h2 className="text-2xl font-bold">Profile requests</h2>
                     <p className="mt-1 text-sm text-sky-900/70">
-                      Members can request a nickname or GitHub repo change. Approve applies it; reject leaves the official profile unchanged.
+                      Members can request a nickname, GitHub repo, or Drive link change. Approve applies it; reject leaves the official profile unchanged.
                     </p>
                   </div>
                   <span className="rounded-full border border-sky-300 bg-white px-3 py-1 text-sm font-bold text-sky-900">
@@ -3068,9 +3342,19 @@ function AdminView({
                                     Repo: <strong>{request.repoUrl || "Remove saved repo"}</strong>
                                   </span>
                                 )}
+                                {request.driveUrl !== undefined && (
+                                  <span className="break-all">
+                                    Drive: <strong>{request.driveUrl || "Remove saved Drive"}</strong>
+                                  </span>
+                                )}
                                 {request.previousRepoUrl && (
                                   <span className="break-all text-xs text-foreground/45">
                                     Previous repo: {request.previousRepoUrl}
+                                  </span>
+                                )}
+                                {request.previousDriveUrl && (
+                                  <span className="break-all text-xs text-foreground/45">
+                                    Previous Drive: {request.previousDriveUrl}
                                   </span>
                                 )}
                               </div>
@@ -3080,6 +3364,12 @@ function AdminView({
                                 <Button type="button" size="sm" onClick={() => window.open(request.repoUrl, "_blank", "noopener,noreferrer")}>
                                   <ExternalLink data-icon="inline-start" />
                                   Open new repo
+                                </Button>
+                              )}
+                              {request.driveUrl && (
+                                <Button type="button" size="sm" onClick={() => window.open(request.driveUrl, "_blank", "noopener,noreferrer")}>
+                                  <FolderOpen data-icon="inline-start" />
+                                  Open new Drive
                                 </Button>
                               )}
                               <Button type="button" size="sm" onClick={() => onReviewProfileRequest(request.id, "approved")}>
@@ -3107,9 +3397,9 @@ function AdminView({
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-2xl font-bold">Repo updates need attention</h2>
+                    <h2 className="text-2xl font-bold">Updates need attention</h2>
                     <p className="mt-1 text-sm text-yellow-900/70">
-                      These are explicit GitHub attention requests or submissions that mentioned GitHub.
+                      These are progress notes, GitHub requests, Drive requests, or submissions that need admin attention.
                     </p>
                   </div>
                   <span className="rounded-full border border-yellow-300 bg-white px-3 py-1 text-sm font-bold text-yellow-900">
@@ -3119,7 +3409,7 @@ function AdminView({
                 <div className="mt-4 grid gap-3">
                   {unseenUpdates.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-yellow-300 bg-white p-4 text-sm text-foreground/60">
-                      No repo updates are waiting. The admin flow will open reviews or tasks next.
+                      No updates are waiting. The admin flow will open reviews or tasks next.
                     </p>
                   ) : (
                     unseenUpdates.map((update) => {
@@ -3155,10 +3445,16 @@ function AdminView({
                               )}
                             </div>
                             <div className="flex flex-wrap gap-2">
-                              {member?.repoUrl && (
+                              {member?.repoUrl && update.source !== "drive" && (
                                 <Button type="button" size="sm" onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}>
                                   <ExternalLink data-icon="inline-start" />
                                   Open repo
+                                </Button>
+                              )}
+                              {member?.driveUrl && update.source === "drive" && (
+                                <Button type="button" size="sm" onClick={() => window.open(member.driveUrl, "_blank", "noopener,noreferrer")}>
+                                  <FolderOpen data-icon="inline-start" />
+                                  Open Drive
                                 </Button>
                               )}
                               <Button type="button" size="sm" variant="outline" onClick={() => onMarkRepoUpdateSeen(update.id)} className="border border-ink/20 bg-white">
@@ -3174,23 +3470,34 @@ function AdminView({
               </div>
 
               <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
-                <h2 className="text-xl font-bold">Team repo directory</h2>
+                <h2 className="text-xl font-bold">Team links directory</h2>
                 <p className="mt-1 text-sm text-foreground/55">
-                  Open member repositories quickly while checking updates.
+                  Open member repositories and Drive folders quickly while checking updates.
                 </p>
                 <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {data.members.map((member) => (
                     <div key={member.id} className="flex items-center justify-between gap-3 rounded-lg border border-ink/10 bg-paper p-3">
                       <strong className="truncate">{member.name}</strong>
-                      {member.repoUrl ? (
-                        <Button type="button" size="sm" onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}>
-                          Repo
-                        </Button>
-                      ) : (
-                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-500">
-                          No repo
-                        </span>
-                      )}
+                      <div className="flex shrink-0 gap-2">
+                        {member.repoUrl ? (
+                          <Button type="button" size="sm" onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}>
+                            Repo
+                          </Button>
+                        ) : (
+                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-500">
+                            No repo
+                          </span>
+                        )}
+                        {member.driveUrl ? (
+                          <Button type="button" size="sm" onClick={() => window.open(member.driveUrl, "_blank", "noopener,noreferrer")}>
+                            Drive
+                          </Button>
+                        ) : (
+                          <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-500">
+                            No Drive
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -3264,24 +3571,32 @@ function AdminView({
                         <Input type="number" min={1} value={taskPoints} onChange={(event) => setTaskPoints(Number(event.target.value))} placeholder="Points" className="h-11 border border-ink/20 bg-white" />
                         <span className="font-normal text-foreground/50">Admin can still award bonus when approving.</span>
                       </label>
-                      <select
-                        value={taskScope === "all" ? "all" : taskMemberId}
-                        onChange={(event) => {
-                          if (event.target.value === "all") {
-                            setTaskScope("all");
-                            setTaskMemberId("");
-                          } else {
-                            setTaskScope("member");
-                            setTaskMemberId(event.target.value);
-                          }
-                        }}
-                        className="h-11 rounded-md border border-ink/20 bg-white px-3 text-sm"
-                      >
-                        <option value="all">All team</option>
-                        {data.members.map((member) => (
-                          <option key={member.id} value={member.id}>{member.name}</option>
-                        ))}
-                      </select>
+                      <div className="grid gap-2 rounded-md border border-ink/20 bg-white p-2 text-sm">
+                        <label className="flex h-8 items-center gap-2 font-bold">
+                          <input
+                            type="checkbox"
+                            checked={taskScope === "all"}
+                            onChange={(event) => {
+                              setTaskScope(event.target.checked ? "all" : "member");
+                              if (event.target.checked) setTaskMemberIds([]);
+                            }}
+                          />
+                          All team
+                        </label>
+                        <div className="max-h-32 overflow-auto border-t border-ink/10 pt-2">
+                          {data.members.map((member) => (
+                            <label key={member.id} className="flex h-8 items-center gap-2">
+                              <input
+                                type="checkbox"
+                                disabled={taskScope === "all"}
+                                checked={taskScope === "all" || taskMemberIds.includes(member.id)}
+                                onChange={() => toggleTaskMemberDraft(member.id)}
+                              />
+                              <span className="truncate">{member.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     <div className="grid gap-2">
                       <DateTimeField
@@ -3466,6 +3781,7 @@ function AdminView({
                         <Input value={member.publicFlag ?? ""} onChange={(event) => onUpdateMember(member.id, { publicFlag: event.target.value })} placeholder="Public flag" className="border border-ink/20 bg-red-50" />
                         <Input value={member.adminNote ?? ""} onChange={(event) => onUpdateMember(member.id, { adminNote: event.target.value })} placeholder="Private admin note" className="border border-ink/20 bg-paper" />
                         <Input value={member.repoUrl ?? ""} onChange={(event) => onUpdateMember(member.id, { repoUrl: event.target.value })} placeholder="Repo URL" dir="ltr" className="border border-ink/20 bg-paper text-left" />
+                        <Input value={member.driveUrl ?? ""} onChange={(event) => onUpdateMember(member.id, { driveUrl: event.target.value })} placeholder="Drive URL" dir="ltr" className="border border-ink/20 bg-paper text-left" />
                         <Input value={member.aliases.join(", ")} onChange={(event) => onUpdateMember(member.id, { aliases: uniqueText(event.target.value.split(",")) })} placeholder="Aliases" className="border border-ink/20 bg-paper" />
                       </div>
                       <div>
@@ -3567,10 +3883,16 @@ function AdminView({
                             )}
                           </div>
                           <div className="flex gap-2">
-                            {member?.repoUrl && (
+                            {member?.repoUrl && update.source !== "drive" && (
                               <Button type="button" size="sm" onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}>
                                 <ExternalLink data-icon="inline-start" />
                                 Repo
+                              </Button>
+                            )}
+                            {member?.driveUrl && update.source === "drive" && (
+                              <Button type="button" size="sm" onClick={() => window.open(member.driveUrl, "_blank", "noopener,noreferrer")}>
+                                <FolderOpen data-icon="inline-start" />
+                                Drive
                               </Button>
                             )}
                             <Button type="button" size="sm" variant="outline" onClick={() => onMarkRepoUpdateSeen(update.id)} className="border border-ink/20 bg-white">Done</Button>
@@ -5557,7 +5879,7 @@ function Index() {
     setIsSubmitting(true);
     try {
       const nextData = await postProgressUpdate(item);
-      const repoUpdate = createRepoUpdateFromText({
+      const repoUpdate = createAttentionUpdate({
         memberId: item.memberId,
         taskId: item.taskId,
         source: "progress",
@@ -5598,6 +5920,31 @@ function Index() {
     } catch (error) {
       setRefreshStatus(
         error instanceof Error ? error.message : "Could not notify admin about GitHub.",
+      );
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function sendDriveAttention(task: StudioTask) {
+    if (!activeMember) return false;
+
+    setIsSubmitting(true);
+    try {
+      const nextData = await postRepoAttention({
+        memberId: activeMember.member.id,
+        taskId: task.id,
+        source: "drive",
+        excerpt: `Drive attention requested for ${task.title}`,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setRefreshStatus("Admin was notified about your Drive update.");
+      return true;
+    } catch (error) {
+      setRefreshStatus(
+        error instanceof Error ? error.message : "Could not notify admin about Drive.",
       );
       return false;
     } finally {
@@ -6034,6 +6381,7 @@ function Index() {
         onSubmitFinal={submitFinalSubmission}
         onSubmitProgress={submitProgressUpdate}
         onRepoAttention={sendRepoAttention}
+        onDriveAttention={sendDriveAttention}
         onProfileChangeRequest={submitProfileChangeRequest}
         onLogout={logout}
         onRefreshData={refreshData}

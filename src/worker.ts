@@ -10,6 +10,7 @@ type Member = {
   adminNote?: string;
   publicFlag?: string;
   repoUrl?: string;
+  driveUrl?: string;
 };
 
 type StudioTask = {
@@ -19,6 +20,7 @@ type StudioTask = {
   points: number;
   scope: "all" | "member";
   memberId?: string;
+  memberIds?: string[];
   createdAt: string;
   startAt?: string;
   deadlineAt?: string;
@@ -86,7 +88,7 @@ type RepoUpdate = {
   memberId: string;
   createdAt: string;
   taskId?: string;
-  source?: "submission" | "progress" | "manual";
+  source?: "submission" | "progress" | "manual" | "drive";
   excerpt?: string;
   note?: string;
   seen?: boolean;
@@ -100,8 +102,10 @@ type MemberProfileRequest = {
   status: "pending" | "approved" | "rejected";
   nickname?: string;
   repoUrl?: string;
+  driveUrl?: string;
   previousAliases?: string[];
   previousRepoUrl?: string;
+  previousDriveUrl?: string;
   reviewedAt?: string;
 };
 
@@ -262,9 +266,23 @@ function normalizeData(data: StudioData): StudioData {
       statsPassword: data.settings?.statsPassword ?? "",
       backendUrl: data.settings?.backendUrl ?? "",
     },
-    members: data.members ?? [],
+    members: (data.members ?? []).map((member) => ({
+      ...member,
+      aliases: uniqueText(member.aliases ?? []),
+      driveUrl: member.driveUrl ?? "",
+      repoUrl: member.repoUrl ?? "",
+    })),
     tasks: (data.tasks ?? []).map((task) => ({
       ...task,
+      scope: task.scope === "member" ? "member" : "all",
+      memberId:
+        task.scope === "member"
+          ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
+          : undefined,
+      memberIds:
+        task.scope === "member"
+          ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
+          : [],
       startAt: task.startAt ?? task.createdAt,
       deadlineAt: task.deadlineAt ?? "",
       status: task.status === "archived" ? "archived" : "active",
@@ -318,6 +336,28 @@ function repoUpdateFromText({
   text: string;
 }): RepoUpdate | null {
   if (!containsGitHubSignal(text)) return null;
+  return {
+    id: `repo-${source}-${memberId}-${taskId ?? "general"}-${Date.now()}`,
+    memberId,
+    taskId,
+    source,
+    excerpt: text.trim().slice(0, 140),
+    createdAt: new Date().toISOString(),
+    seen: false,
+  };
+}
+
+function attentionUpdate({
+  memberId,
+  taskId,
+  source,
+  text,
+}: {
+  memberId: string;
+  taskId?: string;
+  source: RepoUpdate["source"];
+  text: string;
+}): RepoUpdate {
   return {
     id: `repo-${source}-${memberId}-${taskId ?? "general"}-${Date.now()}`,
     memberId,
@@ -441,6 +481,16 @@ function getMember(data: StudioData, memberId: string) {
   const member = data.members.find((item) => item.id === memberId);
   if (!member) throw new Error("Member not found.");
   return member;
+}
+
+function assignedMemberIds(task: Partial<StudioTask>) {
+  return uniqueText(task.memberIds ?? (task.memberId ? [String(task.memberId)] : []));
+}
+
+function checkedMemberIds(data: StudioData, memberIds: string[]) {
+  const cleanIds = uniqueText(memberIds);
+  for (const memberId of cleanIds) getMember(data, memberId);
+  return cleanIds;
 }
 
 function mergeResponses(latest: StudioData, incoming: StudioData) {
@@ -599,7 +649,7 @@ export default {
         const next = await commitData(env, `Progress ${item.taskId} by ${item.memberId}`, (data) => {
           getTask(data, item.taskId);
           getMember(data, item.memberId);
-          const repoUpdate = repoUpdateFromText({
+          const repoUpdate = attentionUpdate({
             memberId: item.memberId,
             taskId: item.taskId,
             source: "progress",
@@ -633,16 +683,22 @@ export default {
           taskId?: string;
           excerpt?: string;
           note?: string;
+          source?: RepoUpdate["source"];
         };
         const next = await commitData(env, `Repo attention by ${item.memberId}`, (data) => {
           getMember(data, item.memberId);
           if (item.taskId) getTask(data, item.taskId);
+          const source: RepoUpdate["source"] = item.source === "drive" ? "drive" : "manual";
           const update: RepoUpdate = {
-            id: `repo-manual-${item.memberId}-${item.taskId ?? "general"}-${Date.now()}`,
+            id: `repo-${source}-${item.memberId}-${item.taskId ?? "general"}-${Date.now()}`,
             memberId: item.memberId,
             taskId: item.taskId,
-            source: "manual",
-            excerpt: String(item.excerpt ?? item.note ?? "GitHub attention requested.").slice(0, 140),
+            source,
+            excerpt: String(
+              item.excerpt ??
+                item.note ??
+                (source === "drive" ? "Drive attention requested." : "GitHub attention requested."),
+            ).slice(0, 140),
             createdAt: new Date().toISOString(),
             seen: false,
           };
@@ -656,15 +712,18 @@ export default {
           memberId: string;
           nickname?: string;
           repoUrl?: string;
+          driveUrl?: string;
         };
         const next = await commitData(env, `Profile request by ${item.memberId}`, (data) => {
           const member = getMember(data, String(item.memberId ?? ""));
           const hasNickname = Object.prototype.hasOwnProperty.call(item, "nickname");
           const hasRepoUrl = Object.prototype.hasOwnProperty.call(item, "repoUrl");
+          const hasDriveUrl = Object.prototype.hasOwnProperty.call(item, "driveUrl");
           const nickname = String(item.nickname ?? "").trim();
           const repoUrl = String(item.repoUrl ?? "").trim();
-          if ((!hasNickname || !nickname) && !hasRepoUrl) {
-            throw new Error("Nickname or GitHub repo is required.");
+          const driveUrl = String(item.driveUrl ?? "").trim();
+          if ((!hasNickname || !nickname) && !hasRepoUrl && !hasDriveUrl) {
+            throw new Error("Nickname, GitHub repo, or Drive link is required.");
           }
           const profileRequest: MemberProfileRequest = {
             id: `profile-${member.id}-${Date.now()}`,
@@ -674,8 +733,10 @@ export default {
             status: "pending",
             ...(nickname ? { nickname } : {}),
             ...(hasRepoUrl ? { repoUrl } : {}),
+            ...(hasDriveUrl ? { driveUrl } : {}),
             previousAliases: member.aliases ?? [],
             previousRepoUrl: member.repoUrl ?? "",
+            previousDriveUrl: member.driveUrl ?? "",
           };
           return {
             ...data,
@@ -699,15 +760,17 @@ export default {
           if (action === "addTask") {
             const task = payload.task as Partial<StudioTask> | undefined;
             if (!task?.title || !task.question) throw new Error("Task title and question are required.");
-            if (task.scope === "member" && !task.memberId) throw new Error("Member task needs a member.");
-            if (task.memberId) getMember(data, String(task.memberId));
+            const scope = task.scope === "member" ? "member" : "all";
+            const memberIds = scope === "member" ? checkedMemberIds(data, assignedMemberIds(task)) : [];
+            if (scope === "member" && memberIds.length === 0) throw new Error("Member task needs at least one member.");
             const nextTask: StudioTask = {
               id: `task-${Date.now()}`,
               title: String(task.title),
               question: String(task.question),
               points: positiveNumber(task.points, 1),
-              scope: task.scope === "member" ? "member" : "all",
-              memberId: task.scope === "member" ? String(task.memberId) : undefined,
+              scope,
+              memberId: scope === "member" ? memberIds[0] : undefined,
+              memberIds,
               createdAt: new Date().toISOString(),
               startAt: task.startAt || new Date().toISOString(),
               deadlineAt: task.deadlineAt || "",
@@ -718,9 +781,19 @@ export default {
 
           if (action === "updateTask") {
             const taskId = String(payload.taskId ?? "");
-            getTask(data, taskId);
+            const existingTask = getTask(data, taskId);
             const updates = (payload.updates ?? {}) as Partial<StudioTask>;
-            if (updates.memberId) getMember(data, String(updates.memberId));
+            const nextScope = updates.scope === "member" ? "member" : updates.scope === "all" ? "all" : existingTask.scope;
+            const fallbackMemberIds = assignedMemberIds(existingTask);
+            const incomingMemberIds =
+              updates.memberIds !== undefined || updates.memberId !== undefined
+                ? assignedMemberIds(updates)
+                : fallbackMemberIds;
+            const nextMemberIds =
+              nextScope === "member" ? checkedMemberIds(data, incomingMemberIds) : [];
+            if (nextScope === "member" && nextMemberIds.length === 0) {
+              throw new Error("Member task needs at least one member.");
+            }
             return {
               ...data,
               tasks: data.tasks.map((task) =>
@@ -728,6 +801,9 @@ export default {
                   ? {
                       ...task,
                       ...updates,
+                      scope: nextScope,
+                      memberId: nextScope === "member" ? nextMemberIds[0] : undefined,
+                      memberIds: nextMemberIds,
                       points:
                         updates.points === undefined
                           ? task.points
@@ -795,6 +871,10 @@ export default {
                         profileRequest.repoUrl === undefined
                           ? item.repoUrl ?? ""
                           : profileRequest.repoUrl,
+                      driveUrl:
+                        profileRequest.driveUrl === undefined
+                          ? item.driveUrl ?? ""
+                          : profileRequest.driveUrl,
                     }
                   : item,
               ),
