@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Archive,
-  Activity,
   BarChart3,
   Bell,
   CalendarClock,
@@ -28,16 +27,11 @@ import {
   X,
 } from "lucide-react";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
   Cell,
   Pie,
   PieChart,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
-  XAxis,
-  YAxis,
 } from "recharts";
 
 import { Button } from "@/components/ui/button";
@@ -184,6 +178,25 @@ type RepoUpdate = {
   seen?: boolean;
 };
 
+type MemberProfileRequest = {
+  id: string;
+  memberId: string;
+  memberName: string;
+  createdAt: string;
+  status: "pending" | "approved" | "rejected";
+  nickname?: string;
+  repoUrl?: string;
+  previousAliases?: string[];
+  previousRepoUrl?: string;
+  reviewedAt?: string;
+};
+
+type MemberProfileRequestInput = {
+  memberId: string;
+  nickname?: string;
+  repoUrl?: string;
+};
+
 type StudioData = {
   projectName: string;
   announcement?: string;
@@ -196,6 +209,7 @@ type StudioData = {
   meetings?: Meeting[];
   meetingAttendance?: Record<string, Record<string, MeetingAttendance>>;
   repoUpdates?: RepoUpdate[];
+  profileRequests?: MemberProfileRequest[];
   meta: { updatedAt: string };
 };
 
@@ -279,6 +293,7 @@ const DEFAULT_DATA: StudioData = {
   meetings: [],
   meetingAttendance: {},
   repoUpdates: [],
+  profileRequests: [],
   meta: { updatedAt: new Date().toISOString() },
 };
 
@@ -366,6 +381,7 @@ function sanitizeData(data: StudioData): StudioData {
     })),
     meetingAttendance: data.meetingAttendance ?? {},
     repoUpdates: data.repoUpdates ?? [],
+    profileRequests: data.profileRequests ?? [],
     meta: data.meta ?? DEFAULT_DATA.meta,
   };
 }
@@ -720,10 +736,8 @@ function createStats(data: StudioData) {
   };
 }
 
-function rankingBadgeClass(item: MemberScore) {
-  if (item.approved > 0) return "bg-emerald-200";
-  if (item.basePoints > 0 || item.baseCompleted > 0) return "bg-yellow-200";
-  return "bg-card";
+function rankingBadgeClass(index: number) {
+  return index === 0 ? "bg-yellow-100" : "bg-white";
 }
 
 function Logo({ size = "size-24" }: { size?: string }) {
@@ -861,17 +875,6 @@ function MemberDetails({ item }: { item: MemberScore }) {
 function Leaderboard({ scores }: { scores: MemberScore[] }) {
   const [openMemberId, setOpenMemberId] = useState("");
   const worstMemberId = scores[scores.length - 1]?.member.id;
-  const rowPalettes = [
-    "bg-[#fff4a8]",
-    "bg-[#cffafe]",
-    "bg-[#dcfce7]",
-    "bg-[#fde2f3]",
-    "bg-[#ede9fe]",
-    "bg-[#ffedd5]",
-    "bg-[#dbeafe]",
-    "bg-[#fef3c7]",
-    "bg-[#ccfbf1]",
-  ];
 
   return (
     <div className="leaderboard-stage grid gap-3 md:grid-cols-2">
@@ -879,7 +882,7 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
         const isLeader = index === 0;
         const isWorst = item.member.id === worstMemberId && scores.length > 1;
         const isOpen = openMemberId === item.member.id;
-        const rowColor = rowPalettes[index % rowPalettes.length];
+        const rowColor = isLeader ? "bg-yellow-50" : "bg-white";
 
         if (isWorst) {
           return (
@@ -917,7 +920,7 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
             <div className="relative z-10 flex items-center gap-3">
               <span
                 className={`leaderboard-badge grid size-10 shrink-0 place-items-center rounded-full border-[2.5px] border-ink font-bold ${rankingBadgeClass(
-                  item,
+                  index,
                 )}`}
               >
                 {index + 1}
@@ -971,6 +974,7 @@ function MemberView({
   onSubmitFinal,
   onSubmitProgress,
   onRepoAttention,
+  onProfileChangeRequest,
   onLogout,
   onRefreshData,
 }: {
@@ -985,10 +989,13 @@ function MemberView({
   onSubmitFinal: (task: StudioTask) => void;
   onSubmitProgress: (task: StudioTask) => void;
   onRepoAttention: (task: StudioTask) => void;
+  onProfileChangeRequest: (item: MemberProfileRequestInput) => void;
   onLogout: () => void;
   onRefreshData: () => Promise<void>;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [nicknameDraft, setNicknameDraft] = useState("");
+  const [repoDraft, setRepoDraft] = useState(activeMember.member.repoUrl ?? "");
   const [memberTab, setMemberTab] = useState<"tasks" | "log">("tasks");
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedOnce, setRefreshedOnce] = useState(
@@ -1005,6 +1012,14 @@ function MemberView({
   const memberLogTasks = data.tasks.filter((task) =>
     taskIsForMember(task, activeMember.member.id),
   );
+  const hasProfileChange =
+    nicknameDraft.trim().length > 0 || repoDraft.trim() !== (activeMember.member.repoUrl ?? "");
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    setNicknameDraft("");
+    setRepoDraft(activeMember.member.repoUrl ?? "");
+  }, [activeMember.member.id, activeMember.member.repoUrl, settingsOpen]);
 
   async function refreshMemberData() {
     setRefreshing(true);
@@ -1419,11 +1434,52 @@ function MemberView({
             </div>
 
             <div className="mt-3 border-[2px] border-ink bg-paper p-3 text-sm leading-6">
-              <strong>التعديل الرسمي من الأدمن فقط.</strong>
-              <p>
-                لو عايز تضيف nickname أو تغير لينك الريبو، كلم الأدمن وهو يحفظه من لوحة الإدارة عشان
-                يظهر لكل الأجهزة.
+              <strong>اطلب تعديل اسمك أو ريبو GitHub.</strong>
+              <p>التغيير هيتبعت للأدمن، ومش هيبقى رسمي غير لما يعمل approve.</p>
+              {!activeMember.member.repoUrl && (
+                <p className="mt-2 rounded-md border-[2px] border-yellow-700 bg-yellow-100 p-2 font-bold text-yellow-900">
+                  ضيف GitHub repo بتاعك علشان لسه مش مضاف هنا.
+                </p>
+              )}
+              <label className="mt-3 block font-bold" htmlFor="member-nickname">
+                Nickname
+              </label>
+              <Input
+                id="member-nickname"
+                value={nicknameDraft}
+                onChange={(event) => setNicknameDraft(event.target.value)}
+                placeholder="اكتب nickname جديد..."
+                className="mt-1 border-[2px] border-ink bg-white"
+              />
+              <label className="mt-3 block font-bold" htmlFor="member-repo">
+                GitHub repo
+              </label>
+              <Input
+                id="member-repo"
+                dir="ltr"
+                value={repoDraft}
+                onChange={(event) => setRepoDraft(event.target.value)}
+                placeholder="https://github.com/user/repo"
+                className="mt-1 border-[2px] border-ink bg-white text-left"
+              />
+              <p className="mt-1 text-xs text-foreground/55">
+                تقدر تمسح القديم وتبعت غيره، والأدمن لازم يوافق.
               </p>
+              <Button
+                type="button"
+                disabled={!hasProfileChange || isSubmitting}
+                onClick={() =>
+                  onProfileChangeRequest({
+                    memberId: activeMember.member.id,
+                    nickname: nicknameDraft.trim(),
+                    repoUrl: repoDraft.trim(),
+                  })
+                }
+                className="mt-3 border-[2px] border-ink doodle-shadow-sm"
+              >
+                <Bell data-icon="inline-start" />
+                إرسال للأدمن
+              </Button>
               {activeMember.member.repoUrl ? (
                 <Button
                   type="button"
@@ -1456,7 +1512,6 @@ function MemberView({
 }
 
 type AdminSection =
-  | "overview"
   | "repo-updates"
   | "reviews"
   | "tasks"
@@ -1639,6 +1694,7 @@ function AdminView({
   onUpdateMember,
   onUpdateSettings,
   onMarkRepoUpdateSeen,
+  onReviewProfileRequest,
   onRefreshAdminQueue,
   onTokenDraftChange,
   onCloseTokenDialog,
@@ -1680,6 +1736,7 @@ function AdminView({
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
   onMarkRepoUpdateSeen: (updateId: string) => void;
+  onReviewProfileRequest: (requestId: string, status: "approved" | "rejected") => void;
   onRefreshAdminQueue: () => void;
   onTokenDraftChange: (value: string) => void;
   onCloseTokenDialog: () => void;
@@ -1740,40 +1797,28 @@ function AdminView({
   );
   const queuedProgress = adminQueue.progressUpdates;
   const unseenUpdates = data.repoUpdates?.filter((update) => !update.seen) ?? [];
-  const reviewedTotal = stats.memberStats.reduce((sum, item) => sum + item.reviewed, 0);
-  const submittedTotal = stats.memberStats.reduce((sum, item) => sum + item.submitted, 0);
-  const completionRate =
-    stats.taskMetrics.reduce((sum, item) => sum + item.expected, 0) > 0
-      ? Math.round(
-          (stats.taskMetrics.reduce((sum, item) => sum + item.received, 0) /
-            stats.taskMetrics.reduce((sum, item) => sum + item.expected, 0)) *
-            100,
-        )
-      : 0;
-  const reviewChartData = [
-    { name: "Approved", value: stats.memberStats.reduce((sum, item) => sum + item.approved, 0) },
-    { name: "Pending", value: stats.pendingTotal },
-    { name: "Rejected", value: stats.memberStats.reduce((sum, item) => sum + item.rejected, 0) },
-  ];
+  const pendingProfileRequests = (data.profileRequests ?? []).filter(
+    (request) => request.status === "pending",
+  );
 
   function attentionLandingSection(): AdminSection {
-    if (unseenUpdates.length > 0) return "repo-updates";
+    if (unseenUpdates.length > 0 || pendingProfileRequests.length > 0) return "repo-updates";
     if (pendingSubmissions.length > 0) return "reviews";
     return "tasks";
   }
 
   useEffect(() => {
     setSection((current) => {
-      if (current === "repo-updates" && unseenUpdates.length === 0) {
+      if (current === "repo-updates" && unseenUpdates.length === 0 && pendingProfileRequests.length === 0) {
         return pendingSubmissions.length > 0 ? "reviews" : "tasks";
       }
       if (current === "reviews" && pendingSubmissions.length === 0) {
-        return unseenUpdates.length > 0 ? "repo-updates" : "tasks";
+        return unseenUpdates.length > 0 || pendingProfileRequests.length > 0 ? "repo-updates" : "tasks";
       }
       if (current === "tasks") return attentionLandingSection();
       return current;
     });
-  }, [pendingSubmissions.length, unseenUpdates.length]);
+  }, [pendingProfileRequests.length, pendingSubmissions.length, unseenUpdates.length]);
 
   function go(nextSection: AdminSection) {
     setSection(nextSection);
@@ -2495,7 +2540,7 @@ function AdminView({
   }
 
   const navItems: Array<{ id: AdminSection; label: string; icon: typeof BarChart3 }> = [
-    { id: "repo-updates", label: "Repo Updates", icon: Bell },
+    { id: "repo-updates", label: "Attention", icon: Bell },
     { id: "reviews", label: "Reviews", icon: ListChecks },
     { id: "tasks", label: "Tasks", icon: ClipboardList },
     { id: "meetings", label: "Meetings", icon: CalendarClock },
@@ -2617,61 +2662,83 @@ function AdminView({
         </header>
 
         <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 pb-24">
-          {section === "overview" && (
-            <>
-              <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-                <CompactMetric label="Active tasks" value={activeTasks.length} />
-                <CompactMetric label="Meetings" value={activeMeetings.length} />
-                <CompactMetric label="Archived" value={archivedTasks.length} />
-                <CompactMetric label="Pending review" value={stats.pendingTotal} />
-                <CompactMetric label="Completion" value={`${completionRate}%`} />
-                <CompactMetric label="Team points" value={stats.pointsTotal} />
-              </section>
-              <section className="grid gap-5 lg:grid-cols-[1.3fr_.7fr]">
-                <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <div>
-                      <h2 className="text-xl font-bold">Review status</h2>
-                      <p className="text-sm text-foreground/55">Approved, pending, and rejected across active tasks.</p>
-                    </div>
-                    <Activity className="size-5 text-foreground/40" />
-                  </div>
-                  <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={reviewChartData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="name" />
-                        <YAxis allowDecimals={false} />
-                        <RechartsTooltip />
-                        <Bar dataKey="value" radius={[8, 8, 0, 0]} fill="#49b6e5" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-                <div className="grid gap-3">
-                  <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
-                    <h2 className="text-xl font-bold">Quick read</h2>
-                    <div className="mt-3 grid gap-2 text-sm">
-                      <div className="flex justify-between gap-3"><span>Leader</span><strong>{stats.leader?.member.name ?? "N/A"}</strong></div>
-                      <div className="flex justify-between gap-3"><span>Needs follow-up</span><strong>{stats.worst?.member.name ?? "N/A"}</strong></div>
-                      <div className="flex justify-between gap-3"><span>Submitted</span><strong>{submittedTotal}</strong></div>
-                      <div className="flex justify-between gap-3"><span>Reviewed</span><strong>{reviewedTotal}</strong></div>
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
-                    <h2 className="text-xl font-bold">Pending queue</h2>
-                    <p className="mt-1 text-sm text-foreground/55">{pendingSubmissions.length} final submissions need a decision.</p>
-                    {unseenUpdates.length > 0 && (
-                      <p className="mt-2 text-sm font-bold text-yellow-800">{unseenUpdates.length} repo updates unseen.</p>
-                    )}
-                  </div>
-                </div>
-              </section>
-            </>
-          )}
-
           {section === "repo-updates" && (
             <section className="grid gap-5">
+              <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-bold">Profile requests</h2>
+                    <p className="mt-1 text-sm text-sky-900/70">
+                      Members can request a nickname or GitHub repo change. Approve applies it; reject leaves the official profile unchanged.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-sky-300 bg-white px-3 py-1 text-sm font-bold text-sky-900">
+                    {pendingProfileRequests.length} pending
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {pendingProfileRequests.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-sky-300 bg-white p-4 text-sm text-foreground/60">
+                      No profile changes are waiting for approval.
+                    </p>
+                  ) : (
+                    pendingProfileRequests.map((request) => {
+                      const member = data.members.find((item) => item.id === request.memberId);
+                      return (
+                        <div key={request.id} className="rounded-lg border border-sky-200 bg-white p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <strong>{member?.name ?? request.memberName}</strong>
+                              <div className="mt-1 text-xs font-bold text-foreground/50">
+                                Requested {formatDateTime(request.createdAt)}
+                              </div>
+                              <div className="mt-2 grid gap-1 text-sm text-foreground/75">
+                                {request.nickname && (
+                                  <span>
+                                    Nickname: <strong>{request.nickname}</strong>
+                                  </span>
+                                )}
+                                {request.repoUrl !== undefined && (
+                                  <span className="break-all">
+                                    Repo: <strong>{request.repoUrl || "Remove saved repo"}</strong>
+                                  </span>
+                                )}
+                                {request.previousRepoUrl && (
+                                  <span className="break-all text-xs text-foreground/45">
+                                    Previous repo: {request.previousRepoUrl}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {request.repoUrl && (
+                                <Button type="button" size="sm" onClick={() => window.open(request.repoUrl, "_blank", "noopener,noreferrer")}>
+                                  <ExternalLink data-icon="inline-start" />
+                                  Open new repo
+                                </Button>
+                              )}
+                              <Button type="button" size="sm" onClick={() => onReviewProfileRequest(request.id, "approved")}>
+                                <Check data-icon="inline-start" />
+                                Approve
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onReviewProfileRequest(request.id, "rejected")}
+                                className="border border-ink/20 bg-white"
+                              >
+                                Reject
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -4489,6 +4556,10 @@ async function postRepoAttention(item: RepoAttentionRequest) {
   return sanitizeData(await postApi<StudioData>("/api/repo-attention", item));
 }
 
+async function postProfileChangeRequest(item: MemberProfileRequestInput) {
+  return sanitizeData(await postApi<StudioData>("/api/profile-requests", item));
+}
+
 async function postAdminMutation(
   adminPassword: string,
   action: string,
@@ -4922,6 +4993,22 @@ function Index() {
     }
   }
 
+  async function submitProfileChangeRequest(item: MemberProfileRequestInput) {
+    if (!activeMember) return;
+
+    setIsSubmitting(true);
+    try {
+      const nextData = await postProfileChangeRequest(item);
+      setData(nextData);
+      setIsDirty(false);
+      setRefreshStatus("Profile change request sent to admin for approval.");
+    } catch (error) {
+      setRefreshStatus(error instanceof Error ? error.message : "Could not send profile request.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function reviewAnswer(
     taskId: string,
     memberId: string,
@@ -5158,6 +5245,29 @@ function Index() {
     }
   }
 
+  async function reviewProfileRequest(requestId: string, status: "approved" | "rejected") {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Saving profile request decision...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "reviewProfileRequest", {
+        requestId,
+        status,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus(status === "approved" ? "Profile request approved." : "Profile request rejected.");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function saveToGithub(tokenOverride?: string) {
     const token = (tokenOverride ?? githubToken).trim();
     if (!token) {
@@ -5260,6 +5370,7 @@ function Index() {
         onUpdateMember={updateMember}
         onUpdateSettings={updateSettings}
         onMarkRepoUpdateSeen={markRepoUpdateSeen}
+        onReviewProfileRequest={reviewProfileRequest}
         onRefreshAdminQueue={refreshAdminQueue}
         onTokenDraftChange={setTokenDraft}
         onCloseTokenDialog={() => setTokenDialogOpen(false)}
@@ -5293,6 +5404,7 @@ function Index() {
         onSubmitFinal={submitFinalSubmission}
         onSubmitProgress={submitProgressUpdate}
         onRepoAttention={sendRepoAttention}
+        onProfileChangeRequest={submitProfileChangeRequest}
         onLogout={logout}
         onRefreshData={refreshData}
       />

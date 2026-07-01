@@ -88,7 +88,21 @@ type RepoUpdate = {
   taskId?: string;
   source?: "submission" | "progress" | "manual";
   excerpt?: string;
+  note?: string;
   seen?: boolean;
+};
+
+type MemberProfileRequest = {
+  id: string;
+  memberId: string;
+  memberName: string;
+  createdAt: string;
+  status: "pending" | "approved" | "rejected";
+  nickname?: string;
+  repoUrl?: string;
+  previousAliases?: string[];
+  previousRepoUrl?: string;
+  reviewedAt?: string;
 };
 
 type StudioData = {
@@ -107,6 +121,7 @@ type StudioData = {
   meetings?: Meeting[];
   meetingAttendance?: Record<string, Record<string, MeetingAttendance>>;
   repoUpdates?: RepoUpdate[];
+  profileRequests?: MemberProfileRequest[];
   meta?: { updatedAt: string };
 };
 
@@ -154,6 +169,10 @@ function nonNegativeNumber(value: unknown, fallback: number) {
 
 function roundScore(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function uniqueText(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
 function taskWindowDuration(task: StudioTask) {
@@ -264,6 +283,7 @@ function normalizeData(data: StudioData): StudioData {
     })),
     meetingAttendance: data.meetingAttendance ?? {},
     repoUpdates: data.repoUpdates ?? [],
+    profileRequests: data.profileRequests ?? [],
     meta: data.meta ?? { updatedAt: new Date().toISOString() },
   };
 }
@@ -488,6 +508,15 @@ function mergeRepoUpdates(latest: StudioData, incoming: StudioData) {
   );
 }
 
+function mergeProfileRequests(latest: StudioData, incoming: StudioData) {
+  const byId = new Map<string, MemberProfileRequest>();
+  for (const request of latest.profileRequests ?? []) byId.set(request.id, request);
+  for (const request of incoming.profileRequests ?? []) byId.set(request.id, request);
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+}
+
 function mergeMeetingAttendance(latest: StudioData, incoming: StudioData) {
   const meetingIds = new Set([
     ...Object.keys(latest.meetingAttendance ?? {}),
@@ -514,6 +543,7 @@ function mergeAdminReplacement(latest: StudioData, incomingPayload: StudioData) 
     progressUpdates: mergeProgressUpdates(latest, incoming),
     meetingAttendance: mergeMeetingAttendance(latest, incoming),
     repoUpdates: mergeRepoUpdates(latest, incoming),
+    profileRequests: mergeProfileRequests(latest, incoming),
   };
 }
 
@@ -621,6 +651,40 @@ export default {
         return json(env, next);
       }
 
+      if (request.method === "POST" && url.pathname === "/api/profile-requests") {
+        const item = (await request.json()) as {
+          memberId: string;
+          nickname?: string;
+          repoUrl?: string;
+        };
+        const next = await commitData(env, `Profile request by ${item.memberId}`, (data) => {
+          const member = getMember(data, String(item.memberId ?? ""));
+          const hasNickname = Object.prototype.hasOwnProperty.call(item, "nickname");
+          const hasRepoUrl = Object.prototype.hasOwnProperty.call(item, "repoUrl");
+          const nickname = String(item.nickname ?? "").trim();
+          const repoUrl = String(item.repoUrl ?? "").trim();
+          if ((!hasNickname || !nickname) && !hasRepoUrl) {
+            throw new Error("Nickname or GitHub repo is required.");
+          }
+          const profileRequest: MemberProfileRequest = {
+            id: `profile-${member.id}-${Date.now()}`,
+            memberId: member.id,
+            memberName: member.name,
+            createdAt: new Date().toISOString(),
+            status: "pending",
+            ...(nickname ? { nickname } : {}),
+            ...(hasRepoUrl ? { repoUrl } : {}),
+            previousAliases: member.aliases ?? [],
+            previousRepoUrl: member.repoUrl ?? "",
+          };
+          return {
+            ...data,
+            profileRequests: [profileRequest, ...(data.profileRequests ?? [])],
+          };
+        });
+        return json(env, next);
+      }
+
       if (request.method === "POST" && url.pathname === "/api/admin/mutate") {
         const { action, payload } = (await request.json()) as {
           action: string;
@@ -700,6 +764,41 @@ export default {
               repoUpdates: (data.repoUpdates ?? []).map((update) =>
                 update.id === updateId ? { ...update, seen: true } : update,
               ),
+            };
+          }
+
+          if (action === "reviewProfileRequest") {
+            const requestId = String(payload.requestId ?? "");
+            const status: MemberProfileRequest["status"] =
+              payload.status === "approved" ? "approved" : "rejected";
+            const profileRequest = (data.profileRequests ?? []).find((item) => item.id === requestId);
+            if (!profileRequest) throw new Error("Profile request not found.");
+            if (profileRequest.status !== "pending") throw new Error("Profile request already reviewed.");
+            const reviewedAt = new Date().toISOString();
+            const nextRequests = (data.profileRequests ?? []).map((item) =>
+              item.id === requestId ? { ...item, status, reviewedAt } : item,
+            );
+            if (status === "rejected") {
+              return { ...data, profileRequests: nextRequests };
+            }
+            const member = getMember(data, profileRequest.memberId);
+            return {
+              ...data,
+              members: data.members.map((item) =>
+                item.id === member.id
+                  ? {
+                      ...item,
+                      aliases: profileRequest.nickname
+                        ? uniqueText([...(item.aliases ?? []), profileRequest.nickname])
+                        : item.aliases ?? [],
+                      repoUrl:
+                        profileRequest.repoUrl === undefined
+                          ? item.repoUrl ?? ""
+                          : profileRequest.repoUrl,
+                    }
+                  : item,
+              ),
+              profileRequests: nextRequests,
             };
           }
 
