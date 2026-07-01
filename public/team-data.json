@@ -282,8 +282,25 @@
       "seen": true
     }
   ],
-  "profileRequests": [],
+  "profileRequests": [
+    {
+      "id": "profile-abozena-1782893610397",
+      "memberId": "abozena",
+      "memberName": "Abozena",
+      "createdAt": "2026-07-01T08:13:30.397Z",
+      "status": "pending",
+      "nickname": "Abdo",
+      "repoUrl": "https://github.com/abdoabozena7/simple_coding_agent",
+      "previousAliases": [
+        "abozena",
+        "abo zena",
+        "ابو زينة",
+        "أبو زينة"
+      ],
+      "previousRepoUrl": "https://github.com/abdoabozena7/simple_coding_agent"
+    }
+  ],
   "meta": {
-    "updatedAt": "2026-07-01T08:07:11.487Z"
+    "updatedAt": "2026-07-01T08:13:30.397Z"
   }
 }
