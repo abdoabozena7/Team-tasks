@@ -39,7 +39,7 @@
       "adminNote": "",
       "baseApproved": 0,
       "baseRejected": 4,
-      "publicFlag": "",
+      "publicFlag": "مدفعش ال100 جنيه",
       "repoUrl": ""
     },
     {
@@ -284,6 +284,6 @@
   ],
   "profileRequests": [],
   "meta": {
-    "updatedAt": "2026-07-01T07:50:32.365Z"
+    "updatedAt": "2026-07-01T08:07:11.487Z"
   }
 }
