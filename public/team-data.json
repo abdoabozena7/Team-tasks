@@ -192,17 +192,6 @@
   ],
   "tasks": [
     {
-      "title": "gbchm",
-      "question": "dtxfh",
-      "points": 1,
-      "scope": "all",
-      "id": "task-1782846378914",
-      "createdAt": "2026-06-30T19:06:18.914Z",
-      "startAt": "2026-06-30T19:06:18.914Z",
-      "deadlineAt": "",
-      "status": "active"
-    },
-    {
       "title": "الريبو فين؟",
       "question": "اعمل ريبو ع github",
       "points": 1,
@@ -215,24 +204,6 @@
     }
   ],
   "responses": {
-    "task-1782846378914": {
-      "kareem-adel": {
-        "memberId": "kareem-adel",
-        "memberName": "kareem adel",
-        "answer": "تم التسليم خارج الموقع وتم اعتماده يدويًا.",
-        "status": "approved",
-        "submittedAt": "2026-06-30T22:06:07.270Z",
-        "reviewedAt": "2026-06-30T22:06:07.270Z"
-      },
-      "abozena": {
-        "memberId": "abozena",
-        "memberName": "abozena",
-        "answer": "واتساب",
-        "status": "approved",
-        "submittedAt": "2026-06-30T22:11:39.430Z",
-        "reviewedAt": "2026-06-30T22:12:20.016Z"
-      }
-    },
     "task-1782865667644": {
       "tasneem": {
         "memberId": "tasneem",
@@ -276,6 +247,6 @@
   "meetingAttendance": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-07-01T00:30:58.059Z"
+    "updatedAt": "2026-07-01T07:02:30.709Z"
   }
 }
