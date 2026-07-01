@@ -201,6 +201,17 @@
       "startAt": "2026-06-30T19:06:18.914Z",
       "deadlineAt": "",
       "status": "active"
+    },
+    {
+      "title": "الريبو فين؟",
+      "question": "اعمل ريبو ع github",
+      "points": 1,
+      "scope": "all",
+      "startAt": "2026-07-01T00:27:00.000Z",
+      "deadlineAt": "2026-07-02T00:27:00.000Z",
+      "status": "active",
+      "id": "task-1782865667644",
+      "createdAt": "2026-07-01T00:27:47.644Z"
     }
   ],
   "responses": {
@@ -223,9 +234,12 @@
       }
     }
   },
+  "taskSkips": {},
   "progressUpdates": {},
+  "meetings": [],
+  "meetingAttendance": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-06-30T23:18:40.329Z"
+    "updatedAt": "2026-07-01T00:28:18.217Z"
   }
 }
