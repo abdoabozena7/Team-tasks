@@ -26,14 +26,6 @@ import {
   Users,
   X,
 } from "lucide-react";
-import {
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip as RechartsTooltip,
-} from "recharts";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -4201,159 +4193,225 @@ function StatsView({
   onLogout: () => void;
 }) {
   const activeTasks = data.tasks.filter(isActiveTask);
-  const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const visibleStats = stats.memberStats;
-  const leader = visibleStats[0];
-  const needsFollowUp = [...visibleStats]
-    .filter((item) => item.assignedTasks > 0)
-    .sort((a, b) => {
-      if (a.responseRate !== b.responseRate) return a.responseRate - b.responseRate;
-      return b.pending - a.pending;
-    })[0];
   const expectedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.expected, 0);
   const receivedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.received, 0);
   const completionRate = expectedTotal > 0 ? Math.round((receivedTotal / expectedTotal) * 100) : 0;
   const approved = visibleStats.reduce((sum, item) => sum + item.approved, 0);
   const rejected = visibleStats.reduce((sum, item) => sum + item.rejected, 0);
-  const meetingPointsTotal = visibleStats.reduce((sum, item) => sum + item.meetingPoints, 0);
-  const chartData = [
-    { name: "Accepted", value: approved, fill: "#10b981" },
-    { name: "Pending", value: stats.pendingTotal, fill: "#f59e0b" },
-    { name: "Rejected", value: rejected, fill: "#ef4444" },
-  ].filter((item) => item.value > 0);
+  const totalPoints = Math.round(stats.pointsTotal * 100) / 100;
   const teamHealth =
     completionRate >= 80 && stats.pendingTotal <= 2
       ? "Stable"
       : completionRate >= 45
         ? "Needs follow-up"
         : "At risk";
+  const healthTone =
+    teamHealth === "Stable"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+      : teamHealth === "Needs follow-up"
+        ? "border-yellow-200 bg-yellow-50 text-yellow-900"
+        : "border-red-200 bg-red-50 text-red-700";
+
+  function memberState(item: MemberScore) {
+    if (item.assignedTasks === 0) return "No active assignments";
+    if (item.responseRate < 50 || item.rejected > 0) return "At risk";
+    if (item.responseRate >= 80 && item.pending === 0) return "On track";
+    return "Needs follow-up";
+  }
+
+  function memberTone(item: MemberScore) {
+    const state = memberState(item);
+    if (state === "At risk") return "border-red-300 bg-red-50 shadow-[0_0_0_3px_rgba(239,68,68,0.18)]";
+    if (state === "Needs follow-up") return "border-yellow-200 bg-yellow-50";
+    if (state === "On track") return "border-emerald-200 bg-emerald-50";
+    return "border-ink/10 bg-paper";
+  }
 
   return (
     <div className="min-h-screen bg-[#f7f6f0] text-foreground" dir="ltr">
-      <main className="mx-auto grid max-w-lg gap-4 px-4 py-5 md:max-w-4xl md:grid-cols-2 md:py-8">
-        <header className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm md:col-span-2">
-          <div className="flex items-start justify-between gap-3">
+      <main className="mx-auto grid max-w-6xl gap-5 px-4 py-5 md:py-8">
+        <header className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="text-sm font-bold text-foreground/50">Hivo Studio</div>
               <h1 className="mt-1 text-3xl font-bold">Team status</h1>
               <p className="mt-2 text-sm leading-6 text-foreground/60">
-                Quick read for active tasks only. Archived tasks stay out of the daily score.
+                Read-only monitoring for active work. It is built for quick checks without needing admin context.
               </p>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onLogout}
-              className="shrink-0 border border-ink/20 bg-paper"
-            >
-              <LogOut className="size-4" />
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full border px-3 py-2 text-sm font-bold ${healthTone}`}>
+                {teamHealth}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onLogout}
+                className="shrink-0 border border-ink/20 bg-paper"
+              >
+                <LogOut className="size-4" />
+              </Button>
+            </div>
           </div>
         </header>
 
-        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm md:col-span-2">
-          <div className="flex items-center justify-between gap-3">
+        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <div className="text-sm font-bold text-foreground/50">Team health</div>
-              <div className="mt-1 text-4xl font-bold">{teamHealth}</div>
+              <div className="text-sm font-bold text-foreground/50">Team task completion</div>
+              <div className="mt-1 text-4xl font-bold">
+                {receivedTotal} / {expectedTotal}
+              </div>
+              <p className="mt-2 text-sm leading-6 text-foreground/60">
+                Completed means final submissions received for active tasks. Archived tasks are not counted here.
+              </p>
             </div>
             <div className="rounded-full border border-ink/10 bg-paper px-4 py-3 text-2xl font-bold">
               {completionRate}%
             </div>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <CompactMetric label="Active" value={activeTasks.length} />
-            <CompactMetric label="Meetings" value={activeMeetings.length} />
-            <CompactMetric label="Pending" value={stats.pendingTotal} />
-            <CompactMetric label="Done" value={receivedTotal} />
+          <div className="mt-5 h-5 overflow-hidden rounded-full border border-ink/10 bg-zinc-100">
+            <div
+              className={`h-full rounded-full transition-all ${
+                completionRate >= 80
+                  ? "bg-emerald-500"
+                  : completionRate >= 45
+                    ? "bg-yellow-400"
+                    : "bg-red-500"
+              }`}
+              style={{ width: `${Math.max(0, Math.min(100, completionRate))}%` }}
+            />
           </div>
-          <p className="mt-3 text-xs leading-5 text-foreground/55">
-            Active counts tasks still open. Pending means waiting for admin review. Done means final submissions received for active tasks.
-          </p>
+          <div className="mt-5 grid grid-cols-2 gap-2 lg:grid-cols-6">
+            <CompactMetric label="Active tasks" value={activeTasks.length} />
+            <CompactMetric label="Expected submissions" value={expectedTotal} />
+            <CompactMetric label="Submitted" value={receivedTotal} />
+            <CompactMetric label="Pending review" value={stats.pendingTotal} />
+            <CompactMetric label="Approved" value={approved} />
+            <CompactMetric label="Team points" value={totalPoints} />
+          </div>
         </section>
 
         <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
-          <h2 className="text-xl font-bold">Review mix</h2>
-          <div className="mt-3 h-56">
-            {chartData.length === 0 ? (
-              <div className="grid h-full place-items-center rounded-xl border border-dashed border-ink/15 text-sm text-foreground/50">
-                No submissions yet
-              </div>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold">Current tasks</h2>
+              <p className="mt-1 text-sm text-foreground/55">
+                Open assignments and review progress. Each bar shows submitted out of expected submissions.
+              </p>
+            </div>
+            <span className="rounded-full border border-ink/10 bg-paper px-3 py-1 text-sm font-bold">
+              {activeTasks.length} active
+            </span>
+          </div>
+          <div className="mt-4 grid gap-3">
+            {stats.taskMetrics.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-ink/15 bg-paper p-5 text-sm text-foreground/55">
+                No active tasks right now.
+              </p>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={chartData} dataKey="value" nameKey="name" innerRadius={45} outerRadius={80} paddingAngle={4}>
-                    {chartData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.fill} />
-                    ))}
-                  </Pie>
-                  <RechartsTooltip />
-                </PieChart>
-              </ResponsiveContainer>
+              stats.taskMetrics.map((metric) => {
+                const taskRate =
+                  metric.expected > 0 ? Math.round((metric.received / metric.expected) * 100) : 0;
+                return (
+                  <div key={metric.task.id} className="rounded-xl border border-ink/10 bg-paper p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-lg font-bold">{metric.task.title}</h3>
+                        <p className="mt-1 text-xs font-bold text-foreground/50">
+                          Deadline {formatDateTime(metric.task.deadlineAt)} | {metric.task.points || 1} points
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-ink/10 bg-white px-3 py-1 text-sm font-bold">
+                        {metric.received}/{metric.expected}
+                      </span>
+                    </div>
+                    <div className="mt-3 h-3 overflow-hidden rounded-full border border-ink/10 bg-white">
+                      <div
+                        className="h-full rounded-full bg-sky-500"
+                        style={{ width: `${Math.max(0, Math.min(100, taskRate))}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
+                      <span>Submitted {metric.received}</span>
+                      <span>Approved {metric.approved}</span>
+                      <span>Pending {metric.submitted}</span>
+                      <span>Rejected {metric.rejected}</span>
+                      <span>Progress notes {metric.progressUpdates}</span>
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
-          <div className="mt-3 grid gap-2 text-sm">
-            {chartData.map((item) => (
-              <div key={item.name} className="flex items-center justify-between gap-3">
-                <span className="flex items-center gap-2">
-                  <span className="size-2 rounded-full" style={{ backgroundColor: item.fill }} />
-                  {item.name}
-                </span>
-                <strong>{item.value}</strong>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-xs leading-5 text-foreground/55">
-            Accepted adds points, pending adds no points yet, rejected increases the review history only.
-          </p>
         </section>
 
-        <section className="grid gap-3">
-          <div className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
-            <div className="text-sm font-bold text-foreground/50">Top performer</div>
-            <div className="mt-1 text-2xl font-bold">{leader?.member.name ?? "N/A"}</div>
-            <p className="mt-1 text-sm text-foreground/55">
-              {leader ? `${leader.points} points / ${leader.completed} accepted tasks` : "No data yet"}
-            </p>
-            <p className="mt-2 text-xs text-foreground/45">Points include task scores, bonuses, and meeting points.</p>
+        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold">Members</h2>
+              <p className="mt-1 text-sm text-foreground/55">
+                Progress is visible without opening a row. Red glow means low progress or rejection history.
+              </p>
+            </div>
+            <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-sm font-bold text-red-700">
+              {rejected} rejections
+            </span>
           </div>
-          <div className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
-            <div className="text-sm font-bold text-foreground/50">Needs follow-up</div>
-            <div className="mt-1 text-2xl font-bold">{needsFollowUp?.member.name ?? "N/A"}</div>
-            <p className="mt-1 text-sm text-foreground/55">
-              {needsFollowUp
-                ? `${formatPercent(needsFollowUp.responseRate)} submitted / ${needsFollowUp.pending} pending`
-                : "No active assignments"}
-            </p>
-            <p className="mt-2 text-xs text-foreground/45">Lowest response rate among members with active assignments.</p>
-          </div>
-          <div className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
-            <div className="text-sm font-bold text-foreground/50">Meeting points</div>
-            <div className="mt-1 text-2xl font-bold">{Math.round(meetingPointsTotal * 100) / 100}</div>
-            <p className="mt-1 text-sm text-foreground/55">Included in leaderboard totals.</p>
-            <p className="mt-2 text-xs text-foreground/45">Late check-ins reduce meeting score gradually.</p>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm md:col-span-2">
-          <h2 className="text-xl font-bold">Members</h2>
           <div className="mt-3 grid gap-2">
-            {visibleStats.map((item) => (
-              <details key={item.member.id} className="rounded-xl border border-ink/10 bg-paper p-3">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                  <div>
-                    <strong>{item.member.name}</strong>
-                    {item.member.publicFlag && (
-                      <div className="text-xs font-bold text-red-600">{item.member.publicFlag}</div>
-                    )}
-                  </div>
-                  <span className="rounded-full border border-ink/10 bg-white px-2 py-1 text-xs font-bold">
-                    {item.points} pts
-                  </span>
-                </summary>
-                <MemberDetails item={item} />
-              </details>
-            ))}
+            {visibleStats.map((item) => {
+              const state = memberState(item);
+              const barColor =
+                state === "At risk"
+                  ? "bg-red-500"
+                  : state === "Needs follow-up"
+                    ? "bg-yellow-400"
+                    : state === "On track"
+                      ? "bg-emerald-500"
+                      : "bg-zinc-300";
+              return (
+                <details key={item.member.id} className={`rounded-xl border p-4 ${memberTone(item)}`}>
+                  <summary className="cursor-pointer list-none">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <strong className="text-lg">{item.member.name}</strong>
+                          <span className="rounded-full border border-ink/10 bg-white px-2 py-1 text-xs font-bold">
+                            {state}
+                          </span>
+                          {item.member.publicFlag && (
+                            <span className="text-xs font-bold text-red-600">{item.member.publicFlag}</span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-xs font-bold text-foreground/45">
+                          Click to see details
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-bold">{item.points} pts</div>
+                        <div className="text-xs text-foreground/50">
+                          {item.submitted}/{item.assignedTasks} submitted
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 h-3 overflow-hidden rounded-full border border-ink/10 bg-white">
+                      <div
+                        className={`h-full rounded-full ${barColor}`}
+                        style={{ width: `${Math.max(0, Math.min(100, item.responseRate))}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
+                      <span>Progress {formatPercent(item.responseRate)}</span>
+                      <span>Pending {item.pending}</span>
+                      <span>Rejected {item.rejected}</span>
+                      <span>Approved {item.approved}</span>
+                    </div>
+                  </summary>
+                  <MemberDetails item={item} />
+                </details>
+              );
+            })}
           </div>
         </section>
       </main>
