@@ -761,6 +761,7 @@ function LoginScreen({
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const settings = data.settings ?? DEFAULT_SETTINGS;
+  const isPasswordEntry = /^\d+$/.test(name.trim());
 
   function submitName() {
     const displayName = name.trim();
@@ -812,6 +813,7 @@ function LoginScreen({
           <p className="mx-auto mb-5 max-w-sm text-lg text-foreground/75">اكتب اسمك</p>
           <div className="flex flex-col gap-3">
             <Input
+              type={isPasswordEntry ? "password" : "text"}
               value={name}
               onChange={(event) => {
                 setName(event.target.value);
