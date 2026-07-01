@@ -211,8 +211,15 @@
         "memberName": "shoiab",
         "answer": "Manual approval outside the website.",
         "status": "approved",
-        "submittedAt": "2026-07-01T07:19:12.822Z",
+        "submittedAt": "2026-07-01T16:33:13.888Z",
         "reviewEvents": [
+          {
+            "id": "review-1782923593888",
+            "status": "approved",
+            "reviewedAt": "2026-07-01T16:33:13.888Z",
+            "awardedPoints": 1,
+            "scoreOverride": true
+          },
           {
             "id": "review-1782890352822",
             "status": "approved",
@@ -242,7 +249,7 @@
             "scoreOverride": true
           }
         ],
-        "reviewedAt": "2026-07-01T07:19:12.822Z",
+        "reviewedAt": "2026-07-01T16:33:13.888Z",
         "awardedPoints": 1,
         "lateSubmission": false,
         "scoreOverride": true
@@ -303,6 +310,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T15:04:13.806Z"
+    "updatedAt": "2026-07-01T16:33:13.888Z"
   }
 }
