@@ -362,18 +362,24 @@
         "memberId": "abozena",
         "memberName": "abozena",
         "answer": "رفعتهولك علي github",
-        "status": "rejected",
+        "status": "approved",
         "submittedAt": "2026-07-01T17:07:07.787Z",
-        "awardedPoints": 0,
+        "awardedPoints": 5,
         "lateSubmission": false,
         "reviewEvents": [
+          {
+            "id": "review-1782925917113",
+            "status": "approved",
+            "reviewedAt": "2026-07-01T17:11:57.113Z",
+            "awardedPoints": 5
+          },
           {
             "id": "review-1782925756294",
             "status": "rejected",
             "reviewedAt": "2026-07-01T17:09:16.294Z"
           }
         ],
-        "reviewedAt": "2026-07-01T17:09:16.294Z",
+        "reviewedAt": "2026-07-01T17:11:57.113Z",
         "scoreOverride": false
       }
     }
@@ -436,6 +442,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T17:09:16.294Z"
+    "updatedAt": "2026-07-01T17:11:57.113Z"
   }
 }
