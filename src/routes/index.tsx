@@ -1575,13 +1575,13 @@ function DateTimeField({
 }) {
   return (
     <label
-      className={`grid gap-2 rounded-xl border p-3 ${
+      className={`min-w-0 overflow-hidden rounded-xl border p-3 ${
         tone === "deadline"
           ? "border-yellow-200 bg-yellow-50"
           : "border-sky-100 bg-sky-50/70"
       }`}
     >
-      <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-foreground/60">
+      <span className="mb-2 flex min-w-0 items-center gap-2 text-xs font-bold uppercase tracking-wide text-foreground/60">
         <CalendarClock className="size-4" />
         {label}
       </span>
@@ -1589,10 +1589,10 @@ function DateTimeField({
         type="datetime-local"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-11 border border-ink/20 bg-white text-left font-mono text-sm"
+        className="block h-11 min-w-0 max-w-full border border-ink/20 bg-white px-3 text-left font-mono text-sm"
         dir="ltr"
       />
-      <span className="text-xs leading-5 text-foreground/55">{help}</span>
+      <span className="mt-2 block max-w-full text-wrap break-words text-xs leading-5 text-foreground/55">{help}</span>
     </label>
   );
 }
@@ -2999,7 +2999,7 @@ function AdminView({
                         ))}
                       </select>
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-2">
                       <DateTimeField
                         label="Start"
                         value={taskStartAt}
