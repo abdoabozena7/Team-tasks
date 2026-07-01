@@ -190,7 +190,19 @@
       "repoUrl": ""
     }
   ],
-  "tasks": [],
+  "tasks": [
+    {
+      "id": "task-1782889469398",
+      "title": "اول تاسك",
+      "question": "عاوزك ترفعلي الrepo بتاع github",
+      "points": 1,
+      "scope": "all",
+      "createdAt": "2026-07-01T07:04:29.398Z",
+      "startAt": "2026-07-01T07:04:00.000Z",
+      "deadlineAt": "2026-07-02T07:04:00.000Z",
+      "status": "active"
+    }
+  ],
   "responses": {},
   "taskSkips": {},
   "progressUpdates": {},
@@ -198,6 +210,6 @@
   "meetingAttendance": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-07-01T07:03:21.092Z"
+    "updatedAt": "2026-07-01T07:04:29.398Z"
   }
 }
