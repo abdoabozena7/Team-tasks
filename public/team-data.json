@@ -215,21 +215,6 @@
       "memberIds": []
     },
     {
-      "id": "task-1782924365661",
-      "title": "watch z playlist",
-      "question": "1234",
-      "points": 5,
-      "scope": "member",
-      "memberId": "renad",
-      "createdAt": "2026-07-01T16:46:05.661Z",
-      "startAt": "2026-07-01T16:41:00.000Z",
-      "deadlineAt": "2026-07-05T16:41:00.000Z",
-      "status": "active",
-      "memberIds": [
-        "renad"
-      ]
-    },
-    {
       "id": "task-1782924886724",
       "title": "123",
       "question": "321",
@@ -393,27 +378,6 @@
         "scoreOverride": true
       }
     },
-    "task-1782924365661": {
-      "renad": {
-        "memberId": "renad",
-        "memberName": "renad",
-        "answer": "سمعتهم",
-        "status": "approved",
-        "submittedAt": "2026-07-01T16:48:17.561Z",
-        "awardedPoints": 5,
-        "lateSubmission": false,
-        "reviewEvents": [
-          {
-            "id": "review-1782924528837",
-            "status": "approved",
-            "reviewedAt": "2026-07-01T16:48:48.837Z",
-            "awardedPoints": 5
-          }
-        ],
-        "reviewedAt": "2026-07-01T16:48:48.837Z",
-        "scoreOverride": false
-      }
-    },
     "task-1782925500361": {
       "abozena": {
         "memberId": "abozena",
@@ -550,6 +514,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T18:13:58.596Z"
+    "updatedAt": "2026-07-01T18:14:16.492Z"
   }
 }
