@@ -201,7 +201,29 @@
       "driveUrl": ""
     }
   ],
-  "tasks": [],
+  "tasks": [
+    {
+      "id": "task-1782933583973",
+      "title": "single agent code",
+      "question": "make a single coding agent with simple tools",
+      "points": 5,
+      "scope": "member",
+      "memberId": "marihan",
+      "memberIds": [
+        "marihan",
+        "fatema",
+        "rodina",
+        "tasneem",
+        "yossef-sharawy",
+        "abo-grir",
+        "shoiab"
+      ],
+      "createdAt": "2026-07-01T19:19:43.973Z",
+      "startAt": "2026-06-29T19:18:00.000Z",
+      "deadlineAt": "2026-07-02T13:00:00.000Z",
+      "status": "active"
+    }
+  ],
   "responses": {},
   "taskSkips": {},
   "progressUpdates": {},
@@ -242,6 +264,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T19:15:39.001Z"
+    "updatedAt": "2026-07-01T19:19:43.973Z"
   }
 }
