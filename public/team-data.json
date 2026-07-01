@@ -117,7 +117,7 @@
       "baseApproved": 0,
       "baseRejected": 0,
       "publicFlag": "هاي",
-      "repoUrl": ""
+      "repoUrl": "https://github.com/renadborham123/Multi_Coding_agents"
     },
     {
       "id": "tasneem",
@@ -356,13 +356,14 @@
       "memberId": "renad",
       "memberName": "renad",
       "createdAt": "2026-07-01T16:52:42.111Z",
-      "status": "pending",
+      "status": "approved",
       "repoUrl": "https://github.com/renadborham123/Multi_Coding_agents",
       "previousAliases": [
         "renad",
         "ريناد"
       ],
-      "previousRepoUrl": ""
+      "previousRepoUrl": "",
+      "reviewedAt": "2026-07-01T16:52:54.107Z"
     },
     {
       "id": "profile-abozena-1782893610397",
@@ -383,6 +384,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T16:52:42.111Z"
+    "updatedAt": "2026-07-01T16:52:54.107Z"
   }
 }
