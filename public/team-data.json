@@ -38,8 +38,8 @@
       "baseCompleted": 4,
       "basePoints": 0,
       "adminNote": "",
-      "baseApproved": 0,
-      "baseRejected": 4,
+      "baseApproved": 4,
+      "baseRejected": 0,
       "publicFlag": "مدفعش ال100 جنيه",
       "repoUrl": ""
     },
@@ -303,6 +303,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T08:18:43.267Z"
+    "updatedAt": "2026-07-01T08:46:22.115Z"
   }
 }
