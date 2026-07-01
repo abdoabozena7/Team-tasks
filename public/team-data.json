@@ -449,6 +449,14 @@
     ],
     "task-1782889469398": [
       {
+        "id": "progress-1782933157457",
+        "taskId": "task-1782889469398",
+        "memberId": "yossef-sharawy",
+        "memberName": "youssef",
+        "note": "تاني",
+        "createdAt": "2026-07-01T19:12:37.457Z"
+      },
+      {
         "id": "progress-1782928403527",
         "taskId": "task-1782889469398",
         "memberId": "yossef-sharawy",
@@ -461,6 +469,15 @@
   "meetings": [],
   "meetingAttendance": {},
   "repoUpdates": [
+    {
+      "id": "repo-progress-yossef-sharawy-task-1782889469398-1782933157944",
+      "memberId": "yossef-sharawy",
+      "taskId": "task-1782889469398",
+      "source": "progress",
+      "excerpt": "تاني",
+      "createdAt": "2026-07-01T19:12:37.944Z",
+      "seen": false
+    },
     {
       "id": "repo-submission-abozena-task-1782925500361-1782925628066",
       "memberId": "abozena",
@@ -514,6 +531,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T19:10:39.648Z"
+    "updatedAt": "2026-07-01T19:12:37.944Z"
   }
 }
