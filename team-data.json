@@ -279,6 +279,21 @@
       "deadlineAt": "2026-07-09T17:54:00.000Z",
       "status": "active",
       "memberIds": []
+    },
+    {
+      "id": "task-1782929638596",
+      "title": "Irure culpa est in",
+      "question": "Molestiae consequatu",
+      "points": 28,
+      "scope": "member",
+      "memberId": "tasneem",
+      "memberIds": [
+        "tasneem"
+      ],
+      "createdAt": "2026-07-01T18:13:58.596Z",
+      "startAt": "2011-01-16T01:47:00.000Z",
+      "deadlineAt": "1982-04-13T17:59:00.000Z",
+      "status": "active"
     }
   ],
   "responses": {
@@ -535,6 +550,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T18:13:57.548Z"
+    "updatedAt": "2026-07-01T18:13:58.596Z"
   }
 }
