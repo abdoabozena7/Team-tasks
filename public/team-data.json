@@ -272,6 +272,26 @@
         ],
         "reviewedAt": "2026-07-01T07:49:43.582Z",
         "scoreOverride": false
+      },
+      "renad": {
+        "memberId": "renad",
+        "memberName": "renad",
+        "answer": "Manual approval outside the website.",
+        "status": "approved",
+        "submittedAt": "2026-07-01T16:33:43.419Z",
+        "reviewEvents": [
+          {
+            "id": "review-1782923623419",
+            "status": "approved",
+            "reviewedAt": "2026-07-01T16:33:43.419Z",
+            "awardedPoints": 1,
+            "scoreOverride": true
+          }
+        ],
+        "reviewedAt": "2026-07-01T16:33:43.419Z",
+        "awardedPoints": 1,
+        "lateSubmission": false,
+        "scoreOverride": true
       }
     }
   },
@@ -310,6 +330,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T16:33:13.888Z"
+    "updatedAt": "2026-07-01T16:33:43.419Z"
   }
 }
