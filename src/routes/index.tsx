@@ -4821,7 +4821,7 @@ async function fetchStudioData() {
 
 async function postApi<TResponse>(path: string, body: unknown, adminPassword?: string) {
   if (!HIVO_API_URL) {
-    throw new Error("Backend URL is not configured. Set VITE_HIVO_API_URL before using shared saves.");
+    throw new Error("Backend is unavailable. Please try again.");
   }
 
   const response = await fetch(`${HIVO_API_URL}${path}`, {
