@@ -38,8 +38,9 @@ export const Route = createFileRoute("/")({
       { name: "description", content: "Hivo Studio team tasks and idea review board." },
     ],
     links: [
-      { rel: "icon", type: "image/png", href: `${import.meta.env.BASE_URL}hivo.png` },
-      { rel: "apple-touch-icon", href: `${import.meta.env.BASE_URL}hivo.png` },
+      { rel: "icon", type: "image/png", href: `${import.meta.env.BASE_URL}hivo.png?v=2` },
+      { rel: "shortcut icon", type: "image/png", href: `${import.meta.env.BASE_URL}hivo.png?v=2` },
+      { rel: "apple-touch-icon", href: `${import.meta.env.BASE_URL}hivo.png?v=2` },
     ],
   }),
 });
