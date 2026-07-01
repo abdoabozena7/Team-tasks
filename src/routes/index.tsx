@@ -930,7 +930,7 @@ function LoginScreen({
               onKeyDown={(event) => {
                 if (event.key === "Enter") submitName();
               }}
-              placeholder="اكتب اسمك..."
+              placeholder="هنا..."
               className="h-12 border-[2px] border-ink bg-paper text-center text-lg"
               autoFocus
             />
@@ -994,7 +994,7 @@ function LeaderboardStatPill({
 }) {
   return (
     <span className={cn("min-w-0 rounded-md border-[2px] border-ink bg-white/85 px-2 py-1 text-center", className)}>
-      <span className="block text-[10px] font-bold uppercase leading-none text-foreground/50">
+      <span className="block text-[10px] font-bold leading-none text-foreground/50">
         {label}
       </span>
       <span className="mt-1 block text-sm font-bold leading-none">{value}</span>
@@ -1002,12 +1002,32 @@ function LeaderboardStatPill({
   );
 }
 
+function memberArabicName(member: Member) {
+  const arabicAlias = member.aliases.find((alias) => /[\u0600-\u06FF]/.test(alias));
+  return arabicAlias?.trim() || member.name;
+}
+
+function textDirection(value: string) {
+  return /[\u0600-\u06FF]/.test(value) ? "rtl" : "ltr";
+}
+
+function textAlignClass(value: string) {
+  return textDirection(value) === "rtl" ? "text-right" : "text-left";
+}
+
+function formatTaskPointsLabel(points: number) {
+  if (points === 1) return "درجة";
+  if (points === 2) return "درجتين";
+  if (points >= 3 && points <= 10) return `${points} درجات`;
+  return `${points} درجة`;
+}
+
 function Leaderboard({ scores }: { scores: MemberScore[] }) {
   const [openMemberId, setOpenMemberId] = useState("");
   const worstMemberId = scores[scores.length - 1]?.member.id;
 
   return (
-    <div className="leaderboard-stage grid gap-3 md:grid-cols-2">
+    <div className="leaderboard-stage grid gap-3 md:grid-cols-2" dir="rtl">
       {scores.map((item, index) => {
         const isLeader = index === 0;
         const isWorst = item.member.id === worstMemberId && scores.length > 1;
@@ -1016,8 +1036,8 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
         const currentSubmitted = Math.max(0, item.submitted - item.baseCompleted);
         const responseLabel =
           item.assignedTasks > 0
-            ? `Current submitted ${currentSubmitted}/${item.assignedTasks}`
-            : "No active assignments";
+            ? `تسلم ${currentSubmitted}/${item.assignedTasks}`
+            : "لا توجد تاسكات نشطة";
         const progressWidth =
           item.assignedTasks > 0 && item.responseRate > 0
             ? Math.max(8, Math.min(100, item.responseRate))
@@ -1037,31 +1057,38 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
             }}
           >
             <div className="relative z-10 grid gap-3">
-              <div className="flex min-w-0 items-start justify-between gap-3">
-                <span
-                  className={`leaderboard-badge grid size-11 shrink-0 place-items-center rounded-full border-[2.5px] border-ink font-bold ${rankingBadgeClass(
-                    index,
-                  )}`}
-                >
-                  {index + 1}
-                </span>
-                <span className="min-w-0 flex-1 text-right">
-                  <span className="flex min-w-0 flex-wrap items-center justify-end gap-1 text-lg font-bold leading-tight">
-                    <span className="min-w-0 break-words">{item.member.name}</span>
-                    {isLeader && <span className="leaderboard-top-tag shrink-0">TOP</span>}
-                    {isWorst && (
-                      <span className="shrink-0 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-bold text-red-700">
-                        Needs follow-up
+              <div className="grid justify-items-end gap-1.5">
+                <span className="block w-full text-right">
+                  <span
+                    className="flex w-full flex-wrap items-start justify-between gap-1.5 text-lg font-bold leading-tight sm:text-xl"
+                    dir="rtl"
+                  >
+                    <span className="inline-flex min-w-0 shrink-0 items-center gap-1.5" dir="rtl">
+                      <span
+                        className={`leaderboard-badge grid size-11 shrink-0 place-items-center rounded-full border-[2.5px] border-ink font-bold ${rankingBadgeClass(
+                          index,
+                        )}`}
+                      >
+                        {index + 1}
                       </span>
-                    )}
-                    {item.member.publicFlag && (
-                      <span className="shrink-0 text-xs font-bold text-red-600">
-                        {item.member.publicFlag}
-                      </span>
-                    )}
+                      <span className="min-w-0 break-words text-right">{memberArabicName(item.member)}</span>
+                    </span>
+                    <span className="ml-2 inline-flex min-w-0 flex-wrap items-center justify-end gap-2.5 sm:ml-3">
+                      {isLeader && <span className="leaderboard-top-tag shrink-0">متصدر</span>}
+                      {isWorst && (
+                        <span className="shrink-0 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-bold text-red-700">
+                          يحتاج متابعة
+                        </span>
+                      )}
+                      {item.member.publicFlag && (
+                        <span className="shrink-0 text-xs font-bold text-red-600">
+                          {item.member.publicFlag}
+                        </span>
+                      )}
+                    </span>
                   </span>
-                  <span className="mt-1 block text-xs font-bold leading-5 text-foreground/55">
-                    {responseLabel} | Approval {formatPercent(item.approvalRate)}
+                  <span className="mt-1 block w-full text-right text-xs font-bold leading-5 text-foreground/55">
+                    {responseLabel} | القبول {formatPercent(item.approvalRate)}
                   </span>
                 </span>
               </div>
@@ -1071,10 +1098,10 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
                   style={{ width: `${progressWidth}%` }}
                 />
               </span>
-              <span className="grid min-w-0 grid-cols-3 gap-1" dir="ltr">
-                <LeaderboardStatPill label="Points" value={item.points} />
-                <LeaderboardStatPill label="Done" value={item.completed} />
-                <LeaderboardStatPill label="Assigned" value={item.assignedTasks} />
+              <span className="grid min-w-0 grid-cols-3 gap-1">
+                <LeaderboardStatPill label="النقاط" value={item.points} />
+                <LeaderboardStatPill label="المنجز" value={item.completed} />
+                <LeaderboardStatPill label="المكلّف" value={item.assignedTasks} />
               </span>
             </div>
             {isOpen && (
@@ -1386,10 +1413,27 @@ function MemberView({
           {refreshStatus && <p className="mt-2 text-sm text-foreground/65">{refreshStatus}</p>}
         </section>
 
+        {(!activeMember.member.repoUrl || !activeMember.member.driveUrl) && (
+          <section
+            className="mb-7 border-[2.5px] border-yellow-700 bg-yellow-50 p-4 text-sm font-bold text-yellow-900 doodle-shadow-sm"
+            style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
+          >
+            <div className="grid gap-2">
+              {!activeMember.member.repoUrl && (
+                <p>حط لينك ال repo من الاعدادات</p>
+              )}
+              {!activeMember.member.driveUrl && (
+                <p>حط لينك ال drive من الاعدادات</p>
+              )}
+            </div>
+          </section>
+        )}
+
         {visibleMeetingNotices.length > 0 && (
           <section
             className="mb-7 grid gap-3 border-[2.5px] border-sky-700 bg-sky-50 p-4 text-sky-950 doodle-shadow-sm"
             style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
+            dir="ltr"
           >
             {visibleMeetingNotices.map((meeting) => {
               const phase = meetingPhase(meeting, nowDate);
@@ -1484,22 +1528,27 @@ function MemberView({
               const key = responseKey(task.id, activeMember.member.id);
               const taskProgressKey = progressKey(task.id, activeMember.member.id);
               const finalSent = sentState[key];
-              const progressSent = sentState[taskProgressKey];
               const finalFeedback = actionFeedback[key];
               const progressFeedback = actionFeedback[taskProgressKey];
               const repoFeedback = actionFeedback[`repo:${task.id}:${activeMember.member.id}`];
               const driveFeedback = actionFeedback[`drive:${task.id}:${activeMember.member.id}`];
-              const finalAnswer = draftAnswers[key] ?? existing?.answer ?? "";
-              const progressNote = draftAnswers[taskProgressKey] ?? "";
+              const sharedDraft = draftAnswers[key] ?? draftAnswers[taskProgressKey] ?? existing?.answer ?? "";
               const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
                 (update) => update.memberId === activeMember.member.id,
               );
               const canAnswer = !existing || existing.status === "rejected";
+              const taskTitleDir = textDirection(task.title);
+              const taskQuestionDir = textDirection(task.question);
+              const taskQuestionLooksLight =
+                task.question.trim().length <= 90 && task.question.trim().split(/\s+/).length <= 12;
+              const taskPoints = sanitizePositiveNumber(task.points, 1);
+              const taskAudienceLabel = task.scope === "all" ? "تاسك عام لكل التيم" : "تاسك مخصص ليك";
+              const taskPointsLabel = formatTaskPointsLabel(taskPoints);
 
               return (
                 <article
                   key={task.id}
-                  className={`border-[2.5px] border-ink p-5 doodle-shadow ${
+                  className={`border-[2.5px] border-ink p-4 doodle-shadow ${
                     existing?.status === "approved"
                       ? "bg-emerald-50"
                       : existing?.status === "submitted" || finalSent
@@ -1510,13 +1559,24 @@ function MemberView({
                   }`}
                   style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
                 >
-                  <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-2xl font-bold">{task.title}</h2>
-                      <p className="mt-1 text-sm text-foreground/60">
-                        {task.scope === "all" ? "تاسك عام لكل التيم" : "تاسك مخصص ليك"} •{" "}
-                        {task.points || 1} points
+                  <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="mb-1 text-sm font-bold text-foreground/60">
+                        <span>{taskAudienceLabel}</span>
+                        <span className="mx-1.5">•</span>
+                        <span className="text-red-600">{taskPointsLabel}</span>
                       </p>
+                      <div className="mb-2 flex w-full flex-wrap items-center justify-start gap-2 text-xs font-bold" dir="ltr">
+                        <span className="rounded-full border-[2px] border-ink bg-white px-2.5 py-1">
+                          deadline: {formatDateTime(task.deadlineAt)}
+                        </span>
+                      </div>
+                      <h2
+                        className={cn("text-xl font-bold leading-tight", textAlignClass(task.title))}
+                        dir={taskTitleDir}
+                      >
+                        {task.title}
+                      </h2>
                     </div>
                     {existing && (
                       <span className="border-[2px] border-ink bg-paper px-3 py-1 text-sm font-bold doodle-shadow-sm">
@@ -1533,24 +1593,34 @@ function MemberView({
                       </span>
                     )}
                   </div>
-                  <p className="mb-4 text-[17px] leading-[1.8]">{task.question}</p>
-                  <Textarea
-                    value={finalAnswer}
-                    onChange={(event) => onDraftChange(key, event.target.value)}
-                    disabled={!canAnswer}
-                    placeholder="اكتب إجابتك هنا..."
-                    className="min-h-32 border-[2px] border-ink bg-paper text-base"
-                  />
-                  <p className="mt-2 text-sm font-bold text-red-700">
-                    ده تسليم رسمي. بعد ما تبعته هيظهر مستني مراجعة الأدمن، والدرجات تتحسب بعد القبول
-                    فقط.
+                  <p
+                    className={cn(
+                      "mb-4 leading-7",
+                      taskQuestionLooksLight ? "text-lg font-semibold leading-8" : "text-base",
+                      textAlignClass(task.question),
+                    )}
+                    dir={taskQuestionDir}
+                  >
+                    {task.question}
                   </p>
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <strong className="text-base">اكتب الرد أو التحديث</strong>
+                  </div>
+                  <Textarea
+                    value={sharedDraft}
+                    onChange={(event) => {
+                      onDraftChange(key, event.target.value);
+                      onDraftChange(taskProgressKey, event.target.value);
+                    }}
+                    placeholder="اكتب هنا الرد النهائي أو تحديث المتابعة..."
+                    className="min-h-20 border-[2px] border-ink bg-paper px-3 py-2 text-sm leading-6 sm:min-h-[88px]"
+                  />
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button
                       type="button"
                       data-testid={`submit-final-${task.id}`}
                       onClick={() => {
-                        if (!finalAnswer.trim()) {
+                        if (!sharedDraft.trim()) {
                           blockMemberAction(key, ["answer"]);
                           return;
                         }
@@ -1570,21 +1640,84 @@ function MemberView({
                       <Save data-icon="inline-start" />
                       تسليم للمراجعة
                     </Button>
+                    <Button
+                      type="button"
+                      data-testid={`submit-progress-${task.id}`}
+                      onClick={() => {
+                        if (!sharedDraft.trim()) {
+                          blockMemberAction(taskProgressKey, ["progress note"]);
+                          return;
+                        }
+                        void runMemberAction(
+                          taskProgressKey,
+                          () => onSubmitProgress(task),
+                          "Progress update sent.",
+                          "Progress update failed. Try again.",
+                        );
+                      }}
+                      disabled={isSubmitting}
+                      variant="outline"
+                      className={actionButtonClass(
+                        "border-[2px] border-ink bg-yellow-200 text-yellow-950 hover:bg-yellow-300 doodle-shadow-sm",
+                        progressFeedback,
+                      )}
+                    >
+                      <Save data-icon="inline-start" />
+                      إرسال متابعة
+                    </Button>
+                    <Button
+                      type="button"
+                      data-testid={`repo-attention-${task.id}`}
+                      onClick={() => {
+                        const repoKey = `repo:${task.id}:${activeMember.member.id}`;
+                        void runMemberAction(
+                          repoKey,
+                          () => onRepoAttention(task),
+                          "GitHub attention sent.",
+                          "Could not notify admin. Try again.",
+                        );
+                      }}
+                      disabled={isSubmitting}
+                      variant="outline"
+                      className={actionButtonClass(
+                        "border-[2px] border-ink bg-paper doodle-shadow-sm",
+                        repoFeedback,
+                      )}
+                    >
+                      <Bell data-icon="inline-start" />
+                      GitHub attention
+                    </Button>
+                    <Button
+                      type="button"
+                      data-testid={`drive-attention-${task.id}`}
+                      onClick={() => {
+                        const driveKey = `drive:${task.id}:${activeMember.member.id}`;
+                        void runMemberAction(
+                          driveKey,
+                          () => onDriveAttention(task),
+                          "Drive attention sent.",
+                          "Could not notify admin. Try again.",
+                        );
+                      }}
+                      disabled={isSubmitting}
+                      variant="outline"
+                      className={actionButtonClass(
+                        "border-[2px] border-ink bg-paper doodle-shadow-sm",
+                        driveFeedback,
+                      )}
+                    >
+                      <FolderOpen data-icon="inline-start" />
+                      Drive attention
+                    </Button>
                   </div>
                   <ActionFeedbackLine feedback={finalFeedback} />
+                  <ActionFeedbackLine feedback={progressFeedback} />
+                  <ActionFeedbackLine feedback={repoFeedback} />
+                  <ActionFeedbackLine feedback={driveFeedback} />
 
-                  <div className="mt-5 border-t-[2px] border-ink/20 pt-4">
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <strong className="text-lg">تحديث متابعة بدون درجات</strong>
-                      <span className="rounded-full border-[2px] border-ink bg-yellow-100 px-2 py-1 text-xs font-bold">
-                        لا يتحسب نقاط
-                      </span>
-                    </div>
-                    <p className="mb-3 text-sm leading-6 text-foreground/65">
-                      اكتب وصلت لإيه أو محتاج إيه. ده متابعة بس، مش تسليم نهائي للتاسك.
-                    </p>
-                    {officialProgress.length > 0 && (
-                      <div className="mb-3 grid gap-2">
+                  {officialProgress.length > 0 && (
+                    <div className="mt-4 border-t-[2px] border-ink/20 pt-3">
+                      <div className="mb-2 grid gap-2">
                         {officialProgress.map((update) => (
                           <div key={update.id} className="border-[2px] border-ink bg-yellow-50 p-3">
                             <p className="whitespace-pre-wrap leading-7">{update.note}</p>
@@ -1594,105 +1727,8 @@ function MemberView({
                           </div>
                         ))}
                       </div>
-                    )}
-                    {progressSent && (
-                      <p className="mb-3 border-[2px] border-ink bg-yellow-100 p-2 text-sm font-bold">
-                        تم إرسال متابعة للأدمن
-                      </p>
-                    )}
-                    <Textarea
-                      value={progressNote}
-                      onChange={(event) => onDraftChange(taskProgressKey, event.target.value)}
-                      placeholder="اكتب تحديث متابعة سريع..."
-                      className="min-h-24 border-[2px] border-ink bg-yellow-50 text-base"
-                    />
-                    <p className="mt-2 text-sm font-bold text-yellow-800">
-                      ده تحديث متابعة فقط، لا يتحسب نقاط ولا يقفل التاسك.
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        data-testid={`submit-progress-${task.id}`}
-                        onClick={() => {
-                          if (!progressNote.trim()) {
-                            blockMemberAction(taskProgressKey, ["progress note"]);
-                            return;
-                          }
-                          void runMemberAction(
-                            taskProgressKey,
-                            () => onSubmitProgress(task),
-                            "Progress update sent.",
-                            "Progress update failed. Try again.",
-                          );
-                        }}
-                        disabled={isSubmitting}
-                        className={actionButtonClass(
-                          "border-[2px] border-ink bg-yellow-100 doodle-shadow-sm",
-                          progressFeedback,
-                        )}
-                      >
-                        <Save data-icon="inline-start" />
-                        إرسال متابعة
-                      </Button>
-                      <Button
-                        type="button"
-                        data-testid={`repo-attention-${task.id}`}
-                        onClick={() => {
-                          const repoKey = `repo:${task.id}:${activeMember.member.id}`;
-                          void runMemberAction(
-                            repoKey,
-                            () => onRepoAttention(task),
-                            "GitHub attention sent.",
-                            "Could not notify admin. Try again.",
-                          );
-                        }}
-                        disabled={isSubmitting}
-                        variant="outline"
-                        className={actionButtonClass(
-                          "border-[2px] border-ink bg-paper doodle-shadow-sm",
-                          repoFeedback,
-                        )}
-                      >
-                        <Bell data-icon="inline-start" />
-                        GitHub attention
-                      </Button>
-                      <Button
-                        type="button"
-                        data-testid={`drive-attention-${task.id}`}
-                        onClick={() => {
-                          const driveKey = `drive:${task.id}:${activeMember.member.id}`;
-                          void runMemberAction(
-                            driveKey,
-                            () => onDriveAttention(task),
-                            "Drive attention sent.",
-                            "Could not notify admin. Try again.",
-                          );
-                        }}
-                        disabled={isSubmitting}
-                        variant="outline"
-                        className={actionButtonClass(
-                          "border-[2px] border-ink bg-paper doodle-shadow-sm",
-                          driveFeedback,
-                        )}
-                      >
-                        <FolderOpen data-icon="inline-start" />
-                        Drive attention
-                      </Button>
                     </div>
-                    <ActionFeedbackLine feedback={progressFeedback} />
-                    <ActionFeedbackLine feedback={repoFeedback} />
-                    <ActionFeedbackLine feedback={driveFeedback} />
-                    {!activeMember.member.repoUrl && (
-                      <p className="mt-2 text-xs font-bold text-yellow-800">
-                        Admin may need to add your repo URL, but the alert will still be sent.
-                      </p>
-                    )}
-                    {!activeMember.member.driveUrl && (
-                      <p className="mt-2 text-xs font-bold text-yellow-800">
-                        Admin may need to add your Drive link, but the alert will still be sent.
-                      </p>
-                    )}
-                  </div>
+                  )}
                 </article>
               );
             })
@@ -1707,14 +1743,14 @@ function MemberView({
             transform: "rotate(-0.3deg)",
           }}
         >
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-4 grid gap-2 md:flex md:flex-wrap md:items-center md:justify-between md:gap-3">
             <h2 className="text-2xl font-bold" style={{ fontFamily: "Caveat, cursive" }}>
-              <span className="highlight-yellow">Leaderboard</span>
+              <span className="highlight-yellow">الترتيب</span>
             </h2>
-            <div className="text-lg font-bold">
+            <div className="min-w-0 text-base font-bold leading-7 md:text-lg">
               <span className="highlight-blue">
                 {stats.leader && stats.leader.points > 0
-                  ? `${stats.leader.member.name} متصدر بـ ${stats.leader.points} points`
+                  ? `${memberArabicName(stats.leader.member)} متصدر بـ ${stats.leader.points} points`
                   : "لسه مفيش إنجازات محسوبة"}
               </span>
             </div>
