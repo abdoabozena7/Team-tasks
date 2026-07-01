@@ -4223,6 +4223,8 @@ function StatsView({
   const activeTasks = data.tasks.filter(isActiveTask);
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const visibleStats = stats.memberStats;
+  const highestMember = stats.leader;
+  const lowestMember = stats.worst;
   const expectedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.expected, 0);
   const receivedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.received, 0);
   const completionRate = expectedTotal > 0 ? Math.round((receivedTotal / expectedTotal) * 100) : 0;
@@ -4503,6 +4505,20 @@ function StatsView({
         </section>
 
         <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
+          <div className="mb-4 grid gap-2 sm:grid-cols-2">
+            {[
+              { label: "Highest", item: highestMember, tone: "border-emerald-200 bg-emerald-50 text-emerald-900" },
+              { label: "Lowest", item: lowestMember, tone: "border-red-200 bg-red-50 text-red-700" },
+            ].map(({ label, item, tone }) => (
+              <div key={label} className={`rounded-xl border p-3 ${tone}`}>
+                <div className="text-xs font-bold uppercase text-foreground/45">{label}</div>
+                <div className="mt-1 flex items-end justify-between gap-3">
+                  <strong className="min-w-0 truncate text-lg">{item?.member.name ?? "N/A"}</strong>
+                  <span className="shrink-0 text-sm font-bold">{item ? `${item.points} pts` : "0 pts"}</span>
+                </div>
+              </div>
+            ))}
+          </div>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold">Members</h2>
@@ -4532,9 +4548,6 @@ function StatsView({
                           <span className={`rounded-full border px-2 py-1 text-xs font-bold ${insight.tone}`}>
                             {insight.text}
                           </span>
-                          {item.member.publicFlag && (
-                            <span className="text-xs font-bold text-red-600">{item.member.publicFlag}</span>
-                          )}
                         </div>
                         <div className="mt-1 text-xs font-bold text-foreground/45">
                           Click to see details
