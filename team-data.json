@@ -226,6 +226,17 @@
       "startAt": "2026-07-08T16:54:00.000Z",
       "deadlineAt": "2026-07-10T16:54:00.000Z",
       "status": "active"
+    },
+    {
+      "id": "task-1782925500361",
+      "title": "كود",
+      "question": "اعملي agent",
+      "points": 5,
+      "scope": "all",
+      "createdAt": "2026-07-01T17:05:00.361Z",
+      "startAt": "2026-07-01T17:04:00.000Z",
+      "deadlineAt": "2026-07-04T17:04:00.000Z",
+      "status": "active"
     }
   ],
   "responses": {
@@ -396,6 +407,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T16:54:46.724Z"
+    "updatedAt": "2026-07-01T17:05:00.361Z"
   }
 }
