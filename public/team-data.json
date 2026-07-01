@@ -352,6 +352,19 @@
   ],
   "profileRequests": [
     {
+      "id": "profile-renad-1782924762111",
+      "memberId": "renad",
+      "memberName": "renad",
+      "createdAt": "2026-07-01T16:52:42.111Z",
+      "status": "pending",
+      "repoUrl": "https://github.com/renadborham123/Multi_Coding_agents",
+      "previousAliases": [
+        "renad",
+        "ريناد"
+      ],
+      "previousRepoUrl": ""
+    },
+    {
       "id": "profile-abozena-1782893610397",
       "memberId": "abozena",
       "memberName": "Abozena",
@@ -370,6 +383,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T16:48:48.837Z"
+    "updatedAt": "2026-07-01T16:52:42.111Z"
   }
 }
