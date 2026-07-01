@@ -14,7 +14,8 @@
         "abozena",
         "abo zena",
         "ابو زينة",
-        "أبو زينة"
+        "أبو زينة",
+        "Abdo"
       ],
       "hidden": true,
       "baseCompleted": 9,
@@ -288,7 +289,7 @@
       "memberId": "abozena",
       "memberName": "Abozena",
       "createdAt": "2026-07-01T08:13:30.397Z",
-      "status": "pending",
+      "status": "approved",
       "nickname": "Abdo",
       "repoUrl": "https://github.com/abdoabozena7/simple_coding_agent",
       "previousAliases": [
@@ -297,10 +298,11 @@
         "ابو زينة",
         "أبو زينة"
       ],
-      "previousRepoUrl": "https://github.com/abdoabozena7/simple_coding_agent"
+      "previousRepoUrl": "https://github.com/abdoabozena7/simple_coding_agent",
+      "reviewedAt": "2026-07-01T08:13:45.483Z"
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T08:13:30.397Z"
+    "updatedAt": "2026-07-01T08:13:45.483Z"
   }
 }
