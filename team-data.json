@@ -202,6 +202,18 @@
       "startAt": "2026-07-01T07:04:00.000Z",
       "deadlineAt": "2026-07-02T07:04:00.000Z",
       "status": "active"
+    },
+    {
+      "id": "task-1782924365661",
+      "title": "watch z playlist",
+      "question": "1234",
+      "points": 5,
+      "scope": "member",
+      "memberId": "renad",
+      "createdAt": "2026-07-01T16:46:05.661Z",
+      "startAt": "2026-07-01T16:41:00.000Z",
+      "deadlineAt": "2026-07-05T16:41:00.000Z",
+      "status": "active"
     }
   ],
   "responses": {
@@ -337,6 +349,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T16:33:50.583Z"
+    "updatedAt": "2026-07-01T16:46:05.661Z"
   }
 }
