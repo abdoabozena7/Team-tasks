@@ -224,7 +224,30 @@
       "status": "active"
     }
   ],
-  "responses": {},
+  "responses": {
+    "task-1782933583973": {
+      "shoiab": {
+        "memberId": "shoiab",
+        "memberName": "shoiab",
+        "answer": "Manual approval outside the website.",
+        "status": "approved",
+        "submittedAt": "2026-07-01T19:19:52.736Z",
+        "reviewEvents": [
+          {
+            "id": "review-1782933592736",
+            "status": "approved",
+            "reviewedAt": "2026-07-01T19:19:52.736Z",
+            "awardedPoints": 5,
+            "scoreOverride": true
+          }
+        ],
+        "reviewedAt": "2026-07-01T19:19:52.736Z",
+        "awardedPoints": 5,
+        "lateSubmission": false,
+        "scoreOverride": true
+      }
+    }
+  },
   "taskSkips": {},
   "progressUpdates": {},
   "meetings": [],
@@ -264,6 +287,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T19:19:43.973Z"
+    "updatedAt": "2026-07-01T19:19:52.736Z"
   }
 }
