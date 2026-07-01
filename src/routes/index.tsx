@@ -29,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -1008,10 +1009,10 @@ function MemberView({
   refreshStatus: string;
   onDraftChange: (key: string, value: string) => void;
   isSubmitting: boolean;
-  onSubmitFinal: (task: StudioTask) => void;
-  onSubmitProgress: (task: StudioTask) => void;
-  onRepoAttention: (task: StudioTask) => void;
-  onProfileChangeRequest: (item: MemberProfileRequestInput) => void;
+  onSubmitFinal: (task: StudioTask) => boolean | Promise<boolean>;
+  onSubmitProgress: (task: StudioTask) => boolean | Promise<boolean>;
+  onRepoAttention: (task: StudioTask) => boolean | Promise<boolean>;
+  onProfileChangeRequest: (item: MemberProfileRequestInput) => boolean | Promise<boolean>;
   onLogout: () => void;
   onRefreshData: () => Promise<void>;
 }) {
@@ -1026,6 +1027,7 @@ function MemberView({
   const [showNicknameHint, setShowNicknameHint] = useState(
     window.localStorage.getItem(NICKNAME_HINT_KEY) !== "seen",
   );
+  const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
   const memberTasks = data.tasks.filter((task) => {
     if (!taskIsForMember(task, activeMember.member.id)) return false;
     if (isTaskSkipped(data, task.id, activeMember.member.id)) return false;
@@ -1036,6 +1038,8 @@ function MemberView({
   );
   const hasProfileChange =
     nicknameDraft.trim().length > 0 || repoDraft.trim() !== (activeMember.member.repoUrl ?? "");
+  const profileActionKey = `profile:${activeMember.member.id}`;
+  const profileFeedback = actionFeedback[profileActionKey];
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -1057,6 +1061,28 @@ function MemberView({
   function closeHint() {
     window.localStorage.setItem(NICKNAME_HINT_KEY, "seen");
     setShowNicknameHint(false);
+  }
+
+  function setMemberFeedback(key: string, feedback: ActionFeedback) {
+    setActionFeedback((current) => ({ ...current, [key]: feedback }));
+  }
+
+  function blockMemberAction(key: string, fields: string[]) {
+    setMemberFeedback(key, { tone: "error", message: missingFieldsMessage(fields) });
+  }
+
+  async function runMemberAction(
+    key: string,
+    action: () => boolean | Promise<boolean>,
+    successMessage: string,
+    failureMessage: string,
+  ) {
+    setMemberFeedback(key, { tone: "pending", message: "Submitting..." });
+    const ok = await action();
+    setMemberFeedback(key, {
+      tone: ok ? "success" : "error",
+      message: ok ? successMessage : failureMessage,
+    });
   }
 
   function renderMemberTaskLog() {
@@ -1278,6 +1304,11 @@ function MemberView({
               const taskProgressKey = progressKey(task.id, activeMember.member.id);
               const finalSent = sentState[key];
               const progressSent = sentState[taskProgressKey];
+              const finalFeedback = actionFeedback[key];
+              const progressFeedback = actionFeedback[taskProgressKey];
+              const repoFeedback = actionFeedback[`repo:${task.id}:${activeMember.member.id}`];
+              const finalAnswer = draftAnswers[key] ?? existing?.answer ?? "";
+              const progressNote = draftAnswers[taskProgressKey] ?? "";
               const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
                 (update) => update.memberId === activeMember.member.id,
               );
@@ -1322,7 +1353,7 @@ function MemberView({
                   </div>
                   <p className="mb-4 text-[17px] leading-[1.8]">{task.question}</p>
                   <Textarea
-                    value={draftAnswers[key] ?? existing?.answer ?? ""}
+                    value={finalAnswer}
                     onChange={(event) => onDraftChange(key, event.target.value)}
                     disabled={!canAnswer}
                     placeholder="اكتب إجابتك هنا..."
@@ -1335,14 +1366,31 @@ function MemberView({
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button
                       type="button"
-                      onClick={() => onSubmitFinal(task)}
+                      data-testid={`submit-final-${task.id}`}
+                      onClick={() => {
+                        if (!finalAnswer.trim()) {
+                          blockMemberAction(key, ["answer"]);
+                          return;
+                        }
+                        void runMemberAction(
+                          key,
+                          () => onSubmitFinal(task),
+                          "Submitted. Waiting for admin review.",
+                          "Submission failed. Try again.",
+                        );
+                      }}
                       disabled={!canAnswer || isSubmitting}
-                      className="border-[2px] border-ink doodle-shadow-sm"
+                      className={actionButtonClass(
+                        "border-[2px] border-ink doodle-shadow-sm",
+                        finalFeedback,
+                        Boolean(finalSent),
+                      )}
                     >
                       <Save data-icon="inline-start" />
                       تسليم للمراجعة
                     </Button>
                   </div>
+                  <ActionFeedbackLine feedback={finalFeedback} />
 
                   <div className="mt-5 border-t-[2px] border-ink/20 pt-4">
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -1372,7 +1420,7 @@ function MemberView({
                       </p>
                     )}
                     <Textarea
-                      value={draftAnswers[taskProgressKey] ?? ""}
+                      value={progressNote}
                       onChange={(event) => onDraftChange(taskProgressKey, event.target.value)}
                       placeholder="اكتب تحديث متابعة سريع..."
                       className="min-h-24 border-[2px] border-ink bg-yellow-50 text-base"
@@ -1383,24 +1431,54 @@ function MemberView({
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Button
                         type="button"
-                        onClick={() => onSubmitProgress(task)}
+                        data-testid={`submit-progress-${task.id}`}
+                        onClick={() => {
+                          if (!progressNote.trim()) {
+                            blockMemberAction(taskProgressKey, ["progress note"]);
+                            return;
+                          }
+                          void runMemberAction(
+                            taskProgressKey,
+                            () => onSubmitProgress(task),
+                            "Progress update sent.",
+                            "Progress update failed. Try again.",
+                          );
+                        }}
                         disabled={isSubmitting}
-                        className="border-[2px] border-ink bg-yellow-100 doodle-shadow-sm"
+                        className={actionButtonClass(
+                          "border-[2px] border-ink bg-yellow-100 doodle-shadow-sm",
+                          progressFeedback,
+                          Boolean(progressSent),
+                        )}
                       >
                         <Save data-icon="inline-start" />
                         إرسال متابعة
                       </Button>
                       <Button
                         type="button"
-                        onClick={() => onRepoAttention(task)}
+                        data-testid={`repo-attention-${task.id}`}
+                        onClick={() => {
+                          const repoKey = `repo:${task.id}:${activeMember.member.id}`;
+                          void runMemberAction(
+                            repoKey,
+                            () => onRepoAttention(task),
+                            "GitHub attention sent.",
+                            "Could not notify admin. Try again.",
+                          );
+                        }}
                         disabled={isSubmitting}
                         variant="outline"
-                        className="border-[2px] border-ink bg-paper doodle-shadow-sm"
+                        className={actionButtonClass(
+                          "border-[2px] border-ink bg-paper doodle-shadow-sm",
+                          repoFeedback,
+                        )}
                       >
                         <Bell data-icon="inline-start" />
                         GitHub attention
                       </Button>
                     </div>
+                    <ActionFeedbackLine feedback={progressFeedback} />
+                    <ActionFeedbackLine feedback={repoFeedback} />
                     {!activeMember.member.repoUrl && (
                       <p className="mt-2 text-xs font-bold text-yellow-800">
                         Admin may need to add your repo URL, but the alert will still be sent.
@@ -1489,19 +1567,34 @@ function MemberView({
               </p>
               <Button
                 type="button"
-                disabled={!hasProfileChange || isSubmitting}
-                onClick={() =>
-                  onProfileChangeRequest({
-                    memberId: activeMember.member.id,
-                    nickname: nicknameDraft.trim(),
-                    repoUrl: repoDraft.trim(),
-                  })
-                }
-                className="mt-3 border-[2px] border-ink doodle-shadow-sm"
+                data-testid="profile-request-submit"
+                disabled={isSubmitting}
+                onClick={() => {
+                  if (!hasProfileChange) {
+                    blockMemberAction(profileActionKey, ["nickname or GitHub repo change"]);
+                    return;
+                  }
+                  void runMemberAction(
+                    profileActionKey,
+                    () =>
+                      onProfileChangeRequest({
+                        memberId: activeMember.member.id,
+                        nickname: nicknameDraft.trim(),
+                        repoUrl: repoDraft.trim(),
+                      }),
+                    "Profile request sent.",
+                    "Could not send profile request. Try again.",
+                  );
+                }}
+                className={actionButtonClass(
+                  "mt-3 border-[2px] border-ink doodle-shadow-sm",
+                  profileFeedback,
+                )}
               >
                 <Bell data-icon="inline-start" />
                 إرسال للأدمن
               </Button>
+              <ActionFeedbackLine feedback={profileFeedback} />
               {activeMember.member.repoUrl ? (
                 <Button
                   type="button"
@@ -1678,6 +1771,41 @@ function statusTone(status?: TaskResponse["status"]) {
   return "bg-zinc-50 text-foreground/65 border-ink/30";
 }
 
+type ActionFeedback = {
+  tone: "error" | "pending" | "success";
+  message: string;
+};
+
+type ActionResult = boolean | void | Promise<boolean | void>;
+
+const ACTION_SUCCESS_CLASS =
+  "border-emerald-700 bg-emerald-600 text-white hover:bg-emerald-700 shadow-[0_0_0_3px_rgba(16,185,129,0.22)]";
+
+function missingFieldsMessage(fields: string[]) {
+  return `Missing: ${fields.join(", ")}. Fill ${fields.length === 1 ? "it" : "them"} and press again.`;
+}
+
+function actionButtonClass(baseClassName: string, feedback?: ActionFeedback, forceSuccess = false) {
+  return cn(baseClassName, (forceSuccess || feedback?.tone === "success") && ACTION_SUCCESS_CLASS);
+}
+
+function ActionFeedbackLine({ feedback }: { feedback?: ActionFeedback }) {
+  if (!feedback) return null;
+
+  return (
+    <p
+      className={cn(
+        "mt-2 rounded-md border px-3 py-2 text-xs font-bold",
+        feedback.tone === "success" && "border-emerald-200 bg-emerald-50 text-emerald-800",
+        feedback.tone === "error" && "border-red-200 bg-red-50 text-red-700",
+        feedback.tone === "pending" && "border-sky-200 bg-sky-50 text-sky-800",
+      )}
+    >
+      {feedback.message}
+    </p>
+  );
+}
+
 function CompactMetric({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-lg border border-ink/10 bg-white px-4 py-3">
@@ -1733,20 +1861,20 @@ function AdminView({
   tokenDialogOpen: boolean;
   tokenDraft: string;
   onLogout: () => void;
-  onAddTask: (task: Omit<StudioTask, "id" | "createdAt">) => void | Promise<void>;
-  onUpdateTask: (taskId: string, updates: Partial<StudioTask>) => void | Promise<void>;
-  onAddMeeting: (meeting: Omit<Meeting, "id" | "createdAt">) => void;
-  onUpdateMeeting: (meetingId: string, updates: Partial<Meeting>) => void;
-  onRecordMeetingAttendance: (meeting: Meeting, member: Member) => void;
-  onRemoveTask: (taskId: string) => void | Promise<void>;
-  onManualApprove: (task: StudioTask, memberId: string, awardedPoints?: number) => void;
-  onSkipTaskMember: (task: StudioTask, memberId: string, note?: string) => void;
-  onUnskipTaskMember: (task: StudioTask, memberId: string) => void;
-  onApproveQueuedSubmission: (item: QueuedSubmission) => void;
-  onRejectQueuedSubmission: (item: QueuedSubmission) => void;
-  onSaveQueuedProgress: (item: QueuedProgressUpdate) => void;
+  onAddTask: (task: Omit<StudioTask, "id" | "createdAt">) => ActionResult;
+  onUpdateTask: (taskId: string, updates: Partial<StudioTask>) => ActionResult;
+  onAddMeeting: (meeting: Omit<Meeting, "id" | "createdAt">) => ActionResult;
+  onUpdateMeeting: (meetingId: string, updates: Partial<Meeting>) => ActionResult;
+  onRecordMeetingAttendance: (meeting: Meeting, member: Member) => ActionResult;
+  onRemoveTask: (taskId: string) => ActionResult;
+  onManualApprove: (task: StudioTask, memberId: string, awardedPoints?: number) => ActionResult;
+  onSkipTaskMember: (task: StudioTask, memberId: string, note?: string) => ActionResult;
+  onUnskipTaskMember: (task: StudioTask, memberId: string) => ActionResult;
+  onApproveQueuedSubmission: (item: QueuedSubmission) => ActionResult;
+  onRejectQueuedSubmission: (item: QueuedSubmission) => ActionResult;
+  onSaveQueuedProgress: (item: QueuedProgressUpdate) => ActionResult;
   onDismissQueuedProgress: (id: string) => void;
-  onAddProgressUpdate: (task: StudioTask, memberId: string, note: string) => void;
+  onAddProgressUpdate: (task: StudioTask, memberId: string, note: string) => ActionResult;
   onReviewAnswer: (
     taskId: string,
     memberId: string,
@@ -1757,13 +1885,13 @@ function AdminView({
   ) => void;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
-  onMarkRepoUpdateSeen: (updateId: string) => void;
-  onReviewProfileRequest: (requestId: string, status: "approved" | "rejected") => void;
+  onMarkRepoUpdateSeen: (updateId: string) => ActionResult;
+  onReviewProfileRequest: (requestId: string, status: "approved" | "rejected") => ActionResult;
   onRefreshAdminQueue: () => void;
   onTokenDraftChange: (value: string) => void;
   onCloseTokenDialog: () => void;
-  onConfirmTokenAndSave: () => void;
-  onSaveToGithub: () => void;
+  onConfirmTokenAndSave: () => ActionResult;
+  onSaveToGithub: () => ActionResult;
 }) {
   const [section, setSection] = useState<AdminSection>("tasks");
   const [navOpen, setNavOpen] = useState(false);
@@ -1790,6 +1918,7 @@ function AdminView({
   const [skipNotes, setSkipNotes] = useState<Record<string, string>>({});
   const [logMode, setLogMode] = useState<"task" | "member">("task");
   const [query, setQuery] = useState("");
+  const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
 
   const activeTasks = data.tasks.filter(isActiveTask);
   const archivedTasks = data.tasks.filter((task) => taskStatus(task) === "archived");
@@ -1848,20 +1977,58 @@ function AdminView({
     setNavOpen(false);
   }
 
-  async function submitTask() {
-    if (!taskTitle.trim() || !taskQuestion.trim()) return;
-    if (taskScope === "member" && !taskMemberId) return;
+  function setAdminFeedback(key: string, feedback: ActionFeedback) {
+    setActionFeedback((current) => ({ ...current, [key]: feedback }));
+  }
 
-    await onAddTask({
-      title: taskTitle.trim(),
-      question: taskQuestion.trim(),
-      points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
-      scope: taskScope,
-      memberId: taskScope === "member" ? taskMemberId : undefined,
-      startAt: fromDateTimeInputValue(taskStartAt) || new Date().toISOString(),
-      deadlineAt: fromDateTimeInputValue(taskDeadlineAt),
-      status: "active",
+  function blockAdminAction(key: string, fields: string[]) {
+    setAdminFeedback(key, { tone: "error", message: missingFieldsMessage(fields) });
+  }
+
+  async function runAdminAction(
+    key: string,
+    action: () => ActionResult,
+    successMessage = "Done.",
+    failureMessage = "Action failed. Try again.",
+  ) {
+    setAdminFeedback(key, { tone: "pending", message: "Submitting..." });
+    const result = await action();
+    const ok = result !== false;
+    setAdminFeedback(key, {
+      tone: ok ? "success" : "error",
+      message: ok ? successMessage : failureMessage,
     });
+    return ok;
+  }
+
+  async function submitTask() {
+    const missing = [
+      !taskTitle.trim() ? "task title" : "",
+      !taskQuestion.trim() ? "question or instructions" : "",
+      taskScope === "member" && !taskMemberId ? "member" : "",
+    ].filter((field): field is string => Boolean(field));
+    if (missing.length > 0) {
+      blockAdminAction("admin:add-task", missing);
+      return;
+    }
+
+    const ok = await runAdminAction(
+      "admin:add-task",
+      () =>
+        onAddTask({
+          title: taskTitle.trim(),
+          question: taskQuestion.trim(),
+          points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
+          scope: taskScope,
+          memberId: taskScope === "member" ? taskMemberId : undefined,
+          startAt: fromDateTimeInputValue(taskStartAt) || new Date().toISOString(),
+          deadlineAt: fromDateTimeInputValue(taskDeadlineAt),
+          status: "active",
+        }),
+      "Task added.",
+      "Task was not added. Try again.",
+    );
+    if (!ok) return;
     setTaskTitle("");
     setTaskQuestion("");
     setTaskPoints(1);
@@ -1871,15 +2038,25 @@ function AdminView({
     setTaskDeadlineAt("");
   }
 
-  function submitMeeting() {
-    if (!meetingTitle.trim()) return;
-    onAddMeeting({
-      title: meetingTitle.trim(),
-      startsAt: fromDateTimeInputValue(meetingStartsAt) || new Date().toISOString(),
-      durationMinutes: sanitizeNumber(meetingDuration) || 60,
-      points: sanitizePositiveNumber(meetingPoints, 1),
-      status: "active",
-    });
+  async function submitMeeting() {
+    if (!meetingTitle.trim()) {
+      blockAdminAction("admin:add-meeting", ["meeting title"]);
+      return;
+    }
+    const ok = await runAdminAction(
+      "admin:add-meeting",
+      () =>
+        onAddMeeting({
+          title: meetingTitle.trim(),
+          startsAt: fromDateTimeInputValue(meetingStartsAt) || new Date().toISOString(),
+          durationMinutes: sanitizeNumber(meetingDuration) || 60,
+          points: sanitizePositiveNumber(meetingPoints, 1),
+          status: "active",
+        }),
+      "Meeting added.",
+      "Meeting was not added. Try again.",
+    );
+    if (!ok) return;
     setMeetingTitle("");
     setMeetingStartsAt("");
     setMeetingDuration(60);
@@ -1971,6 +2148,8 @@ function AdminView({
     const selectedManualScore = manualApproveScores[task.id] ?? String(sanitizePositiveNumber(task.points, 1));
     const selectedProgressMember = progressMembers[task.id] ?? "";
     const progressNote = progressNotes[task.id] ?? "";
+    const manualApproveKey = `admin:manual-approve:${task.id}`;
+    const addProgressKey = `admin:add-progress:${task.id}`;
 
     return (
       <section className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
@@ -2081,18 +2260,30 @@ function AdminView({
               />
               <Button
                 type="button"
-                onClick={() =>
-                  onManualApprove(
-                    task,
-                    selectedManualMember,
-                    sanitizeScore(selectedManualScore, sanitizePositiveNumber(task.points, 1)),
-                  )
-                }
+                onClick={() => {
+                  if (!selectedManualMember) {
+                    blockAdminAction(manualApproveKey, ["member"]);
+                    return;
+                  }
+                  void runAdminAction(
+                    manualApproveKey,
+                    () =>
+                      onManualApprove(
+                        task,
+                        selectedManualMember,
+                        sanitizeScore(selectedManualScore, sanitizePositiveNumber(task.points, 1)),
+                      ),
+                    "Manual approval saved.",
+                    "Manual approval failed. Try again.",
+                  );
+                }}
+                className={actionButtonClass("", actionFeedback[manualApproveKey])}
               >
                 <Check data-icon="inline-start" />
                 Approve
               </Button>
             </div>
+            <ActionFeedbackLine feedback={actionFeedback[manualApproveKey]} />
           </div>
 
           <div className="rounded-lg border border-ink/10 bg-yellow-50 p-3">
@@ -2127,15 +2318,33 @@ function AdminView({
                 <Button
                   type="button"
                   onClick={() => {
-                    onAddProgressUpdate(task, selectedProgressMember, progressNote);
-                    setProgressNotes((current) => ({ ...current, [task.id]: "" }));
+                    const missing = [
+                      !selectedProgressMember ? "member" : "",
+                      !progressNote.trim() ? "quick note" : "",
+                    ].filter((field): field is string => Boolean(field));
+                    if (missing.length > 0) {
+                      blockAdminAction(addProgressKey, missing);
+                      return;
+                    }
+                    void runAdminAction(
+                      addProgressKey,
+                      () => onAddProgressUpdate(task, selectedProgressMember, progressNote),
+                      "Progress update added.",
+                      "Progress update failed. Try again.",
+                    ).then((ok) => {
+                      if (ok) setProgressNotes((current) => ({ ...current, [task.id]: "" }));
+                    });
                   }}
-                  className="bg-yellow-100 text-foreground hover:bg-yellow-200"
+                  className={actionButtonClass(
+                    "bg-yellow-100 text-foreground hover:bg-yellow-200",
+                    actionFeedback[addProgressKey],
+                  )}
                 >
                   <Plus data-icon="inline-start" />
                   Add
                 </Button>
               </div>
+              <ActionFeedbackLine feedback={actionFeedback[addProgressKey]} />
             </div>
           </div>
         </div>
@@ -2159,6 +2368,12 @@ function AdminView({
             const awarded = responseAwardedPoints(task, response);
             const late = responseIsLate(task, response);
             const hardLocked = response ? isHardLocked(task, response) : false;
+            const rowManualKey = `admin:row-manual:${task.id}:${member.id}`;
+            const skipKey = `admin:skip:${task.id}:${member.id}`;
+            const restoreKey = `admin:restore:${task.id}:${member.id}`;
+            const approveKey = `admin:approve:${task.id}:${member.id}`;
+            const overrideKey = `admin:override:${task.id}:${member.id}`;
+            const rejectKey = `admin:reject:${task.id}:${member.id}`;
             return (
               <details
                 key={member.id}
@@ -2222,17 +2437,27 @@ function AdminView({
                           type="button"
                           size="sm"
                           onClick={() =>
-                            onManualApprove(
-                              task,
-                              member.id,
-                              sanitizeScore(manualScore, sanitizePositiveNumber(task.points, 1)),
+                            void runAdminAction(
+                              rowManualKey,
+                              () =>
+                                onManualApprove(
+                                  task,
+                                  member.id,
+                                  sanitizeScore(manualScore, sanitizePositiveNumber(task.points, 1)),
+                                ),
+                              "Manual approval saved.",
+                              "Manual approval failed. Try again.",
                             )
                           }
-                          className="bg-emerald-600 text-white hover:bg-emerald-700"
+                          className={actionButtonClass(
+                            "bg-emerald-600 text-white hover:bg-emerald-700",
+                            actionFeedback[rowManualKey],
+                          )}
                         >
                           <Check data-icon="inline-start" />
                           Manual approve
                         </Button>
+                        <ActionFeedbackLine feedback={actionFeedback[rowManualKey]} />
                       </>
                     )}
                     {skipped ? (
@@ -2240,8 +2465,18 @@ function AdminView({
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => onUnskipTaskMember(task, member.id)}
-                        className="border border-ink/20 bg-white"
+                        onClick={() =>
+                          void runAdminAction(
+                            restoreKey,
+                            () => onUnskipTaskMember(task, member.id),
+                            "Assignment restored.",
+                            "Could not restore assignment.",
+                          )
+                        }
+                        className={actionButtonClass(
+                          "border border-ink/20 bg-white",
+                          actionFeedback[restoreKey],
+                        )}
                       >
                         Restore assignment
                       </Button>
@@ -2251,10 +2486,19 @@ function AdminView({
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          onSkipTaskMember(task, member.id, skipNote);
-                          setSkipNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                          void runAdminAction(
+                            skipKey,
+                            () => onSkipTaskMember(task, member.id, skipNote),
+                            "Member skipped.",
+                            "Could not skip member.",
+                          ).then((ok) => {
+                            if (ok) setSkipNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                          });
                         }}
-                        className="border border-zinc-300 bg-zinc-100 text-zinc-700"
+                        className={actionButtonClass(
+                          "border border-zinc-300 bg-zinc-100 text-zinc-700",
+                          actionFeedback[skipKey],
+                        )}
                       >
                         Skip member
                       </Button>
@@ -2263,6 +2507,7 @@ function AdminView({
                       Skip is a full exemption: no points, no penalties, no completion count.
                     </span>
                   </div>
+                  <ActionFeedbackLine feedback={actionFeedback[restoreKey] ?? actionFeedback[skipKey]} />
                 </div>
                 {response && (
                   <div className="mt-3 rounded-md border border-ink/10 bg-paper p-3">
@@ -2321,18 +2566,29 @@ function AdminView({
                       <Button
                         type="button"
                         size="sm"
-                        disabled={hardLocked}
                         onClick={() => {
-                          onReviewAnswer(
-                            task.id,
-                            member.id,
-                            "approved",
-                            reviewNote,
-                            sanitizeScore(scoreValue, calculateAwardedPoints(task, response, "approved")),
-                            false,
-                          );
-                          setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                          if (hardLocked) {
+                            blockAdminAction(approveKey, ["override approval for locked submission"]);
+                            return;
+                          }
+                          void runAdminAction(
+                            approveKey,
+                            () =>
+                              onReviewAnswer(
+                                task.id,
+                                member.id,
+                                "approved",
+                                reviewNote,
+                                sanitizeScore(scoreValue, calculateAwardedPoints(task, response, "approved")),
+                                false,
+                              ),
+                            "Submission approved.",
+                            "Approve failed. Try again.",
+                          ).then((ok) => {
+                            if (ok) setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                          });
                         }}
+                        className={actionButtonClass("", actionFeedback[approveKey])}
                       >
                         <Check data-icon="inline-start" />
                         Approve
@@ -2342,17 +2598,27 @@ function AdminView({
                           type="button"
                           size="sm"
                           onClick={() => {
-                            onReviewAnswer(
-                              task.id,
-                              member.id,
-                              "approved",
-                              reviewNote,
-                              sanitizeScore(scoreValue, 0),
-                              true,
-                            );
-                            setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                            void runAdminAction(
+                              overrideKey,
+                              () =>
+                                onReviewAnswer(
+                                  task.id,
+                                  member.id,
+                                  "approved",
+                                  reviewNote,
+                                  sanitizeScore(scoreValue, 0),
+                                  true,
+                                ),
+                              "Override approval saved.",
+                              "Override approval failed.",
+                            ).then((ok) => {
+                              if (ok) setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                            });
                           }}
-                          className="bg-red-600 text-white hover:bg-red-700"
+                          className={actionButtonClass(
+                            "bg-red-600 text-white hover:bg-red-700",
+                            actionFeedback[overrideKey],
+                          )}
                         >
                           Override approve
                         </Button>
@@ -2362,15 +2628,31 @@ function AdminView({
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          onReviewAnswer(task.id, member.id, "rejected", reviewNote, 0, false);
-                          setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                          void runAdminAction(
+                            rejectKey,
+                            () => onReviewAnswer(task.id, member.id, "rejected", reviewNote, 0, false),
+                            "Submission rejected.",
+                            "Reject failed. Try again.",
+                          ).then((ok) => {
+                            if (ok) setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                          });
                         }}
-                        className="border border-ink/20 bg-white"
+                        className={actionButtonClass(
+                          "border border-ink/20 bg-white",
+                          actionFeedback[rejectKey],
+                        )}
                       >
                         <RotateCcw data-icon="inline-start" />
                         Reject
                       </Button>
                     </div>
+                    <ActionFeedbackLine
+                      feedback={
+                        actionFeedback[approveKey] ??
+                        actionFeedback[overrideKey] ??
+                        actionFeedback[rejectKey]
+                      }
+                    />
                   </div>
                 )}
                 {progress.length > 0 && (
@@ -3019,10 +3301,19 @@ function AdminView({
                     <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs leading-5 text-yellow-900">
                       Deadline rule: late submissions default to half score. Submissions after double the task window require override approval.
                     </div>
-                    <Button type="button" onClick={submitTask} className="h-11 bg-sky-500 text-white hover:bg-sky-600">
+                    <Button
+                      type="button"
+                      data-testid="admin-add-task"
+                      onClick={submitTask}
+                      className={actionButtonClass(
+                        "h-11 bg-sky-500 text-white hover:bg-sky-600",
+                        actionFeedback["admin:add-task"],
+                      )}
+                    >
                       <Plus data-icon="inline-start" />
                       Add task
                     </Button>
+                    <ActionFeedbackLine feedback={actionFeedback["admin:add-task"]} />
                   </div>
                 </div>
                 <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
@@ -3074,10 +3365,19 @@ function AdminView({
                         className="h-11 border border-ink/20 bg-white"
                       />
                     </div>
-                    <Button type="button" onClick={submitMeeting} className="h-11 bg-emerald-600 text-white hover:bg-emerald-700">
+                    <Button
+                      type="button"
+                      data-testid="admin-add-meeting"
+                      onClick={submitMeeting}
+                      className={actionButtonClass(
+                        "h-11 bg-emerald-600 text-white hover:bg-emerald-700",
+                        actionFeedback["admin:add-meeting"],
+                      )}
+                    >
                       <Plus data-icon="inline-start" />
                       Add meeting
                     </Button>
+                    <ActionFeedbackLine feedback={actionFeedback["admin:add-meeting"]} />
                   </div>
                 </div>
                 <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
@@ -5083,7 +5383,7 @@ function Index() {
   async function addTask(task: Omit<StudioTask, "id" | "createdAt">) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
-      return;
+      return false;
     }
 
     setIsSaving(true);
@@ -5093,8 +5393,10 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Task saved to GitHub.");
+      return true;
     } catch (error) {
       setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -5103,7 +5405,7 @@ function Index() {
   async function updateTask(taskId: string, updates: Partial<StudioTask>) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
-      return;
+      return false;
     }
 
     setIsSaving(true);
@@ -5113,8 +5415,10 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Task update saved.");
+      return true;
     } catch (error) {
       setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -5133,6 +5437,7 @@ function Index() {
         },
       ],
     }));
+    return true;
   }
 
   function updateMeeting(meetingId: string, updates: Partial<Meeting>) {
@@ -5142,6 +5447,7 @@ function Index() {
         meeting.id === meetingId ? { ...meeting, ...updates } : meeting,
       ),
     }));
+    return true;
   }
 
   function recordMeetingAttendance(meeting: Meeting, member: Member) {
@@ -5164,12 +5470,13 @@ function Index() {
         },
       },
     }));
+    return true;
   }
 
   async function removeTask(taskId: string) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
-      return;
+      return false;
     }
 
     setIsSaving(true);
@@ -5179,18 +5486,20 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Task deleted from GitHub.");
+      return true;
     } catch (error) {
       setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
     } finally {
       setIsSaving(false);
     }
   }
 
   async function submitFinalSubmission(task: StudioTask) {
-    if (!activeMember) return;
+    if (!activeMember) return false;
     const key = responseKey(task.id, activeMember.member.id);
-    const answer = draftAnswers[key]?.trim();
-    if (!answer) return;
+    const answer = (draftAnswers[key] ?? getResponse(data, task.id, activeMember.member.id)?.answer ?? "").trim();
+    if (!answer) return false;
 
     const item: QueuedSubmission = {
       id: `submission-${Date.now()}`,
@@ -5219,20 +5528,22 @@ function Index() {
         return next;
       });
       setRefreshStatus("Submission saved centrally and is waiting for admin review.");
+      return true;
     } catch (error) {
       setRefreshStatus(
         error instanceof Error ? error.message : "Submission failed. Nothing was approved.",
       );
+      return false;
     } finally {
       setIsSubmitting(false);
     }
   }
 
   async function submitProgressUpdate(task: StudioTask) {
-    if (!activeMember) return;
+    if (!activeMember) return false;
     const key = progressKey(task.id, activeMember.member.id);
     const note = draftAnswers[key]?.trim();
-    if (!note) return;
+    if (!note) return false;
 
     const item: QueuedProgressUpdate = {
       id: `progress-${Date.now()}`,
@@ -5261,15 +5572,17 @@ function Index() {
         return next;
       });
       setRefreshStatus("Progress update saved centrally. It does not count as points.");
+      return true;
     } catch (error) {
       setRefreshStatus(error instanceof Error ? error.message : "Progress update failed.");
+      return false;
     } finally {
       setIsSubmitting(false);
     }
   }
 
   async function sendRepoAttention(task: StudioTask) {
-    if (!activeMember) return;
+    if (!activeMember) return false;
 
     setIsSubmitting(true);
     try {
@@ -5281,17 +5594,19 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setRefreshStatus("Admin was notified about your GitHub update.");
+      return true;
     } catch (error) {
       setRefreshStatus(
         error instanceof Error ? error.message : "Could not notify admin about GitHub.",
       );
+      return false;
     } finally {
       setIsSubmitting(false);
     }
   }
 
   async function submitProfileChangeRequest(item: MemberProfileRequestInput) {
-    if (!activeMember) return;
+    if (!activeMember) return false;
 
     setIsSubmitting(true);
     try {
@@ -5299,8 +5614,10 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setRefreshStatus("Profile change request sent to admin for approval.");
+      return true;
     } catch (error) {
       setRefreshStatus(error instanceof Error ? error.message : "Could not send profile request.");
+      return false;
     } finally {
       setIsSubmitting(false);
     }
@@ -5316,7 +5633,7 @@ function Index() {
   ) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
-      return;
+      return false;
     }
 
     setIsSaving(true);
@@ -5333,10 +5650,12 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Saved to GitHub.");
+      return true;
     } catch (error) {
       setSaveStatus(
         error instanceof Error ? `Save failed: ${error.message}` : "Save failed. Nothing was approved.",
       );
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -5361,19 +5680,19 @@ function Index() {
   }
 
   async function approveQueuedSubmission(item: QueuedSubmission) {
-    await reviewAnswer(item.taskId, item.memberId, "approved");
+    return reviewAnswer(item.taskId, item.memberId, "approved");
   }
 
   async function rejectQueuedSubmission(item: QueuedSubmission) {
-    await reviewAnswer(item.taskId, item.memberId, "rejected");
+    return reviewAnswer(item.taskId, item.memberId, "rejected");
   }
 
   async function manualApprove(task: StudioTask, memberId: string, awardedPoints?: number) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
-      return;
+      return false;
     }
-    if (!memberId) return;
+    if (!memberId) return false;
 
     setIsSaving(true);
     setSaveStatus("Syncing data...");
@@ -5386,10 +5705,12 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Saved to GitHub.");
+      return true;
     } catch (error) {
       setSaveStatus(
         error instanceof Error ? `Save failed: ${error.message}` : "Save failed. Nothing was approved.",
       );
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -5398,9 +5719,9 @@ function Index() {
   async function skipTaskMember(task: StudioTask, memberId: string, note = "") {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
-      return;
+      return false;
     }
-    if (!memberId) return;
+    if (!memberId) return false;
 
     setIsSaving(true);
     setSaveStatus("Syncing data...");
@@ -5413,8 +5734,10 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Member skipped for this task.");
+      return true;
     } catch (error) {
       setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -5423,9 +5746,9 @@ function Index() {
   async function unskipTaskMember(task: StudioTask, memberId: string) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
-      return;
+      return false;
     }
-    if (!memberId) return;
+    if (!memberId) return false;
 
     setIsSaving(true);
     setSaveStatus("Syncing data...");
@@ -5437,8 +5760,10 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Member assignment restored.");
+      return true;
     } catch (error) {
       setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -5447,10 +5772,10 @@ function Index() {
   async function addProgressUpdate(task: StudioTask, memberId: string, note: string) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
-      return;
+      return false;
     }
     const cleanNote = note.trim();
-    if (!memberId || !cleanNote) return;
+    if (!memberId || !cleanNote) return false;
 
     setIsSaving(true);
     setSaveStatus("Syncing data...");
@@ -5463,10 +5788,12 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Progress saved to GitHub.");
+      return true;
     } catch (error) {
       setSaveStatus(
         error instanceof Error ? `Save failed: ${error.message}` : "Save failed. Nothing was approved.",
       );
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -5490,6 +5817,7 @@ function Index() {
       },
     }));
     removeQueuedProgress(item.id);
+    return true;
   }
 
   function updateMember(memberId: string, updates: Partial<Member>) {
@@ -5526,7 +5854,7 @@ function Index() {
   async function markRepoUpdateSeen(updateId: string) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
-      return;
+      return false;
     }
 
     setIsSaving(true);
@@ -5536,8 +5864,10 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Repo update marked done.");
+      return true;
     } catch (error) {
       setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -5546,7 +5876,7 @@ function Index() {
   async function reviewProfileRequest(requestId: string, status: "approved" | "rejected") {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
-      return;
+      return false;
     }
 
     setIsSaving(true);
@@ -5559,8 +5889,10 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus(status === "approved" ? "Profile request approved." : "Profile request rejected.");
+      return true;
     } catch (error) {
       setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
     } finally {
       setIsSaving(false);
     }
