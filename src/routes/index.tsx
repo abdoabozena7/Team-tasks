@@ -1717,7 +1717,7 @@ function AdminView({
   onUpdateMeeting: (meetingId: string, updates: Partial<Meeting>) => void;
   onRecordMeetingAttendance: (meeting: Meeting, member: Member) => void;
   onRemoveTask: (taskId: string) => void | Promise<void>;
-  onManualApprove: (task: StudioTask, memberId: string) => void;
+  onManualApprove: (task: StudioTask, memberId: string, awardedPoints?: number) => void;
   onSkipTaskMember: (task: StudioTask, memberId: string, note?: string) => void;
   onUnskipTaskMember: (task: StudioTask, memberId: string) => void;
   onApproveQueuedSubmission: (item: QueuedSubmission) => void;
@@ -1760,6 +1760,7 @@ function AdminView({
   const [selectedMeetingId, setSelectedMeetingId] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState(data.members[0]?.id ?? "");
   const [manualApproveMembers, setManualApproveMembers] = useState<Record<string, string>>({});
+  const [manualApproveScores, setManualApproveScores] = useState<Record<string, string>>({});
   const [progressMembers, setProgressMembers] = useState<Record<string, string>>({});
   const [progressNotes, setProgressNotes] = useState<Record<string, string>>({});
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
@@ -1945,6 +1946,7 @@ function AdminView({
     const members = assignedMembers(task);
     const responses = data.responses[task.id] ?? {};
     const selectedManualMember = manualApproveMembers[task.id] ?? "";
+    const selectedManualScore = manualApproveScores[task.id] ?? String(sanitizePositiveNumber(task.points, 1));
     const selectedProgressMember = progressMembers[task.id] ?? "";
     const progressNote = progressNotes[task.id] ?? "";
 
@@ -2023,7 +2025,7 @@ function AdminView({
               <Star className="size-4" />
               Manual approval
             </div>
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <div className="grid gap-2 sm:grid-cols-[1fr_140px_auto]">
               <select
                 value={selectedManualMember}
                 onChange={(event) =>
@@ -2041,7 +2043,30 @@ function AdminView({
                   </option>
                 ))}
               </select>
-              <Button type="button" onClick={() => onManualApprove(task, selectedManualMember)}>
+              <Input
+                type="number"
+                min={0}
+                step={0.1}
+                value={selectedManualScore}
+                onChange={(event) =>
+                  setManualApproveScores((current) => ({
+                    ...current,
+                    [task.id]: event.target.value,
+                  }))
+                }
+                placeholder="Score"
+                className="h-10 border border-ink/20 bg-white"
+              />
+              <Button
+                type="button"
+                onClick={() =>
+                  onManualApprove(
+                    task,
+                    selectedManualMember,
+                    sanitizeScore(selectedManualScore, sanitizePositiveNumber(task.points, 1)),
+                  )
+                }
+              >
                 <Check data-icon="inline-start" />
                 Approve
               </Button>
@@ -2098,6 +2123,9 @@ function AdminView({
             const response = responses[member.id];
             const reviewNoteKey = `${task.id}:${member.id}`;
             const reviewNote = reviewNotes[reviewNoteKey] ?? "";
+            const manualScoreKey = `manual:${task.id}:${member.id}`;
+            const manualScore =
+              manualApproveScores[manualScoreKey] ?? String(sanitizePositiveNumber(task.points, 1));
             const scoreValue =
               reviewScores[reviewNoteKey] ??
               (response ? String(calculateAwardedPoints(task, response, "approved")) : "");
@@ -2152,6 +2180,39 @@ function AdminView({
                     className="border border-ink/20 bg-white"
                   />
                   <div className="flex flex-wrap gap-2">
+                    {!response && !skipped && (
+                      <>
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          value={manualScore}
+                          onChange={(event) =>
+                            setManualApproveScores((current) => ({
+                              ...current,
+                              [manualScoreKey]: event.target.value,
+                            }))
+                          }
+                          placeholder="Manual score"
+                          className="h-9 w-36 border border-ink/20 bg-white"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() =>
+                            onManualApprove(
+                              task,
+                              member.id,
+                              sanitizeScore(manualScore, sanitizePositiveNumber(task.points, 1)),
+                            )
+                          }
+                          className="bg-emerald-600 text-white hover:bg-emerald-700"
+                        >
+                          <Check data-icon="inline-start" />
+                          Manual approve
+                        </Button>
+                      </>
+                    )}
                     {skipped ? (
                       <Button
                         type="button"
@@ -2766,7 +2827,20 @@ function AdminView({
                         <div key={update.id} className="rounded-lg border border-yellow-200 bg-white p-3">
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <strong>{member?.name ?? update.memberId}</strong>
+                              {update.taskId ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedTaskId(update.taskId ?? "");
+                                    setSection("reviews");
+                                  }}
+                                  className="text-left text-lg font-bold underline decoration-yellow-400 decoration-4 underline-offset-4"
+                                >
+                                  {member?.name ?? update.memberId}
+                                </button>
+                              ) : (
+                                <strong>{member?.name ?? update.memberId}</strong>
+                              )}
                               <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold text-foreground/50">
                                 <span>{update.source ?? "manual"}</span>
                                 {task && <span>Task: {task.title}</span>}
@@ -2854,9 +2928,10 @@ function AdminView({
                 </div>
               </div>
               {renderTaskDetail(
-                selectedTask && pendingSubmissions.some((item) => item.taskId === selectedTask.id)
-                  ? selectedTask
-                  : data.tasks.find((task) => pendingSubmissions.some((item) => item.taskId === task.id)),
+                selectedTask ??
+                  data.tasks.find((task) =>
+                    pendingSubmissions.some((item) => item.taskId === task.id),
+                  ),
               )}
             </section>
           )}
@@ -5071,7 +5146,7 @@ function Index() {
     await reviewAnswer(item.taskId, item.memberId, "rejected");
   }
 
-  async function manualApprove(task: StudioTask, memberId: string) {
+  async function manualApprove(task: StudioTask, memberId: string, awardedPoints?: number) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
       return;
@@ -5084,6 +5159,7 @@ function Index() {
       const nextData = await postAdminMutation(adminPassword, "manualApprove", {
         taskId: task.id,
         memberId,
+        awardedPoints,
       });
       setData(nextData);
       setIsDirty(false);
