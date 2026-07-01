@@ -17,7 +17,7 @@
         "أبو زينة",
         "Abdo"
       ],
-      "hidden": true,
+      "hidden": false,
       "baseCompleted": 9,
       "basePoints": 14,
       "adminNote": "عامل ايه",
@@ -303,6 +303,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T08:13:45.483Z"
+    "updatedAt": "2026-07-01T08:18:43.267Z"
   }
 }
