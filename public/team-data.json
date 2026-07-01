@@ -426,7 +426,18 @@
     }
   },
   "taskSkips": {},
-  "progressUpdates": {},
+  "progressUpdates": {
+    "task-1782926545670": [
+      {
+        "id": "progress-1782926697604",
+        "taskId": "task-1782926545670",
+        "memberId": "yossef-sharawy",
+        "memberName": "yossef sharawy",
+        "note": "جمعت 50",
+        "createdAt": "2026-07-01T17:24:57.604Z"
+      }
+    ]
+  },
   "meetings": [],
   "meetingAttendance": {},
   "repoUpdates": [
@@ -483,6 +494,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T17:22:25.670Z"
+    "updatedAt": "2026-07-01T17:24:57.564Z"
   }
 }
