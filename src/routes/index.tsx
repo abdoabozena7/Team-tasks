@@ -161,6 +161,13 @@ type QueuedProgressUpdate = {
   createdAt: string;
 };
 
+type RepoAttentionRequest = {
+  memberId: string;
+  taskId?: string;
+  excerpt?: string;
+  note?: string;
+};
+
 type AdminQueue = {
   submissions: QueuedSubmission[];
   progressUpdates: QueuedProgressUpdate[];
@@ -961,6 +968,7 @@ function MemberView({
   isSubmitting,
   onSubmitFinal,
   onSubmitProgress,
+  onRepoAttention,
   onLogout,
   onRefreshData,
 }: {
@@ -974,6 +982,7 @@ function MemberView({
   isSubmitting: boolean;
   onSubmitFinal: (task: StudioTask) => void;
   onSubmitProgress: (task: StudioTask) => void;
+  onRepoAttention: (task: StudioTask) => void;
   onLogout: () => void;
   onRefreshData: () => Promise<void>;
 }) {
@@ -1342,7 +1351,22 @@ function MemberView({
                         <Save data-icon="inline-start" />
                         إرسال متابعة
                       </Button>
+                      <Button
+                        type="button"
+                        onClick={() => onRepoAttention(task)}
+                        disabled={isSubmitting}
+                        variant="outline"
+                        className="border-[2px] border-ink bg-paper doodle-shadow-sm"
+                      >
+                        <Bell data-icon="inline-start" />
+                        GitHub attention
+                      </Button>
                     </div>
+                    {!activeMember.member.repoUrl && (
+                      <p className="mt-2 text-xs font-bold text-yellow-800">
+                        Admin may need to add your repo URL, but the alert will still be sent.
+                      </p>
+                    )}
                   </div>
                 </article>
               );
@@ -1429,7 +1453,16 @@ function MemberView({
   );
 }
 
-type AdminSection = "overview" | "tasks" | "meetings" | "members" | "logs" | "archive" | "settings";
+type AdminSection =
+  | "overview"
+  | "repo-updates"
+  | "reviews"
+  | "tasks"
+  | "meetings"
+  | "members"
+  | "logs"
+  | "archive"
+  | "settings";
 
 function formatDateTime(value?: string) {
   if (!value) return "Not set";
@@ -1620,12 +1653,12 @@ function AdminView({
   tokenDialogOpen: boolean;
   tokenDraft: string;
   onLogout: () => void;
-  onAddTask: (task: Omit<StudioTask, "id" | "createdAt">) => void;
-  onUpdateTask: (taskId: string, updates: Partial<StudioTask>) => void;
+  onAddTask: (task: Omit<StudioTask, "id" | "createdAt">) => void | Promise<void>;
+  onUpdateTask: (taskId: string, updates: Partial<StudioTask>) => void | Promise<void>;
   onAddMeeting: (meeting: Omit<Meeting, "id" | "createdAt">) => void;
   onUpdateMeeting: (meetingId: string, updates: Partial<Meeting>) => void;
   onRecordMeetingAttendance: (meeting: Meeting, member: Member) => void;
-  onRemoveTask: (taskId: string) => void;
+  onRemoveTask: (taskId: string) => void | Promise<void>;
   onManualApprove: (task: StudioTask, memberId: string) => void;
   onSkipTaskMember: (task: StudioTask, memberId: string, note?: string) => void;
   onUnskipTaskMember: (task: StudioTask, memberId: string) => void;
@@ -1721,16 +1754,35 @@ function AdminView({
     { name: "Rejected", value: stats.memberStats.reduce((sum, item) => sum + item.rejected, 0) },
   ];
 
+  function attentionLandingSection(): AdminSection {
+    if (unseenUpdates.length > 0) return "repo-updates";
+    if (pendingSubmissions.length > 0) return "reviews";
+    return "tasks";
+  }
+
+  useEffect(() => {
+    setSection((current) => {
+      if (current === "repo-updates" && unseenUpdates.length === 0) {
+        return pendingSubmissions.length > 0 ? "reviews" : "tasks";
+      }
+      if (current === "reviews" && pendingSubmissions.length === 0) {
+        return unseenUpdates.length > 0 ? "repo-updates" : "tasks";
+      }
+      if (current === "tasks") return attentionLandingSection();
+      return current;
+    });
+  }, [pendingSubmissions.length, unseenUpdates.length]);
+
   function go(nextSection: AdminSection) {
     setSection(nextSection);
     setNavOpen(false);
   }
 
-  function submitTask() {
+  async function submitTask() {
     if (!taskTitle.trim() || !taskQuestion.trim()) return;
     if (taskScope === "member" && !taskMemberId) return;
 
-    onAddTask({
+    await onAddTask({
       title: taskTitle.trim(),
       question: taskQuestion.trim(),
       points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
@@ -2441,6 +2493,8 @@ function AdminView({
   }
 
   const navItems: Array<{ id: AdminSection; label: string; icon: typeof BarChart3 }> = [
+    { id: "repo-updates", label: "Repo Updates", icon: Bell },
+    { id: "reviews", label: "Reviews", icon: ListChecks },
     { id: "tasks", label: "Tasks", icon: ClipboardList },
     { id: "meetings", label: "Meetings", icon: CalendarClock },
     { id: "members", label: "Members", icon: Users },
@@ -2612,6 +2666,130 @@ function AdminView({
                 </div>
               </section>
             </>
+          )}
+
+          {section === "repo-updates" && (
+            <section className="grid gap-5">
+              <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-bold">Repo updates need attention</h2>
+                    <p className="mt-1 text-sm text-yellow-900/70">
+                      These are explicit GitHub attention requests or submissions that mentioned GitHub.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-yellow-300 bg-white px-3 py-1 text-sm font-bold text-yellow-900">
+                    {unseenUpdates.length} unseen
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {unseenUpdates.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-yellow-300 bg-white p-4 text-sm text-foreground/60">
+                      No repo updates are waiting. The admin flow will open reviews or tasks next.
+                    </p>
+                  ) : (
+                    unseenUpdates.map((update) => {
+                      const member = data.members.find((item) => item.id === update.memberId);
+                      const task = update.taskId
+                        ? data.tasks.find((item) => item.id === update.taskId)
+                        : undefined;
+                      return (
+                        <div key={update.id} className="rounded-lg border border-yellow-200 bg-white p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <strong>{member?.name ?? update.memberId}</strong>
+                              <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold text-foreground/50">
+                                <span>{update.source ?? "manual"}</span>
+                                {task && <span>Task: {task.title}</span>}
+                                <span>{formatDateTime(update.createdAt)}</span>
+                              </div>
+                              {update.excerpt && (
+                                <p className="mt-2 max-w-3xl text-sm leading-6 text-foreground/70">{update.excerpt}</p>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {member?.repoUrl && (
+                                <Button type="button" size="sm" onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}>
+                                  <ExternalLink data-icon="inline-start" />
+                                  Open repo
+                                </Button>
+                              )}
+                              <Button type="button" size="sm" variant="outline" onClick={() => onMarkRepoUpdateSeen(update.id)} className="border border-ink/20 bg-white">
+                                Done
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                <h2 className="text-xl font-bold">Team repo directory</h2>
+                <p className="mt-1 text-sm text-foreground/55">
+                  Open member repositories quickly while checking updates.
+                </p>
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {data.members.map((member) => (
+                    <div key={member.id} className="flex items-center justify-between gap-3 rounded-lg border border-ink/10 bg-paper p-3">
+                      <strong className="truncate">{member.name}</strong>
+                      {member.repoUrl ? (
+                        <Button type="button" size="sm" onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}>
+                          Repo
+                        </Button>
+                      ) : (
+                        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-500">
+                          No repo
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+
+          {section === "reviews" && (
+            <section className="grid gap-5 xl:grid-cols-[360px_1fr]">
+              <div className="rounded-xl border border-yellow-200 bg-white p-4 shadow-sm">
+                <h2 className="text-xl font-bold">Pending reviews</h2>
+                <p className="mt-1 text-sm text-foreground/55">
+                  Final submissions waiting for approve, override, or reject.
+                </p>
+                <div className="mt-4 grid gap-2">
+                  {pendingSubmissions.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-ink/20 bg-paper p-4 text-sm text-foreground/55">
+                      No pending submissions.
+                    </p>
+                  ) : (
+                    pendingSubmissions.map((item) => {
+                      const task = data.tasks.find((candidate) => candidate.id === item.taskId);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setSelectedTaskId(item.taskId)}
+                          className={`rounded-lg border p-3 text-start transition hover:border-yellow-300 ${
+                            selectedTask?.id === item.taskId ? "border-yellow-400 bg-yellow-50" : "border-ink/10 bg-paper"
+                          }`}
+                        >
+                          <strong>{item.memberName}</strong>
+                          <p className="mt-1 text-sm font-bold text-foreground/65">{task?.title ?? item.taskId}</p>
+                          <p className="mt-1 text-xs text-foreground/50">{formatDateTime(item.submittedAt)}</p>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+              {renderTaskDetail(
+                selectedTask && pendingSubmissions.some((item) => item.taskId === selectedTask.id)
+                  ? selectedTask
+                  : data.tasks.find((task) => pendingSubmissions.some((item) => item.taskId === task.id)),
+              )}
+            </section>
           )}
 
           {section === "tasks" && (
@@ -4305,6 +4483,10 @@ async function postProgressUpdate(item: QueuedProgressUpdate) {
   return sanitizeData(await postApi<StudioData>("/api/progress-updates", item));
 }
 
+async function postRepoAttention(item: RepoAttentionRequest) {
+  return sanitizeData(await postApi<StudioData>("/api/repo-attention", item));
+}
+
 async function postAdminMutation(
   adminPassword: string,
   action: string,
@@ -4528,28 +4710,44 @@ function Index() {
     setActiveStats(false);
   }
 
-  function addTask(task: Omit<StudioTask, "id" | "createdAt">) {
-    updateData((current) => ({
-      ...current,
-      tasks: [
-        ...current.tasks,
-        {
-          ...task,
-          id: `task-${Date.now()}`,
-          createdAt: new Date().toISOString(),
-          status: task.status ?? "active",
-        },
-      ],
-    }));
+  async function addTask(task: Omit<StudioTask, "id" | "createdAt">) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Saving task to GitHub...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "addTask", { task });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Task saved to GitHub.");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function updateTask(taskId: string, updates: Partial<StudioTask>) {
-    updateData((current) => ({
-      ...current,
-      tasks: current.tasks.map((task) =>
-        task.id === taskId ? { ...task, ...updates } : task,
-      ),
-    }));
+  async function updateTask(taskId: string, updates: Partial<StudioTask>) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Saving task update...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "updateTask", { taskId, updates });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Task update saved.");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function addMeeting(meeting: Omit<Meeting, "id" | "createdAt">) {
@@ -4598,23 +4796,24 @@ function Index() {
     }));
   }
 
-  function removeTask(taskId: string) {
-    updateData((current) => {
-      const nextResponses = { ...current.responses };
-      const nextTaskSkips = { ...(current.taskSkips ?? {}) };
-      const nextProgressUpdates = { ...(current.progressUpdates ?? {}) };
-      delete nextResponses[taskId];
-      delete nextTaskSkips[taskId];
-      delete nextProgressUpdates[taskId];
+  async function removeTask(taskId: string) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return;
+    }
 
-      return {
-        ...current,
-        tasks: current.tasks.filter((task) => task.id !== taskId),
-        responses: nextResponses,
-        taskSkips: nextTaskSkips,
-        progressUpdates: nextProgressUpdates,
-      };
-    });
+    setIsSaving(true);
+    setSaveStatus("Deleting task...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "removeTask", { taskId });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Task deleted from GitHub.");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function submitFinalSubmission(task: StudioTask) {
@@ -4694,6 +4893,28 @@ function Index() {
       setRefreshStatus("Progress update saved centrally. It does not count as points.");
     } catch (error) {
       setRefreshStatus(error instanceof Error ? error.message : "Progress update failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function sendRepoAttention(task: StudioTask) {
+    if (!activeMember) return;
+
+    setIsSubmitting(true);
+    try {
+      const nextData = await postRepoAttention({
+        memberId: activeMember.member.id,
+        taskId: task.id,
+        excerpt: `GitHub attention requested for ${task.title}`,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setRefreshStatus("Admin was notified about your GitHub update.");
+    } catch (error) {
+      setRefreshStatus(
+        error instanceof Error ? error.message : "Could not notify admin about GitHub.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -4915,13 +5136,24 @@ function Index() {
     setRefreshStatus("اتسجل تنبيه الريبو. لازم الأدمن يحفظ GitHub عشان يظهر على جهاز تاني.");
   }
 
-  function markRepoUpdateSeen(updateId: string) {
-    updateData((current) => ({
-      ...current,
-      repoUpdates: (current.repoUpdates ?? []).map((update) =>
-        update.id === updateId ? { ...update, seen: true } : update,
-      ),
-    }));
+  async function markRepoUpdateSeen(updateId: string) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Marking repo update done...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "markRepoUpdateSeen", { updateId });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Repo update marked done.");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function saveToGithub(tokenOverride?: string) {
@@ -5058,6 +5290,7 @@ function Index() {
         }}
         onSubmitFinal={submitFinalSubmission}
         onSubmitProgress={submitProgressUpdate}
+        onRepoAttention={sendRepoAttention}
         onLogout={logout}
         onRefreshData={refreshData}
       />

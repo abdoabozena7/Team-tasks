@@ -413,6 +413,10 @@ function getTask(data: StudioData, taskId: string) {
   return task;
 }
 
+function taskStatus(task: StudioTask) {
+  return task.status === "archived" ? "archived" : "active";
+}
+
 function getMember(data: StudioData, memberId: string) {
   const member = data.members.find((item) => item.id === memberId);
   if (!member) throw new Error("Member not found.");
@@ -593,6 +597,30 @@ export default {
         return json(env, next);
       }
 
+      if (request.method === "POST" && url.pathname === "/api/repo-attention") {
+        const item = (await request.json()) as {
+          memberId: string;
+          taskId?: string;
+          excerpt?: string;
+          note?: string;
+        };
+        const next = await commitData(env, `Repo attention by ${item.memberId}`, (data) => {
+          getMember(data, item.memberId);
+          if (item.taskId) getTask(data, item.taskId);
+          const update: RepoUpdate = {
+            id: `repo-manual-${item.memberId}-${item.taskId ?? "general"}-${Date.now()}`,
+            memberId: item.memberId,
+            taskId: item.taskId,
+            source: "manual",
+            excerpt: String(item.excerpt ?? item.note ?? "GitHub attention requested.").slice(0, 140),
+            createdAt: new Date().toISOString(),
+            seen: false,
+          };
+          return { ...data, repoUpdates: appendRepoUpdate(data, update) };
+        });
+        return json(env, next);
+      }
+
       if (request.method === "POST" && url.pathname === "/api/admin/mutate") {
         const { action, payload } = (await request.json()) as {
           action: string;
@@ -603,6 +631,77 @@ export default {
 
         const next = await commitData(env, `Admin ${action}`, (data) => {
           if (action === "replaceData") return mergeAdminReplacement(data, payload.data as StudioData);
+
+          if (action === "addTask") {
+            const task = payload.task as Partial<StudioTask> | undefined;
+            if (!task?.title || !task.question) throw new Error("Task title and question are required.");
+            if (task.scope === "member" && !task.memberId) throw new Error("Member task needs a member.");
+            if (task.memberId) getMember(data, String(task.memberId));
+            const nextTask: StudioTask = {
+              id: `task-${Date.now()}`,
+              title: String(task.title),
+              question: String(task.question),
+              points: positiveNumber(task.points, 1),
+              scope: task.scope === "member" ? "member" : "all",
+              memberId: task.scope === "member" ? String(task.memberId) : undefined,
+              createdAt: new Date().toISOString(),
+              startAt: task.startAt || new Date().toISOString(),
+              deadlineAt: task.deadlineAt || "",
+              status: task.status === "archived" ? "archived" : "active",
+            };
+            return { ...data, tasks: [...data.tasks, nextTask] };
+          }
+
+          if (action === "updateTask") {
+            const taskId = String(payload.taskId ?? "");
+            getTask(data, taskId);
+            const updates = (payload.updates ?? {}) as Partial<StudioTask>;
+            if (updates.memberId) getMember(data, String(updates.memberId));
+            return {
+              ...data,
+              tasks: data.tasks.map((task) =>
+                task.id === taskId
+                  ? {
+                      ...task,
+                      ...updates,
+                      points:
+                        updates.points === undefined
+                          ? task.points
+                          : positiveNumber(updates.points, task.points || 1),
+                      status: updates.status === "archived" ? "archived" : updates.status === "active" ? "active" : taskStatus(task),
+                    }
+                  : task,
+              ),
+            };
+          }
+
+          if (action === "removeTask") {
+            const taskId = String(payload.taskId ?? "");
+            getTask(data, taskId);
+            const responses = { ...data.responses };
+            const progressUpdates = { ...(data.progressUpdates ?? {}) };
+            const taskSkips = { ...(data.taskSkips ?? {}) };
+            delete responses[taskId];
+            delete progressUpdates[taskId];
+            delete taskSkips[taskId];
+            return {
+              ...data,
+              tasks: data.tasks.filter((task) => task.id !== taskId),
+              responses,
+              progressUpdates,
+              taskSkips,
+            };
+          }
+
+          if (action === "markRepoUpdateSeen") {
+            const updateId = String(payload.updateId ?? "");
+            return {
+              ...data,
+              repoUpdates: (data.repoUpdates ?? []).map((update) =>
+                update.id === updateId ? { ...update, seen: true } : update,
+              ),
+            };
+          }
 
           if (action === "reviewAnswer") {
             const taskId = String(payload.taskId ?? "");
