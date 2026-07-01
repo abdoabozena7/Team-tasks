@@ -4193,6 +4193,7 @@ function StatsView({
   onLogout: () => void;
 }) {
   const activeTasks = data.tasks.filter(isActiveTask);
+  const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const visibleStats = stats.memberStats;
   const expectedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.expected, 0);
   const receivedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.received, 0);
@@ -4226,6 +4227,59 @@ function StatsView({
     if (state === "Needs follow-up") return "border-yellow-200 bg-yellow-50";
     if (state === "On track") return "border-emerald-200 bg-emerald-50";
     return "border-ink/10 bg-paper";
+  }
+
+  function memberInsight(item: MemberScore) {
+    const assignedTasks = activeTasks.filter(
+      (task) => taskIsForMember(task, item.member.id) && !isTaskSkipped(data, task.id, item.member.id),
+    );
+    const taskResponses = assignedTasks
+      .map((task) => ({ task, response: getResponse(data, task.id, item.member.id) }))
+      .filter((entry): entry is { task: StudioTask; response: TaskResponse } =>
+        Boolean(entry.response),
+      );
+    const approvedResponses = taskResponses.filter((entry) => entry.response.status === "approved");
+    const bonusPoints = approvedResponses.reduce(
+      (sum, entry) =>
+        sum +
+        Math.max(
+          0,
+          responseAwardedPoints(entry.task, entry.response) -
+            sanitizePositiveNumber(entry.task.points, 1),
+        ),
+      0,
+    );
+    const meetingAttendance = activeMeetings
+      .map((meeting) => data.meetingAttendance?.[meeting.id]?.[item.member.id])
+      .filter((attendance): attendance is MeetingAttendance => Boolean(attendance));
+    const missedActiveMeetings = activeMeetings.length > 0 && meetingAttendance.length === 0;
+    const lateMeeting = meetingAttendance.some((attendance) => attendance.lateMinutes > 0);
+    const lateSubmission = taskResponses.some((entry) => responseIsLate(entry.task, entry.response));
+    const finishedAll =
+      assignedTasks.length > 0 && approvedResponses.length === assignedTasks.length;
+
+    if (bonusPoints >= 5) {
+      return { text: `واخد بونص ${Math.round(bonusPoints * 100) / 100} درجات`, tone: "bg-emerald-100 text-emerald-900 border-emerald-200" };
+    }
+    if (finishedAll) {
+      return { text: "مخلص كل حاجة", tone: "bg-emerald-100 text-emerald-900 border-emerald-200" };
+    }
+    if (missedActiveMeetings) {
+      return { text: "مبيحضرش الميتينج آخر فترة", tone: "bg-red-100 text-red-700 border-red-200" };
+    }
+    if (lateMeeting) {
+      return { text: "بيتاخر في حضور الميتينج", tone: "bg-yellow-100 text-yellow-900 border-yellow-200" };
+    }
+    if (lateSubmission) {
+      return { text: "بيسلم متأخر", tone: "bg-yellow-100 text-yellow-900 border-yellow-200" };
+    }
+    if (item.avgHours !== null && item.avgHours <= 24 && item.submitted > 0) {
+      return { text: "بيسلم بسرعة", tone: "bg-sky-100 text-sky-900 border-sky-200" };
+    }
+    if (item.assignedTasks === 0) {
+      return { text: "مفيش عليه تاسكات حالية", tone: "bg-zinc-100 text-zinc-600 border-zinc-200" };
+    }
+    return { text: "محتاج متابعة بسيطة", tone: "bg-white text-foreground/65 border-ink/10" };
   }
 
   return (
@@ -4362,6 +4416,7 @@ function StatsView({
           <div className="mt-3 grid gap-2">
             {visibleStats.map((item) => {
               const state = memberState(item);
+              const insight = memberInsight(item);
               const barColor =
                 state === "At risk"
                   ? "bg-red-500"
@@ -4379,6 +4434,9 @@ function StatsView({
                           <strong className="text-lg">{item.member.name}</strong>
                           <span className="rounded-full border border-ink/10 bg-white px-2 py-1 text-xs font-bold">
                             {state}
+                          </span>
+                          <span className={`rounded-full border px-2 py-1 text-xs font-bold ${insight.tone}`}>
+                            {insight.text}
                           </span>
                           {item.member.publicFlag && (
                             <span className="text-xs font-bold text-red-600">{item.member.publicFlag}</span>
