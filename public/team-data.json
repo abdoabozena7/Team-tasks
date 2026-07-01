@@ -203,18 +203,6 @@
   ],
   "tasks": [
     {
-      "id": "task-1782925500361",
-      "title": "كود",
-      "question": "اعملي agent",
-      "points": 5,
-      "scope": "all",
-      "createdAt": "2026-07-01T17:05:00.361Z",
-      "startAt": "2026-07-01T17:04:00.000Z",
-      "deadlineAt": "2026-07-04T17:04:00.000Z",
-      "status": "active",
-      "memberIds": []
-    },
-    {
       "id": "task-1782926545670",
       "title": "Research Paper",
       "question": "تجميع 100 بيبر في خلال اسبوع",
@@ -266,64 +254,7 @@
       "status": "active"
     }
   ],
-  "responses": {
-    "task-1782925500361": {
-      "abozena": {
-        "memberId": "abozena",
-        "memberName": "abozena",
-        "answer": "رفعتهولك علي github",
-        "status": "rejected",
-        "submittedAt": "2026-07-01T17:07:07.787Z",
-        "awardedPoints": 0,
-        "lateSubmission": false,
-        "reviewEvents": [
-          {
-            "id": "review-1782926209841",
-            "status": "rejected",
-            "reviewedAt": "2026-07-01T17:16:49.841Z"
-          },
-          {
-            "id": "review-1782925917113",
-            "status": "approved",
-            "reviewedAt": "2026-07-01T17:11:57.113Z",
-            "awardedPoints": 5
-          },
-          {
-            "id": "review-1782925756294",
-            "status": "rejected",
-            "reviewedAt": "2026-07-01T17:09:16.294Z"
-          }
-        ],
-        "reviewedAt": "2026-07-01T17:16:49.841Z",
-        "scoreOverride": false
-      },
-      "shoiab": {
-        "memberId": "shoiab",
-        "memberName": "shoiab",
-        "answer": "Manual approval outside the website.",
-        "status": "rejected",
-        "submittedAt": "2026-07-01T17:12:05.342Z",
-        "reviewEvents": [
-          {
-            "id": "review-1782926224517",
-            "status": "rejected",
-            "reviewedAt": "2026-07-01T17:17:04.517Z"
-          },
-          {
-            "id": "review-1782925925342",
-            "status": "approved",
-            "reviewedAt": "2026-07-01T17:12:05.342Z",
-            "awardedPoints": 5,
-            "scoreOverride": true
-          }
-        ],
-        "reviewedAt": "2026-07-01T17:17:04.517Z",
-        "awardedPoints": 0,
-        "lateSubmission": false,
-        "scoreOverride": false
-      }
-    }
-  },
+  "responses": {},
   "taskSkips": {},
   "progressUpdates": {
     "task-1782926545670": [
@@ -339,17 +270,7 @@
   },
   "meetings": [],
   "meetingAttendance": {},
-  "repoUpdates": [
-    {
-      "id": "repo-submission-abozena-task-1782925500361-1782925628066",
-      "memberId": "abozena",
-      "taskId": "task-1782925500361",
-      "source": "submission",
-      "excerpt": "رفعتهولك علي github",
-      "createdAt": "2026-07-01T17:07:08.066Z",
-      "seen": true
-    }
-  ],
+  "repoUpdates": [],
   "profileRequests": [
     {
       "id": "profile-renad-1782924762111",
@@ -384,6 +305,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T19:14:05.831Z"
+    "updatedAt": "2026-07-01T19:14:08.875Z"
   }
 }
