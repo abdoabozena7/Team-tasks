@@ -224,6 +224,16 @@
         "awardedPoints": 1,
         "lateSubmission": false,
         "scoreOverride": true
+      },
+      "abozena": {
+        "memberId": "abozena",
+        "memberName": "Abozena",
+        "answer": "رفعته ع github",
+        "status": "submitted",
+        "submittedAt": "2026-07-01T07:05:15.190Z",
+        "awardedPoints": 0,
+        "lateSubmission": false,
+        "reviewEvents": []
       }
     }
   },
@@ -231,8 +241,18 @@
   "progressUpdates": {},
   "meetings": [],
   "meetingAttendance": {},
-  "repoUpdates": [],
+  "repoUpdates": [
+    {
+      "id": "repo-submission-abozena-task-1782889469398-1782889515950",
+      "memberId": "abozena",
+      "taskId": "task-1782889469398",
+      "source": "submission",
+      "excerpt": "رفعته ع github",
+      "createdAt": "2026-07-01T07:05:15.950Z",
+      "seen": false
+    }
+  ],
   "meta": {
-    "updatedAt": "2026-07-01T07:04:38.457Z"
+    "updatedAt": "2026-07-01T07:05:15.950Z"
   }
 }
