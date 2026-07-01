@@ -350,6 +350,17 @@ function isActiveMeeting(meeting: Meeting) {
   return meetingStatus(meeting) === "active";
 }
 
+function upcomingMeetings(meetings: Meeting[], now = new Date()) {
+  const nowTime = now.getTime();
+  return meetings
+    .filter((meeting) => isActiveMeeting(meeting))
+    .filter((meeting) => {
+      const startTime = new Date(meeting.startsAt).getTime();
+      return Number.isFinite(startTime) && startTime >= nowTime;
+    })
+    .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+}
+
 function sanitizeData(data: StudioData): StudioData {
   const tasks = (data.tasks ?? []).map((task) => ({
     ...task,
@@ -921,7 +932,7 @@ function LeaderboardStatPill({
   className?: string;
 }) {
   return (
-    <span className={cn("rounded-md border-[2px] border-ink bg-white/85 px-2 py-1 text-center", className)}>
+    <span className={cn("min-w-0 rounded-md border-[2px] border-ink bg-white/85 px-2 py-1 text-center", className)}>
       <span className="block text-[10px] font-bold uppercase leading-none text-foreground/50">
         {label}
       </span>
@@ -946,6 +957,10 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
           item.assignedTasks > 0
             ? `Current submitted ${currentSubmitted}/${item.assignedTasks}`
             : "No active assignments";
+        const progressWidth =
+          item.assignedTasks > 0 && item.responseRate > 0
+            ? Math.max(8, Math.min(100, item.responseRate))
+            : 0;
 
         return (
           <button
@@ -960,7 +975,7 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
               animationDelay: `${index * 80}ms`,
             }}
           >
-            <div className="relative z-10 flex items-center gap-3">
+            <div className="relative z-10 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3">
               <span
                 className={`leaderboard-badge grid size-10 shrink-0 place-items-center rounded-full border-[2.5px] border-ink font-bold ${rankingBadgeClass(
                   index,
@@ -968,33 +983,35 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
               >
                 {index + 1}
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-lg font-bold leading-tight">
-                  {item.member.name}
-                  {isLeader && <span className="leaderboard-top-tag ms-2">TOP</span>}
-                  {isWorst && <span className="ms-2 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-bold text-red-700">Needs follow-up</span>}
+              <span className="min-w-0">
+                <span className="flex min-w-0 flex-wrap items-center justify-end gap-1 text-lg font-bold leading-tight">
+                  <span className="min-w-0 truncate">{item.member.name}</span>
+                  {isLeader && <span className="leaderboard-top-tag shrink-0">TOP</span>}
+                  {isWorst && (
+                    <span className="shrink-0 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-bold text-red-700">
+                      Needs follow-up
+                    </span>
+                  )}
                   {item.member.publicFlag && (
-                    <span className="ms-2 text-xs font-bold text-red-600">
+                    <span className="shrink-0 text-xs font-bold text-red-600">
                       {item.member.publicFlag}
                     </span>
                   )}
                 </span>
-                <span className="mt-1 block text-xs font-bold text-foreground/55">
+                <span className="mt-1 block text-xs font-bold leading-5 text-foreground/55">
                   {responseLabel} | Approval {formatPercent(item.approvalRate)}
                 </span>
-                <span className="mt-2 block h-2 overflow-hidden rounded-full border-[1.5px] border-ink bg-white/70">
+                <span className="mt-2 block h-2 overflow-hidden rounded-full border-[1.5px] border-ink bg-white/70" dir="ltr">
                   <span
                     className="leaderboard-progress block h-full rounded-full bg-emerald-400"
-                    style={{
-                      width: `${item.assignedTasks > 0 ? Math.max(8, Math.min(100, item.responseRate)) : 0}%`,
-                    }}
+                    style={{ width: `${progressWidth}%` }}
                   />
                 </span>
               </span>
-              <span className="grid shrink-0 grid-cols-3 gap-1" dir="ltr">
-                <LeaderboardStatPill label="Points" value={item.points} className="min-w-16" />
-                <LeaderboardStatPill label="Done" value={item.completed} className="min-w-14" />
-                <LeaderboardStatPill label="Assigned" value={item.assignedTasks} className="min-w-16" />
+              <span className="col-span-2 grid min-w-0 grid-cols-3 gap-1" dir="ltr">
+                <LeaderboardStatPill label="Points" value={item.points} />
+                <LeaderboardStatPill label="Done" value={item.completed} />
+                <LeaderboardStatPill label="Assigned" value={item.assignedTasks} />
               </span>
             </div>
             {isOpen && (
@@ -1063,6 +1080,8 @@ function MemberView({
   const memberLogTasks = data.tasks.filter((task) =>
     taskIsForMember(task, activeMember.member.id),
   );
+  const nextMeetings = useMemo(() => upcomingMeetings(data.meetings ?? []), [data.meetings]);
+  const nextMeeting = nextMeetings[0];
   const hasProfileChange =
     nicknameDraft.trim().length > 0 ||
     repoDraft.trim() !== (activeMember.member.repoUrl ?? "") ||
@@ -1277,6 +1296,35 @@ function MemberView({
           </div>
           {refreshStatus && <p className="mt-2 text-sm text-foreground/65">{refreshStatus}</p>}
         </section>
+
+        {nextMeeting && (
+          <section
+            className="mb-7 border-[2.5px] border-sky-700 bg-sky-50 p-4 text-sky-950 doodle-shadow-sm"
+            style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="grid size-11 shrink-0 place-items-center rounded-full border-[2px] border-sky-700 bg-white">
+                  <CalendarClock className="size-5" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wide text-sky-700">
+                    Upcoming meeting for all users
+                  </p>
+                  <h2 className="mt-1 truncate text-2xl font-bold">{nextMeeting.title}</h2>
+                  <p className="mt-1 text-sm font-bold leading-6 text-sky-900/75">
+                    Starts {formatDateTime(nextMeeting.startsAt)} | {nextMeeting.durationMinutes}m | {nextMeeting.points} points
+                  </p>
+                </div>
+              </div>
+              {nextMeetings.length > 1 && (
+                <span className="rounded-full border border-sky-300 bg-white px-3 py-1 text-sm font-bold text-sky-900">
+                  +{nextMeetings.length - 1} more
+                </span>
+              )}
+            </div>
+          </section>
+        )}
 
         {activeMember.member.publicFlag?.trim() && (
           <section
