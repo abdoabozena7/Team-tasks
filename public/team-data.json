@@ -244,6 +244,13 @@
         "lateSubmission": false,
         "reviewEvents": [
           {
+            "id": "review-1782865858059",
+            "status": "approved",
+            "reviewedAt": "2026-07-01T00:30:58.059Z",
+            "awardedPoints": 5,
+            "scoreOverride": true
+          },
+          {
             "id": "review-1782865856187",
             "status": "approved",
             "reviewedAt": "2026-07-01T00:30:56.187Z",
@@ -258,7 +265,7 @@
             "scoreOverride": true
           }
         ],
-        "reviewedAt": "2026-07-01T00:30:56.187Z",
+        "reviewedAt": "2026-07-01T00:30:58.059Z",
         "scoreOverride": true
       }
     }
@@ -269,6 +276,6 @@
   "meetingAttendance": {},
   "repoUpdates": [],
   "meta": {
-    "updatedAt": "2026-07-01T00:30:56.187Z"
+    "updatedAt": "2026-07-01T00:30:58.059Z"
   }
 }
