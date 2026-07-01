@@ -4,7 +4,7 @@
   "settings": {
     "adminPassword": "5678",
     "statsPassword": "6789",
-    "backendUrl": ""
+    "backendUrl": "https://hivo-studio-api.boodyabozena.workers.dev/api"
   },
   "members": [
     {
@@ -18,10 +18,10 @@
         "Abdo"
       ],
       "hidden": false,
-      "baseCompleted": 9,
-      "basePoints": 14,
+      "baseCompleted": 0,
+      "basePoints": 0,
       "adminNote": "عامل ايه",
-      "baseApproved": 13,
+      "baseApproved": 0,
       "baseRejected": 0,
       "publicFlag": "",
       "repoUrl": "https://github.com/abdoabozena7/simple_coding_agent",
@@ -36,10 +36,10 @@
         "شعيب"
       ],
       "hidden": false,
-      "baseCompleted": 4,
+      "baseCompleted": 0,
       "basePoints": 0,
       "adminNote": "",
-      "baseApproved": 4,
+      "baseApproved": 0,
       "baseRejected": 0,
       "publicFlag": "مدفعش ال100 جنيه",
       "repoUrl": "",
@@ -242,6 +242,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T19:14:19.852Z"
+    "updatedAt": "2026-07-01T19:15:09.262Z"
   }
 }
