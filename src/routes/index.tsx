@@ -273,6 +273,7 @@ const NICKNAME_HINT_KEY = "hivo-studio-nickname-hint";
 const MEMBER_DRAFTS_KEY = "hivo-studio-member-drafts";
 const MEMBER_SENT_STATE_KEY = "hivo-studio-member-sent-state";
 const LOCAL_QUEUE_KEY = "hivo-studio-local-admin-queue";
+const SEEN_MEETINGS_KEY = "hivo-studio-seen-meetings";
 const GITHUB_OWNER = "abdoabozena7";
 const GITHUB_REPO = "Team-tasks";
 const GITHUB_BRANCH = "main";
@@ -317,6 +318,25 @@ function uniqueText(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
+function seenMeetingsStorageKey(memberId: string) {
+  return `${SEEN_MEETINGS_KEY}:${memberId}`;
+}
+
+function readSeenMeetingIds(memberId: string) {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(seenMeetingsStorageKey(memberId)) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSeenMeetingIds(memberId: string, ids: string[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(seenMeetingsStorageKey(memberId), JSON.stringify(uniqueText(ids)));
+}
+
 function isStatsLoginName(value: string) {
   const normalized = normalizeName(value);
   const lowered = value.trim().toLowerCase();
@@ -350,15 +370,56 @@ function isActiveMeeting(meeting: Meeting) {
   return meetingStatus(meeting) === "active";
 }
 
-function upcomingMeetings(meetings: Meeting[], now = new Date()) {
+type MeetingPhase = "upcoming" | "live" | "ended" | "invalid";
+
+function meetingWindow(meeting: Meeting) {
+  const startMs = new Date(meeting.startsAt).getTime();
+  const durationMinutes = Math.max(1, sanitizeNumber(meeting.durationMinutes) || 60);
+  if (!Number.isFinite(startMs)) return null;
+  return {
+    startMs,
+    endMs: startMs + durationMinutes * 60000,
+    durationMinutes,
+  };
+}
+
+function meetingPhase(meeting: Meeting, now = new Date()): MeetingPhase {
+  const timeWindow = meetingWindow(meeting);
+  if (!timeWindow) return "invalid";
+  const nowTime = now.getTime();
+  if (nowTime < timeWindow.startMs) return "upcoming";
+  if (nowTime <= timeWindow.endMs) return "live";
+  return "ended";
+}
+
+function canRecordMeetingAttendance(meeting: Meeting, now = new Date()) {
+  const phase = meetingPhase(meeting, now);
+  return phase === "live" || phase === "ended";
+}
+
+function meetingPhaseLabel(phase: MeetingPhase) {
+  if (phase === "upcoming") return "Upcoming";
+  if (phase === "live") return "Live now";
+  if (phase === "ended") return "Ended";
+  return "Time missing";
+}
+
+function meetingPhaseTone(phase: MeetingPhase) {
+  if (phase === "upcoming") return "border-sky-200 bg-sky-50 text-sky-800";
+  if (phase === "live") return "border-emerald-200 bg-emerald-50 text-emerald-800";
+  if (phase === "ended") return "border-zinc-200 bg-zinc-50 text-zinc-600";
+  return "border-red-200 bg-red-50 text-red-700";
+}
+
+function memberVisibleMeetings(meetings: Meeting[], now = new Date()) {
   const nowTime = now.getTime();
   return meetings
     .filter((meeting) => isActiveMeeting(meeting))
     .filter((meeting) => {
-      const startTime = new Date(meeting.startsAt).getTime();
-      return Number.isFinite(startTime) && startTime >= nowTime;
+      const timeWindow = meetingWindow(meeting);
+      return Boolean(timeWindow && nowTime <= timeWindow.endMs);
     })
-    .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+    .sort((a, b) => (meetingWindow(a)?.startMs ?? 0) - (meetingWindow(b)?.startMs ?? 0));
 }
 
 function sanitizeData(data: StudioData): StudioData {
@@ -975,40 +1036,42 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
               animationDelay: `${index * 80}ms`,
             }}
           >
-            <div className="relative z-10 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3">
-              <span
-                className={`leaderboard-badge grid size-10 shrink-0 place-items-center rounded-full border-[2.5px] border-ink font-bold ${rankingBadgeClass(
-                  index,
-                )}`}
-              >
-                {index + 1}
+            <div className="relative z-10 grid gap-3">
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <span
+                  className={`leaderboard-badge grid size-11 shrink-0 place-items-center rounded-full border-[2.5px] border-ink font-bold ${rankingBadgeClass(
+                    index,
+                  )}`}
+                >
+                  {index + 1}
+                </span>
+                <span className="min-w-0 flex-1 text-right">
+                  <span className="flex min-w-0 flex-wrap items-center justify-end gap-1 text-lg font-bold leading-tight">
+                    <span className="min-w-0 break-words">{item.member.name}</span>
+                    {isLeader && <span className="leaderboard-top-tag shrink-0">TOP</span>}
+                    {isWorst && (
+                      <span className="shrink-0 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-bold text-red-700">
+                        Needs follow-up
+                      </span>
+                    )}
+                    {item.member.publicFlag && (
+                      <span className="shrink-0 text-xs font-bold text-red-600">
+                        {item.member.publicFlag}
+                      </span>
+                    )}
+                  </span>
+                  <span className="mt-1 block text-xs font-bold leading-5 text-foreground/55">
+                    {responseLabel} | Approval {formatPercent(item.approvalRate)}
+                  </span>
+                </span>
+              </div>
+              <span className="block h-2 overflow-hidden rounded-full border-[1.5px] border-ink bg-white/70" dir="ltr">
+                <span
+                  className="leaderboard-progress block h-full rounded-full bg-emerald-400"
+                  style={{ width: `${progressWidth}%` }}
+                />
               </span>
-              <span className="min-w-0">
-                <span className="flex min-w-0 flex-wrap items-center justify-end gap-1 text-lg font-bold leading-tight">
-                  <span className="min-w-0 truncate">{item.member.name}</span>
-                  {isLeader && <span className="leaderboard-top-tag shrink-0">TOP</span>}
-                  {isWorst && (
-                    <span className="shrink-0 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-bold text-red-700">
-                      Needs follow-up
-                    </span>
-                  )}
-                  {item.member.publicFlag && (
-                    <span className="shrink-0 text-xs font-bold text-red-600">
-                      {item.member.publicFlag}
-                    </span>
-                  )}
-                </span>
-                <span className="mt-1 block text-xs font-bold leading-5 text-foreground/55">
-                  {responseLabel} | Approval {formatPercent(item.approvalRate)}
-                </span>
-                <span className="mt-2 block h-2 overflow-hidden rounded-full border-[1.5px] border-ink bg-white/70" dir="ltr">
-                  <span
-                    className="leaderboard-progress block h-full rounded-full bg-emerald-400"
-                    style={{ width: `${progressWidth}%` }}
-                  />
-                </span>
-              </span>
-              <span className="col-span-2 grid min-w-0 grid-cols-3 gap-1" dir="ltr">
+              <span className="grid min-w-0 grid-cols-3 gap-1" dir="ltr">
                 <LeaderboardStatPill label="Points" value={item.points} />
                 <LeaderboardStatPill label="Done" value={item.completed} />
                 <LeaderboardStatPill label="Assigned" value={item.assignedTasks} />
@@ -1072,6 +1135,10 @@ function MemberView({
     window.localStorage.getItem(NICKNAME_HINT_KEY) !== "seen",
   );
   const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
+  const [seenMeetingIds, setSeenMeetingIds] = useState(() =>
+    readSeenMeetingIds(activeMember.member.id),
+  );
+  const [nowTime, setNowTime] = useState(() => Date.now());
   const memberTasks = data.tasks.filter((task) => {
     if (!taskIsForMember(task, activeMember.member.id)) return false;
     if (isTaskSkipped(data, task.id, activeMember.member.id)) return false;
@@ -1080,8 +1147,11 @@ function MemberView({
   const memberLogTasks = data.tasks.filter((task) =>
     taskIsForMember(task, activeMember.member.id),
   );
-  const nextMeetings = useMemo(() => upcomingMeetings(data.meetings ?? []), [data.meetings]);
-  const nextMeeting = nextMeetings[0];
+  const nowDate = useMemo(() => new Date(nowTime), [nowTime]);
+  const visibleMeetingNotices = useMemo(() => {
+    const seenIds = new Set(seenMeetingIds);
+    return memberVisibleMeetings(data.meetings ?? [], nowDate).filter((meeting) => !seenIds.has(meeting.id));
+  }, [data.meetings, nowDate, seenMeetingIds]);
   const hasProfileChange =
     nicknameDraft.trim().length > 0 ||
     repoDraft.trim() !== (activeMember.member.repoUrl ?? "") ||
@@ -1095,6 +1165,15 @@ function MemberView({
     setRepoDraft(activeMember.member.repoUrl ?? "");
     setDriveDraft(activeMember.member.driveUrl ?? "");
   }, [activeMember.member.driveUrl, activeMember.member.id, activeMember.member.repoUrl, settingsOpen]);
+
+  useEffect(() => {
+    setSeenMeetingIds(readSeenMeetingIds(activeMember.member.id));
+  }, [activeMember.member.id]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTime(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function refreshMemberData() {
     setRefreshing(true);
@@ -1110,6 +1189,14 @@ function MemberView({
   function closeHint() {
     window.localStorage.setItem(NICKNAME_HINT_KEY, "seen");
     setShowNicknameHint(false);
+  }
+
+  function markMeetingSeen(meetingId: string) {
+    setSeenMeetingIds((current) => {
+      const next = uniqueText([...current, meetingId]);
+      writeSeenMeetingIds(activeMember.member.id, next);
+      return next;
+    });
   }
 
   function setMemberFeedback(key: string, feedback: ActionFeedback) {
@@ -1225,15 +1312,6 @@ function MemberView({
 
   return (
     <div className="min-h-screen text-foreground" dir="rtl">
-      <button
-        type="button"
-        onClick={() => setSettingsOpen(true)}
-        className="fixed left-4 top-4 z-30 grid size-11 place-items-center rounded-full border-[2px] border-ink bg-card doodle-shadow-sm"
-        aria-label="settings"
-      >
-        <Settings className="size-5" />
-      </button>
-
       {showNicknameHint && (
         <div className="fixed left-4 top-20 z-30 max-w-xs border-[2px] border-ink bg-card p-3 text-sm doodle-shadow-sm">
           <p>ممكن تضيف nickname تسجل بيه دايمًا لو اسمك مش عاجبك.</p>
@@ -1249,6 +1327,17 @@ function MemberView({
       )}
 
       <div className="mx-auto max-w-4xl px-5 py-10 md:py-14">
+        <div className="mb-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="grid size-11 place-items-center rounded-full border-[2px] border-ink bg-card doodle-shadow-sm"
+            aria-label="settings"
+          >
+            <Settings className="size-5" />
+          </button>
+        </div>
+
         <header className="relative mb-10 text-center">
           <Logo />
           <h1 className="mb-3 mt-4 text-5xl font-bold leading-tight md:text-6xl">
@@ -1297,32 +1386,45 @@ function MemberView({
           {refreshStatus && <p className="mt-2 text-sm text-foreground/65">{refreshStatus}</p>}
         </section>
 
-        {nextMeeting && (
+        {visibleMeetingNotices.length > 0 && (
           <section
-            className="mb-7 border-[2.5px] border-sky-700 bg-sky-50 p-4 text-sky-950 doodle-shadow-sm"
+            className="mb-7 grid gap-3 border-[2.5px] border-sky-700 bg-sky-50 p-4 text-sky-950 doodle-shadow-sm"
             style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
           >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-3">
-                <span className="grid size-11 shrink-0 place-items-center rounded-full border-[2px] border-sky-700 bg-white">
-                  <CalendarClock className="size-5" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold uppercase tracking-wide text-sky-700">
-                    Upcoming meeting for all users
-                  </p>
-                  <h2 className="mt-1 truncate text-2xl font-bold">{nextMeeting.title}</h2>
-                  <p className="mt-1 text-sm font-bold leading-6 text-sky-900/75">
-                    Starts {formatDateTime(nextMeeting.startsAt)} | {nextMeeting.durationMinutes}m | {nextMeeting.points} points
-                  </p>
+            {visibleMeetingNotices.map((meeting) => {
+              const phase = meetingPhase(meeting, nowDate);
+              const timeWindow = meetingWindow(meeting);
+              return (
+                <div key={meeting.id} className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="grid size-11 shrink-0 place-items-center rounded-full border-[2px] border-sky-700 bg-white">
+                      <CalendarClock className="size-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold uppercase tracking-wide text-sky-700">
+                        {meetingPhaseLabel(phase)} meeting for all users
+                      </p>
+                      <h2 className="mt-1 break-words text-2xl font-bold">{meeting.title}</h2>
+                      <p className="mt-1 text-sm font-bold leading-6 text-sky-900/75">
+                        Starts {formatDateTime(meeting.startsAt)}
+                        {timeWindow ? ` | Ends ${formatDateTime(new Date(timeWindow.endMs).toISOString())}` : ""}
+                        {` | ${meeting.points} points`}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => markMeetingSeen(meeting.id)}
+                    className="shrink-0 border border-sky-300 bg-white text-sky-900"
+                  >
+                    <Eye data-icon="inline-start" />
+                    Seen
+                  </Button>
                 </div>
-              </div>
-              {nextMeetings.length > 1 && (
-                <span className="rounded-full border border-sky-300 bg-white px-3 py-1 text-sm font-bold text-sky-900">
-                  +{nextMeetings.length - 1} more
-                </span>
-              )}
-            </div>
+              );
+            })}
           </section>
         )}
 
@@ -2102,6 +2204,7 @@ function AdminView({
   const [logMode, setLogMode] = useState<"task" | "member">("task");
   const [query, setQuery] = useState("");
   const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
+  const [adminNowTime, setAdminNowTime] = useState(() => Date.now());
   const refreshAdminKey = "admin:refresh-data";
   const saveGithubKey = "admin:save-github";
 
@@ -2120,6 +2223,7 @@ function AdminView({
     archivedMeetings[0];
   const selectedMember =
     data.members.find((member) => member.id === selectedMemberId) ?? data.members[0];
+  const adminNowDate = useMemo(() => new Date(adminNowTime), [adminNowTime]);
   const pendingSubmissions = data.tasks.flatMap((task) =>
     Object.values(data.responses[task.id] ?? {})
       .filter((response) => response.status === "submitted")
@@ -2156,6 +2260,11 @@ function AdminView({
       return current;
     });
   }, [pendingProfileRequests.length, pendingSubmissions.length, unseenUpdates.length]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setAdminNowTime(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   function go(nextSection: AdminSection) {
     setSection(nextSection);
@@ -2358,13 +2467,13 @@ function AdminView({
               key={task.id}
               type="button"
               onClick={() => setSelectedTaskId(task.id)}
-              className={`rounded-lg border p-3 text-start transition hover:border-ink/40 hover:bg-white ${
+              className={`min-w-0 rounded-lg border p-3 text-start transition hover:border-ink/40 hover:bg-white ${
                 isSelected ? "border-ink bg-white shadow-sm" : "border-ink/10 bg-white/70"
               }`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate text-lg font-bold">{task.title}</div>
+                  <div className="break-words text-lg font-bold">{task.title}</div>
                   <div className="mt-1 text-xs text-foreground/55">
                     {taskAudienceLabel(task)}{" "}
                     | {task.points || 1} pts | deadline {formatDateTime(task.deadlineAt)}
@@ -2403,11 +2512,11 @@ function AdminView({
     const editDraft = taskEditDraft(task);
 
     return (
-      <section className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+      <section className="min-w-0 rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-2xl font-bold">{task.title}</h3>
+              <h3 className="min-w-0 break-words text-2xl font-bold">{task.title}</h3>
               <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
                 {taskStatus(task)}
               </span>
@@ -2479,7 +2588,7 @@ function AdminView({
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
           <DateTimeField
             label="Start"
             value={toDateTimeInputValue(task.startAt)}
@@ -2513,7 +2622,7 @@ function AdminView({
               placeholder="Question or instructions"
               className="min-h-24 border border-ink/20 bg-white"
             />
-            <div className="grid gap-3 md:grid-cols-[140px_1fr]">
+            <div className="grid gap-3 lg:grid-cols-[140px_1fr]">
               <Input
                 type="number"
                 min={1}
@@ -2608,7 +2717,7 @@ function AdminView({
               <Star className="size-4" />
               Manual approval
             </div>
-            <div className="grid gap-2 sm:grid-cols-[1fr_140px_auto]">
+            <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_140px_auto]">
               <select
                 value={selectedManualMember}
                 onChange={(event) =>
@@ -2688,7 +2797,7 @@ function AdminView({
                   </option>
                 ))}
               </select>
-              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
                 <Input
                   value={progressNote}
                   onChange={(event) =>
@@ -3065,6 +3174,7 @@ function AdminView({
         {meetings.map((meeting) => {
           const attendance = Object.values(data.meetingAttendance?.[meeting.id] ?? {});
           const isSelected = selectedMeeting?.id === meeting.id;
+          const phase = meetingPhase(meeting);
           return (
             <button
               key={meeting.id}
@@ -3081,9 +3191,14 @@ function AdminView({
                     {formatDateTime(meeting.startsAt)} | {meeting.durationMinutes}m | {meeting.points} pts
                   </div>
                 </div>
-                <span className="shrink-0 rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
-                  {attendance.length}/{data.members.filter((member) => !member.hidden).length}
-                </span>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span className={`rounded-full border px-2 py-1 text-xs font-bold ${meetingPhaseTone(phase)}`}>
+                    {meetingPhaseLabel(phase)}
+                  </span>
+                  <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
+                    {attendance.length}/{data.members.filter((member) => !member.hidden).length}
+                  </span>
+                </div>
               </div>
             </button>
           );
@@ -3098,19 +3213,26 @@ function AdminView({
     const totalScore = Object.values(attendanceMap).reduce((sum, item) => sum + item.score, 0);
     const archiveMeetingKey = `admin:archive-meeting:${meeting.id}`;
     const restoreMeetingKey = `admin:restore-meeting:${meeting.id}`;
+    const phase = meetingPhase(meeting, adminNowDate);
+    const attendanceOpen = canRecordMeetingAttendance(meeting, adminNowDate);
+    const timeWindow = meetingWindow(meeting);
 
     return (
-      <section className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+      <section className="min-w-0 rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-2xl font-bold">{meeting.title}</h3>
+              <h3 className="min-w-0 break-words text-2xl font-bold">{meeting.title}</h3>
               <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
                 {meetingStatus(meeting)}
+              </span>
+              <span className={`rounded-full border px-2 py-1 text-xs font-bold ${meetingPhaseTone(phase)}`}>
+                {meetingPhaseLabel(phase)}
               </span>
             </div>
             <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
               <span>Start: {formatDateTime(meeting.startsAt)}</span>
+              {timeWindow && <span>Ends: {formatDateTime(new Date(timeWindow.endMs).toISOString())}</span>}
               <span>Duration: {meeting.durationMinutes}m</span>
               <span>Points: {meeting.points}</span>
               <span>Total score: {Math.round(totalScore * 100) / 100}</span>
@@ -3152,7 +3274,7 @@ function AdminView({
           )}
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
           <DateTimeField
             label="Start"
             value={toDateTimeInputValue(meeting.startsAt)}
@@ -3186,6 +3308,12 @@ function AdminView({
           </label>
         </div>
 
+        {!attendanceOpen && (
+          <p className="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm font-bold text-sky-900">
+            Attendance opens at {formatDateTime(meeting.startsAt)}.
+          </p>
+        )}
+
         <div className="mt-5 grid gap-2">
           {data.members.map((member) => {
             const attendance = attendanceMap[member.id];
@@ -3212,6 +3340,7 @@ function AdminView({
                 </div>
                 <Button
                   type="button"
+                  disabled={!attendanceOpen}
                   onClick={() =>
                     void runAdminAction(
                       attendanceKey,
@@ -3221,12 +3350,16 @@ function AdminView({
                     )
                   }
                   className={actionButtonClass(
-                    attendance ? "bg-emerald-600 text-white hover:bg-emerald-700" : "",
+                    attendance
+                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                      : !attendanceOpen
+                        ? "bg-zinc-100 text-zinc-500"
+                        : "",
                     actionFeedback[attendanceKey],
                   )}
                 >
                   <Check data-icon="inline-start" />
-                  {attendance ? "Checked" : "Check"}
+                  {attendance ? "Checked" : attendanceOpen ? "Check" : "Not open"}
                 </Button>
               </div>
             );
@@ -3704,7 +3837,7 @@ function AdminView({
           )}
 
           {section === "reviews" && (
-            <section className="grid gap-5 xl:grid-cols-[360px_1fr]">
+            <section className="grid min-w-0 gap-5 2xl:grid-cols-[360px_minmax(0,1fr)]">
               <div className="rounded-xl border border-yellow-200 bg-white p-4 shadow-sm">
                 <h2 className="text-xl font-bold">Pending reviews</h2>
                 <p className="mt-1 text-sm text-foreground/55">
@@ -3746,7 +3879,7 @@ function AdminView({
           )}
 
           {section === "tasks" && (
-            <section className="grid gap-5 xl:grid-cols-[380px_1fr]">
+            <section className="grid min-w-0 gap-5 2xl:grid-cols-[420px_minmax(0,1fr)]">
               <div className="grid gap-4">
                 <div className="rounded-xl border border-sky-100 bg-white p-4 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
@@ -3763,7 +3896,7 @@ function AdminView({
                   <div className="mt-4 grid gap-3">
                     <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Task title" className="h-11 border border-ink/20 bg-white" />
                     <Textarea value={taskQuestion} onChange={(event) => setTaskQuestion(event.target.value)} placeholder="Question or instructions" className="min-h-24 border border-ink/20 bg-white" />
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-3">
                       <label className="grid gap-1 text-xs font-bold text-foreground/65">
                         Base points
                         <Input type="number" min={1} value={taskPoints} onChange={(event) => setTaskPoints(Number(event.target.value))} placeholder="Points" className="h-11 border border-ink/20 bg-white" />
@@ -3839,7 +3972,7 @@ function AdminView({
           )}
 
           {section === "meetings" && (
-            <section className="grid gap-5 xl:grid-cols-[380px_1fr]">
+            <section className="grid min-w-0 gap-5 2xl:grid-cols-[420px_minmax(0,1fr)]">
               <div className="grid gap-4">
                 <div className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
                   <h2 className="text-xl font-bold">Create meeting</h2>
@@ -3859,7 +3992,7 @@ function AdminView({
                       onChange={setMeetingStartsAt}
                       help="Start time is used to calculate late minutes."
                     />
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-2">
                       <Input
                         type="number"
                         min={1}
@@ -6011,6 +6144,11 @@ function Index() {
   }
 
   function recordMeetingAttendance(meeting: Meeting, member: Member) {
+    if (!canRecordMeetingAttendance(meeting)) {
+      setSaveStatus(`Attendance opens at ${formatDateTime(meeting.startsAt)}.`);
+      return false;
+    }
+
     const checkedAt = new Date().toISOString();
     const calculated = calculateMeetingAttendance(meeting, checkedAt);
 

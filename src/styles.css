@@ -278,7 +278,7 @@
 
 .leaderboard-row:hover,
 .leaderboard-row:focus-visible {
-  transform: translateY(-3px) rotate(-0.35deg) scale(1.01);
+  transform: translateY(-2px) rotate(-0.15deg);
 }
 
 .leaderboard-row:hover::before,
@@ -304,7 +304,8 @@
 .leaderboard-row-top::after {
   content: "";
   position: absolute;
-  inset: 8px 14px auto auto;
+  inset: 10px auto auto 14px;
+  z-index: 0;
   width: 52px;
   height: 18px;
   background: linear-gradient(
@@ -318,6 +319,8 @@
   border: 2px solid var(--ink);
   border-radius: 999px;
   transform: rotate(-7deg);
+  opacity: 0.55;
+  pointer-events: none;
   animation: leaderboard-confetti 1.9s ease-in-out infinite;
 }
 
