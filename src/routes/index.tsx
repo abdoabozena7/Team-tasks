@@ -1034,10 +1034,6 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
         const isOpen = openMemberId === item.member.id;
         const rowColor = isLeader ? "bg-yellow-50" : isWorst ? "bg-red-50" : "bg-white";
         const currentSubmitted = Math.max(0, item.submitted - item.baseCompleted);
-        const responseLabel =
-          item.assignedTasks > 0
-            ? `تسلم ${currentSubmitted}/${item.assignedTasks}`
-            : "لا توجد تاسكات نشطة";
         const progressWidth =
           item.assignedTasks > 0 && item.responseRate > 0
             ? Math.max(8, Math.min(100, item.responseRate))
@@ -1088,7 +1084,7 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
                     </span>
                   </span>
                   <span className="mt-1 block w-full text-right text-xs font-bold leading-5 text-foreground/55">
-                    {responseLabel} | القبول {formatPercent(item.approvalRate)}
+                    القبول {formatPercent(item.approvalRate)}
                   </span>
                 </span>
               </div>
@@ -1099,9 +1095,9 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
                 />
               </span>
               <span className="grid min-w-0 grid-cols-3 gap-1">
-                <LeaderboardStatPill label="النقاط" value={item.points} />
-                <LeaderboardStatPill label="المنجز" value={item.completed} />
-                <LeaderboardStatPill label="المكلّف" value={item.assignedTasks} />
+                <LeaderboardStatPill label="أخذ" value={item.assignedTasks} />
+                <LeaderboardStatPill label="خلص منهم" value={item.completed} />
+                <LeaderboardStatPill label="درجات" value={item.points} />
               </span>
             </div>
             {isOpen && (
@@ -1179,12 +1175,24 @@ function MemberView({
     const seenIds = new Set(seenMeetingIds);
     return memberVisibleMeetings(data.meetings ?? [], nowDate).filter((meeting) => !seenIds.has(meeting.id));
   }, [data.meetings, nowDate, seenMeetingIds]);
+  const activeMemberScore = useMemo(
+    () => stats.memberStats.find((item) => item.member.id === activeMember.member.id),
+    [activeMember.member.id, stats.memberStats],
+  );
   const hasProfileChange =
-    nicknameDraft.trim().length > 0 ||
     repoDraft.trim() !== (activeMember.member.repoUrl ?? "") ||
     driveDraft.trim() !== (activeMember.member.driveUrl ?? "");
+  const hasNicknameChange =
+    nicknameDraft.trim().length > 0 && nicknameDraft.trim() !== activeMember.displayName.trim();
   const profileActionKey = `profile:${activeMember.member.id}`;
   const profileFeedback = actionFeedback[profileActionKey];
+  const loginAliases = useMemo(
+    () =>
+      [...new Set([activeMember.member.name, ...activeMember.member.aliases].map((alias) => alias.trim()))].filter(
+        Boolean,
+      ),
+    [activeMember.member.aliases, activeMember.member.name],
+  );
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -1354,14 +1362,36 @@ function MemberView({
       )}
 
       <div className="mx-auto max-w-4xl px-5 py-10 md:py-14">
-        <div className="mb-4 flex justify-end">
+        <div className="mb-4 flex justify-end gap-3">
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
             className="grid size-11 place-items-center rounded-full border-[2px] border-ink bg-card doodle-shadow-sm"
             aria-label="settings"
+            title="الإعدادات"
           >
             <Settings className="size-5" />
+          </button>
+          <button
+            type="button"
+            onClick={refreshMemberData}
+            disabled={refreshing}
+            className={`grid size-11 place-items-center rounded-full border-[2px] border-ink doodle-shadow-sm transition ${
+              refreshedOnce ? "bg-card" : "bg-red-500 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.35)]"
+            }`}
+            aria-label={refreshing ? "refreshing" : "refresh"}
+            title={refreshing ? "جاري التحديث" : "تحديث"}
+          >
+            <RefreshCw className={`size-5 ${refreshing ? "animate-spin" : ""}`} />
+          </button>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="grid size-11 place-items-center rounded-full border-[2px] border-ink bg-card doodle-shadow-sm"
+            aria-label="logout"
+            title="تسجيل خروج"
+          >
+            <LogOut className="size-5" />
           </button>
         </div>
 
@@ -1371,47 +1401,16 @@ function MemberView({
             <span className="highlight-yellow">Hivo Studio</span>
           </h1>
           <p className="mx-auto max-w-xl text-xl leading-relaxed text-foreground/80">
-            أهلا {activeMember.displayName}. هنا تاسكاتك أنت بس، واللي يتوافق عليه يتحسب لك بالنقط.
+            أهلا {memberArabicName(activeMember.member)}.
           </p>
-        </header>
-
-        <section
-          className="mb-7 border-[2.5px] border-ink bg-card p-4 doodle-shadow"
-          style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="font-bold">
-              <span className="highlight-blue">
-                نقاط التيم: {stats.pointsTotal} | تاسكات محسوبة: {stats.approvedTotal}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                onClick={refreshMemberData}
-                disabled={refreshing}
-                className={`border-[2px] border-ink doodle-shadow-sm ${
-                  refreshedOnce
-                    ? ""
-                    : "scale-105 bg-red-500 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.35)]"
-                }`}
-              >
-                <RefreshCw data-icon="inline-start" />
-                {refreshing ? "Refreshing..." : "Refresh"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onLogout}
-                className="border-[2px] border-ink bg-paper doodle-shadow-sm"
-              >
-                <LogOut data-icon="inline-start" />
-                <span className="text-sm">تسجيل خروج</span>
-              </Button>
-            </div>
+          <div className="mt-4 font-bold">
+            <span className="highlight-blue">
+              درجاتك: {activeMemberScore?.points ?? 0} | التاسكات عليك: {memberTasks.length} | تاسكات محسوبة:{" "}
+              {activeMemberScore?.completed ?? 0}
+            </span>
           </div>
-          {refreshStatus && <p className="mt-2 text-sm text-foreground/65">{refreshStatus}</p>}
-        </section>
+          {refreshStatus && <p className="mt-3 text-sm text-foreground/65">{refreshStatus}</p>}
+        </header>
 
         {(!activeMember.member.repoUrl || !activeMember.member.driveUrl) && (
           <section
@@ -1451,7 +1450,6 @@ function MemberView({
                       <h2 className="mt-1 break-words text-2xl font-bold">{meeting.title}</h2>
                       <p className="mt-1 text-sm font-bold leading-6 text-sky-900/75">
                         Starts {formatDateTime(meeting.startsAt)}
-                        {timeWindow ? ` | Ends ${formatDateTime(new Date(timeWindow.endMs).toISOString())}` : ""}
                         {` | ${meeting.points} points`}
                       </p>
                     </div>
@@ -1750,7 +1748,7 @@ function MemberView({
             <div className="min-w-0 text-base font-bold leading-7 md:text-lg">
               <span className="highlight-blue">
                 {stats.leader && stats.leader.points > 0
-                  ? `${memberArabicName(stats.leader.member)} متصدر بـ ${stats.leader.points} points`
+                  ? `${memberArabicName(stats.leader.member)} متصدر بـ ${formatTaskPointsLabel(stats.leader.points)} عن الكل`
                   : "لسه مفيش إنجازات محسوبة"}
               </span>
             </div>
@@ -1762,35 +1760,23 @@ function MemberView({
       {settingsOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 px-4">
           <section
-            className="w-full max-w-lg border-[2.5px] border-ink bg-card p-5 doodle-shadow"
+            className="w-full max-w-md border-[2.5px] border-ink bg-card p-4 doodle-shadow"
             style={{ borderRadius: "22px 28px 18px 26px / 24px 18px 28px 20px" }}
           >
-            <h2 className="mb-3 text-3xl font-bold">
+            <h2 className="mb-2 text-3xl font-bold">
               <span className="highlight-yellow">Settings</span>
             </h2>
-            <p className="mb-3 text-sm text-foreground/65">الأسماء المتاحة للدخول:</p>
-            <div className="mb-4 flex flex-wrap gap-2">
-              {[activeMember.member.name, ...activeMember.member.aliases].map((alias) => (
+            <p className="mb-2 text-sm text-foreground/65">الأسماء المتاحة للدخول:</p>
+            <div className="mb-3 flex flex-wrap gap-2">
+              {loginAliases.map((alias) => (
                 <span key={alias} className="border-[2px] border-ink bg-paper px-2 py-1 text-sm">
                   {alias}
                 </span>
               ))}
             </div>
 
-            <div className="mt-3 border-[2px] border-ink bg-paper p-3 text-sm leading-6">
-              <strong>اطلب تعديل اسمك أو ريبو GitHub.</strong>
-              <p>التغيير هيتبعت للأدمن، ومش هيبقى رسمي غير لما يعمل approve.</p>
-              {!activeMember.member.repoUrl && (
-                <p className="mt-2 rounded-md border-[2px] border-yellow-700 bg-yellow-100 p-2 font-bold text-yellow-900">
-                  ضيف GitHub repo بتاعك علشان لسه مش مضاف هنا.
-                </p>
-              )}
-              {!activeMember.member.driveUrl && (
-                <p className="mt-2 rounded-md border-[2px] border-yellow-700 bg-yellow-100 p-2 font-bold text-yellow-900">
-                  Add your Drive link for files that are not code.
-                </p>
-              )}
-              <label className="mt-3 block font-bold" htmlFor="member-nickname">
+            <div className="mt-2 border-[2px] border-ink bg-paper p-3 text-sm leading-6">
+              <label className="block font-bold" htmlFor="member-nickname">
                 Nickname
               </label>
               <Input
@@ -1800,6 +1786,31 @@ function MemberView({
                 placeholder="اكتب nickname جديد..."
                 className="mt-1 border-[2px] border-ink bg-white"
               />
+              <Button
+                type="button"
+                disabled={!hasNicknameChange}
+                onClick={() => {
+                  if (!hasNicknameChange) return;
+                  onSaveNickname(nicknameDraft.trim());
+                  setNicknameDraft("");
+                }}
+                className="mt-2 border-[2px] border-ink doodle-shadow-sm"
+              >
+                حفظ الاسم
+              </Button>
+
+              <div className="mt-4 border-t-[2px] border-ink/15 pt-3">
+                {!activeMember.member.repoUrl && (
+                  <p className="mb-2 rounded-md border-[2px] border-yellow-700 bg-yellow-100 p-2 font-bold text-yellow-900">
+                    ضيف GitHub repo بتاعك علشان لسه مش مضاف هنا.
+                  </p>
+                )}
+                {!activeMember.member.driveUrl && (
+                  <p className="mb-2 rounded-md border-[2px] border-yellow-700 bg-yellow-100 p-2 font-bold text-yellow-900">
+                    Add your Drive link for files that are not code.
+                  </p>
+                )}
+              </div>
               <label className="mt-3 block font-bold" htmlFor="member-repo">
                 GitHub repo
               </label>
@@ -1825,16 +1836,13 @@ function MemberView({
               <p className="mt-1 text-xs text-foreground/55">
                 Use this for designs, PDFs, videos, and non-code uploads.
               </p>
-              <p className="mt-1 text-xs text-foreground/55">
-                تقدر تمسح القديم وتبعت غيره، والأدمن لازم يوافق.
-              </p>
               <Button
                 type="button"
                 data-testid="profile-request-submit"
                 disabled={isSubmitting}
                 onClick={() => {
                   if (!hasProfileChange) {
-                    blockMemberAction(profileActionKey, ["nickname, GitHub repo, or Drive link change"]);
+                    blockMemberAction(profileActionKey, ["GitHub repo or Drive link change"]);
                     return;
                   }
                   void runMemberAction(
@@ -1842,12 +1850,12 @@ function MemberView({
                     () =>
                       onProfileChangeRequest({
                         memberId: activeMember.member.id,
-                        nickname: nicknameDraft.trim(),
+                        nickname: "",
                         repoUrl: repoDraft.trim(),
                         driveUrl: driveDraft.trim(),
                       }),
-                    "Profile request sent.",
-                    "Could not send profile request. Try again.",
+                    "Links sent to admin.",
+                    "Could not send links. Try again.",
                   );
                 }}
                 className={actionButtonClass(
@@ -1856,7 +1864,7 @@ function MemberView({
                 )}
               >
                 <Bell data-icon="inline-start" />
-                إرسال للأدمن
+                إرسال الروابط للأدمن
               </Button>
               <ActionFeedbackLine feedback={profileFeedback} />
               {activeMember.member.repoUrl ? (
@@ -2333,10 +2341,15 @@ function AdminView({
   }
 
   async function submitTask() {
+    const cleanMemberIds = uniqueText(taskMemberIds).filter((memberId) =>
+      data.members.some((member) => member.id === memberId),
+    );
+    const allSelected = areAllMembersSelected(cleanMemberIds);
+    const effectiveScope = allSelected ? "all" : "member";
     const missing = [
       !taskTitle.trim() ? "task title" : "",
       !taskQuestion.trim() ? "question or instructions" : "",
-      taskScope === "member" && taskMemberIds.length === 0 ? "at least one member" : "",
+      effectiveScope === "member" && cleanMemberIds.length === 0 ? "at least one member" : "",
     ].filter((field): field is string => Boolean(field));
     if (missing.length > 0) {
       blockAdminAction("admin:add-task", missing);
@@ -2345,18 +2358,18 @@ function AdminView({
 
     const ok = await runAdminAction(
       "admin:add-task",
-      () =>
-        onAddTask({
-          title: taskTitle.trim(),
-          question: taskQuestion.trim(),
-          points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
-          scope: taskScope,
-          memberId: taskScope === "member" ? taskMemberIds[0] : undefined,
-          memberIds: taskScope === "member" ? taskMemberIds : [],
-          startAt: fromDateTimeInputValue(taskStartAt) || new Date().toISOString(),
-          deadlineAt: fromDateTimeInputValue(taskDeadlineAt),
-          status: "active",
-        }),
+        () =>
+          onAddTask({
+            title: taskTitle.trim(),
+            question: taskQuestion.trim(),
+            points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
+            scope: effectiveScope,
+            memberId: effectiveScope === "member" ? cleanMemberIds[0] : undefined,
+            memberIds: effectiveScope === "member" ? cleanMemberIds : [],
+            startAt: fromDateTimeInputValue(taskStartAt) || new Date().toISOString(),
+            deadlineAt: fromDateTimeInputValue(taskDeadlineAt),
+            status: "active",
+          }),
       "Task added.",
       "Task was not added. Try again.",
     );
@@ -2417,6 +2430,15 @@ function AdminView({
     return uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []));
   }
 
+  function allTaskMemberIds() {
+    return data.members.map((member) => member.id);
+  }
+
+  function areAllMembersSelected(memberIds: string[]) {
+    const allIds = allTaskMemberIds();
+    return allIds.length > 0 && allIds.every((memberId) => memberIds.includes(memberId));
+  }
+
   function taskAudienceLabel(task: StudioTask) {
     if (task.scope === "all") return "All team";
     const memberIds = selectedMemberIdsForTask(task);
@@ -2433,6 +2455,11 @@ function AdminView({
         ? current.filter((id) => id !== memberId)
         : [...current, memberId],
     );
+  }
+
+  function toggleAllTaskMembers(checked: boolean) {
+    setTaskScope(checked ? "all" : "member");
+    setTaskMemberIds(checked ? allTaskMemberIds() : []);
   }
 
   function taskEditDraft(task: StudioTask) {
@@ -2470,7 +2497,17 @@ function AdminView({
     const memberIds = draft.memberIds.includes(memberId)
       ? draft.memberIds.filter((id) => id !== memberId)
       : [...draft.memberIds, memberId];
-    updateTaskEditDraft(task, { scope: "member", memberIds });
+    updateTaskEditDraft(task, {
+      scope: areAllMembersSelected(memberIds) ? "all" : "member",
+      memberIds,
+    });
+  }
+
+  function toggleAllTaskEditMembers(task: StudioTask, checked: boolean) {
+    updateTaskEditDraft(task, {
+      scope: checked ? "all" : "member",
+      memberIds: checked ? allTaskMemberIds() : [],
+    });
   }
 
   function taskMetric(task: StudioTask) {
@@ -2668,30 +2705,24 @@ function AdminView({
                 className="border border-ink/20 bg-white"
               />
               <div className="grid gap-2 rounded-md border border-ink/20 bg-white p-2 text-sm">
-                <label className="flex h-8 items-center gap-2 font-bold">
-                  <input
-                    type="checkbox"
-                    checked={editDraft.scope === "all"}
-                    onChange={(event) =>
-                      updateTaskEditDraft(task, {
-                        scope: event.target.checked ? "all" : "member",
-                        memberIds: event.target.checked ? [] : editDraft.memberIds,
-                      })
-                    }
-                  />
-                  All team
-                </label>
-                <div className="max-h-36 overflow-auto border-t border-ink/10 pt-2">
-                  {data.members.map((member) => (
-                    <label key={member.id} className="flex h-8 items-center gap-2">
-                      <input
-                        type="checkbox"
-                        disabled={editDraft.scope === "all"}
-                        checked={editDraft.scope === "all" || editDraft.memberIds.includes(member.id)}
-                        onChange={() => toggleTaskEditMember(task, member.id)}
-                      />
-                      <span className="truncate">{member.name}</span>
-                    </label>
+                        <label className="flex h-8 items-center gap-2 font-bold">
+                          <input
+                            type="checkbox"
+                            checked={areAllMembersSelected(editDraft.memberIds)}
+                            onChange={(event) => toggleAllTaskEditMembers(task, event.target.checked)}
+                          />
+                          All team
+                        </label>
+                        <div className="max-h-36 overflow-auto border-t border-ink/10 pt-2">
+                          {data.members.map((member) => (
+                            <label key={member.id} className="flex h-8 items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={editDraft.memberIds.includes(member.id)}
+                                onChange={() => toggleTaskEditMember(task, member.id)}
+                              />
+                              <span className="truncate">{member.name}</span>
+                            </label>
                   ))}
                 </div>
               </div>
@@ -2703,10 +2734,12 @@ function AdminView({
                   const cleanMemberIds = uniqueText(editDraft.memberIds).filter((memberId) =>
                     data.members.some((member) => member.id === memberId),
                   );
+                  const allSelected = areAllMembersSelected(cleanMemberIds);
+                  const effectiveScope = allSelected ? "all" : "member";
                   const missing = [
                     !editDraft.title.trim() ? "task title" : "",
                     !editDraft.question.trim() ? "question or instructions" : "",
-                    editDraft.scope === "member" && cleanMemberIds.length === 0 ? "at least one member" : "",
+                    effectiveScope === "member" && cleanMemberIds.length === 0 ? "at least one member" : "",
                   ].filter((field): field is string => Boolean(field));
                   if (missing.length > 0) {
                     blockAdminAction(saveTaskKey, missing);
@@ -2719,9 +2752,9 @@ function AdminView({
                         title: editDraft.title.trim(),
                         question: editDraft.question.trim(),
                         points: sanitizePositiveNumber(editDraft.points, sanitizePositiveNumber(task.points, 1)),
-                        scope: editDraft.scope,
-                        memberId: editDraft.scope === "member" ? cleanMemberIds[0] : undefined,
-                        memberIds: editDraft.scope === "member" ? cleanMemberIds : [],
+                        scope: effectiveScope,
+                        memberId: effectiveScope === "member" ? cleanMemberIds[0] : undefined,
+                        memberIds: effectiveScope === "member" ? cleanMemberIds : [],
                       }),
                     "Task updated.",
                     "Task update failed. Try again.",
@@ -3942,11 +3975,8 @@ function AdminView({
                         <label className="flex h-8 items-center gap-2 font-bold">
                           <input
                             type="checkbox"
-                            checked={taskScope === "all"}
-                            onChange={(event) => {
-                              setTaskScope(event.target.checked ? "all" : "member");
-                              if (event.target.checked) setTaskMemberIds([]);
-                            }}
+                            checked={areAllMembersSelected(taskMemberIds)}
+                            onChange={(event) => toggleAllTaskMembers(event.target.checked)}
                           />
                           All team
                         </label>
@@ -3955,8 +3985,7 @@ function AdminView({
                             <label key={member.id} className="flex h-8 items-center gap-2">
                               <input
                                 type="checkbox"
-                                disabled={taskScope === "all"}
-                                checked={taskScope === "all" || taskMemberIds.includes(member.id)}
+                                checked={taskMemberIds.includes(member.id)}
                                 onChange={() => toggleTaskMemberDraft(member.id)}
                               />
                               <span className="truncate">{member.name}</span>
@@ -6075,7 +6104,7 @@ function Index() {
   async function refreshData() {
     const freshData = await fetchStudioData();
     setData(freshData);
-    setRefreshStatus("تم تحديث الداتا، وأي تغييرات محلية على جهازك فضلت محفوظة.");
+    setRefreshStatus("تم تحديث الداتا،");
   }
 
   function loginMember(member: Member, displayName: string) {
@@ -6380,6 +6409,16 @@ function Index() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function saveMemberNickname(nickname: string) {
+    if (!activeMember) return;
+    const nextDisplayName = nickname.trim() || activeMember.displayName;
+    window.localStorage.setItem(ACTIVE_DISPLAY_NAME_KEY, nextDisplayName);
+    setActiveMember((current) =>
+      current ? { ...current, displayName: nextDisplayName } : current,
+    );
+    setRefreshStatus("تم حفظ الاسم الجديد على جهازك.");
   }
 
   async function reviewAnswer(
@@ -6795,6 +6834,7 @@ function Index() {
         onRepoAttention={sendRepoAttention}
         onDriveAttention={sendDriveAttention}
         onProfileChangeRequest={submitProfileChangeRequest}
+        onSaveNickname={saveMemberNickname}
         onLogout={logout}
         onRefreshData={refreshData}
       />
