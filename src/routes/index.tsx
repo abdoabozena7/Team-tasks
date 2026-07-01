@@ -37,6 +37,10 @@ export const Route = createFileRoute("/")({
       { title: "Hivo Studio" },
       { name: "description", content: "Hivo Studio team tasks and idea review board." },
     ],
+    links: [
+      { rel: "icon", type: "image/png", href: `${import.meta.env.BASE_URL}hivo.png` },
+      { rel: "apple-touch-icon", href: `${import.meta.env.BASE_URL}hivo.png` },
+    ],
   }),
 });
 
@@ -4252,6 +4256,86 @@ function StatsView({
     return "border-ink/10 bg-paper";
   }
 
+  function activeTaskMembers(task: StudioTask) {
+    return data.members.filter(
+      (member) =>
+        !member.hidden &&
+        taskIsForMember(task, member.id) &&
+        !isTaskSkipped(data, task.id, member.id),
+    );
+  }
+
+  function statusSegments(total: number, counts: { approved: number; pending: number; rejected: number }) {
+    const safeTotal = Math.max(0, total);
+    if (safeTotal === 0) {
+      return [{ key: "none", label: "No assignments", count: 1, className: "bg-zinc-200" }];
+    }
+    const approvedCount = Math.max(0, counts.approved);
+    const pendingCount = Math.max(0, counts.pending);
+    const rejectedCount = Math.max(0, counts.rejected);
+    const missingCount = Math.max(0, safeTotal - approvedCount - pendingCount - rejectedCount);
+    return [
+      { key: "approved", label: "Approved", count: approvedCount, className: "bg-emerald-500" },
+      { key: "pending", label: "Pending", count: pendingCount, className: "bg-yellow-400" },
+      { key: "rejected", label: "Rejected", count: rejectedCount, className: "bg-red-500" },
+      { key: "missing", label: "Missing", count: missingCount, className: "bg-zinc-200" },
+    ].filter((segment) => segment.count > 0);
+  }
+
+  function taskSegments(task: StudioTask) {
+    const members = activeTaskMembers(task);
+    const responses = data.responses[task.id] ?? {};
+    return statusSegments(members.length, {
+      approved: members.filter((member) => responses[member.id]?.status === "approved").length,
+      pending: members.filter((member) => responses[member.id]?.status === "submitted").length,
+      rejected: members.filter((member) => responses[member.id]?.status === "rejected").length,
+    });
+  }
+
+  function teamSegments() {
+    const counts = activeTasks.reduce(
+      (sum, task) => {
+        const responses = data.responses[task.id] ?? {};
+        for (const member of activeTaskMembers(task)) {
+          const status = responses[member.id]?.status;
+          if (status === "approved") sum.approved += 1;
+          if (status === "submitted") sum.pending += 1;
+          if (status === "rejected") sum.rejected += 1;
+        }
+        return sum;
+      },
+      { approved: 0, pending: 0, rejected: 0 },
+    );
+    return statusSegments(expectedTotal, counts);
+  }
+
+  function memberSegments(memberId: string) {
+    const assignedTasks = activeTasks.filter(
+      (task) => taskIsForMember(task, memberId) && !isTaskSkipped(data, task.id, memberId),
+    );
+    return statusSegments(assignedTasks.length, {
+      approved: assignedTasks.filter((task) => getResponse(data, task.id, memberId)?.status === "approved").length,
+      pending: assignedTasks.filter((task) => getResponse(data, task.id, memberId)?.status === "submitted").length,
+      rejected: assignedTasks.filter((task) => getResponse(data, task.id, memberId)?.status === "rejected").length,
+    });
+  }
+
+  function SegmentedStatusBar({ segments, total }: { segments: ReturnType<typeof statusSegments>; total: number }) {
+    const safeTotal = Math.max(1, total);
+    return (
+      <div className="flex h-3 overflow-hidden rounded-full border border-ink/10 bg-white">
+        {segments.map((segment) => (
+          <div
+            key={segment.key}
+            title={`${segment.label}: ${segment.count}`}
+            className={`h-full ${segment.className}`}
+            style={{ width: `${total > 0 ? (segment.count / safeTotal) * 100 : 100}%` }}
+          />
+        ))}
+      </div>
+    );
+  }
+
   function memberInsight(item: MemberScore) {
     const assignedTasks = activeTasks.filter(
       (task) => taskIsForMember(task, item.member.id) && !isTaskSkipped(data, task.id, item.member.id),
@@ -4348,17 +4432,8 @@ function StatsView({
               {completionRate}%
             </div>
           </div>
-          <div className="mt-5 h-5 overflow-hidden rounded-full border border-ink/10 bg-zinc-100">
-            <div
-              className={`h-full rounded-full transition-all ${
-                completionRate >= 80
-                  ? "bg-emerald-500"
-                  : completionRate >= 45
-                    ? "bg-yellow-400"
-                    : "bg-red-500"
-              }`}
-              style={{ width: `${Math.max(0, Math.min(100, completionRate))}%` }}
-            />
+          <div className="mt-5">
+            <SegmentedStatusBar segments={teamSegments()} total={expectedTotal} />
           </div>
           <div className="mt-5 grid grid-cols-2 gap-2 lg:grid-cols-6">
             <CompactMetric label="Active tasks" value={activeTasks.length} />
@@ -4389,8 +4464,7 @@ function StatsView({
               </p>
             ) : (
               stats.taskMetrics.map((metric) => {
-                const taskRate =
-                  metric.expected > 0 ? Math.round((metric.received / metric.expected) * 100) : 0;
+                const segments = taskSegments(metric.task);
                 return (
                   <div key={metric.task.id} className="rounded-xl border border-ink/10 bg-paper p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -4404,11 +4478,8 @@ function StatsView({
                         {metric.received}/{metric.expected}
                       </span>
                     </div>
-                    <div className="mt-3 h-3 overflow-hidden rounded-full border border-ink/10 bg-white">
-                      <div
-                        className="h-full rounded-full bg-sky-500"
-                        style={{ width: `${Math.max(0, Math.min(100, taskRate))}%` }}
-                      />
+                    <div className="mt-3">
+                      <SegmentedStatusBar segments={segments} total={metric.expected} />
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
                       <span>Submitted {metric.received}</span>
@@ -4421,6 +4492,12 @@ function StatsView({
                 );
               })
             )}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-3 text-xs font-bold text-foreground/55">
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-emerald-500" /> Approved</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-yellow-400" /> Pending</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-red-500" /> Rejected</span>
+            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-zinc-200" /> Missing</span>
           </div>
         </section>
 
@@ -4440,14 +4517,7 @@ function StatsView({
             {visibleStats.map((item) => {
               const state = memberState(item);
               const insight = memberInsight(item);
-              const barColor =
-                state === "At risk"
-                  ? "bg-red-500"
-                  : state === "Needs follow-up"
-                    ? "bg-yellow-400"
-                    : state === "On track"
-                      ? "bg-emerald-500"
-                      : "bg-zinc-300";
+              const segments = memberSegments(item.member.id);
               return (
                 <details key={item.member.id} className={`rounded-xl border p-4 ${memberTone(item)}`}>
                   <summary className="cursor-pointer list-none">
@@ -4476,11 +4546,8 @@ function StatsView({
                         </div>
                       </div>
                     </div>
-                    <div className="mt-3 h-3 overflow-hidden rounded-full border border-ink/10 bg-white">
-                      <div
-                        className={`h-full rounded-full ${barColor}`}
-                        style={{ width: `${Math.max(0, Math.min(100, item.responseRate))}%` }}
-                      />
+                    <div className="mt-3">
+                      <SegmentedStatusBar segments={segments} total={item.assignedTasks} />
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
                       <span>Progress {formatPercent(item.responseRate)}</span>
