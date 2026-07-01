@@ -318,11 +318,20 @@
         "memberId": "renad",
         "memberName": "renad",
         "answer": "سمعتهم",
-        "status": "submitted",
+        "status": "approved",
         "submittedAt": "2026-07-01T16:48:17.561Z",
-        "awardedPoints": 0,
+        "awardedPoints": 5,
         "lateSubmission": false,
-        "reviewEvents": []
+        "reviewEvents": [
+          {
+            "id": "review-1782924528837",
+            "status": "approved",
+            "reviewedAt": "2026-07-01T16:48:48.837Z",
+            "awardedPoints": 5
+          }
+        ],
+        "reviewedAt": "2026-07-01T16:48:48.837Z",
+        "scoreOverride": false
       }
     }
   },
@@ -361,6 +370,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T16:48:18.369Z"
+    "updatedAt": "2026-07-01T16:48:48.837Z"
   }
 }
