@@ -250,11 +250,20 @@
         "memberId": "abozena",
         "memberName": "Abozena",
         "answer": "رفعته ع github",
-        "status": "submitted",
+        "status": "approved",
         "submittedAt": "2026-07-01T07:05:15.190Z",
-        "awardedPoints": 0,
+        "awardedPoints": 1,
         "lateSubmission": false,
-        "reviewEvents": []
+        "reviewEvents": [
+          {
+            "id": "review-1782892183582",
+            "status": "approved",
+            "reviewedAt": "2026-07-01T07:49:43.582Z",
+            "awardedPoints": 1
+          }
+        ],
+        "reviewedAt": "2026-07-01T07:49:43.582Z",
+        "scoreOverride": false
       }
     }
   },
@@ -273,7 +282,8 @@
       "seen": false
     }
   ],
+  "profileRequests": [],
   "meta": {
-    "updatedAt": "2026-07-01T07:19:12.822Z"
+    "updatedAt": "2026-07-01T07:49:43.582Z"
   }
 }
