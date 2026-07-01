@@ -436,6 +436,16 @@
         "note": "جمعت 50",
         "createdAt": "2026-07-01T17:24:57.604Z"
       }
+    ],
+    "task-1782889469398": [
+      {
+        "id": "progress-1782928403527",
+        "taskId": "task-1782889469398",
+        "memberId": "yossef-sharawy",
+        "memberName": "youssef",
+        "note": "ihd",
+        "createdAt": "2026-07-01T17:53:23.527Z"
+      }
     ]
   },
   "meetings": [],
@@ -494,6 +504,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T17:24:57.564Z"
+    "updatedAt": "2026-07-01T17:53:23.830Z"
   }
 }
