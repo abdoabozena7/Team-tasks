@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Archive,
   BarChart3,
@@ -351,6 +351,24 @@ function isActiveMeeting(meeting: Meeting) {
 }
 
 function sanitizeData(data: StudioData): StudioData {
+  const tasks = (data.tasks ?? []).map((task) => ({
+    ...task,
+    points: sanitizeNumber(task.points) || 1,
+    scope: task.scope === "member" ? "member" : "all",
+    memberId:
+      task.scope === "member"
+        ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
+        : undefined,
+    memberIds:
+      task.scope === "member"
+        ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
+        : [],
+    startAt: task.startAt ?? task.createdAt,
+    deadlineAt: task.deadlineAt ?? "",
+    status: task.status === "archived" ? "archived" : "active",
+  }));
+  const taskIds = new Set(tasks.map((task) => task.id));
+
   return {
     ...DEFAULT_DATA,
     ...data,
@@ -373,22 +391,7 @@ function sanitizeData(data: StudioData): StudioData {
       repoUrl: member.repoUrl ?? "",
       driveUrl: member.driveUrl ?? "",
     })),
-    tasks: (data.tasks ?? []).map((task) => ({
-      ...task,
-      points: sanitizeNumber(task.points) || 1,
-      scope: task.scope === "member" ? "member" : "all",
-      memberId:
-        task.scope === "member"
-          ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
-          : undefined,
-      memberIds:
-        task.scope === "member"
-          ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
-          : [],
-      startAt: task.startAt ?? task.createdAt,
-      deadlineAt: task.deadlineAt ?? "",
-      status: task.status === "archived" ? "archived" : "active",
-    })),
+    tasks,
     responses: data.responses ?? {},
     taskSkips: data.taskSkips ?? {},
     progressUpdates: data.progressUpdates ?? {},
@@ -402,7 +405,9 @@ function sanitizeData(data: StudioData): StudioData {
       createdAt: meeting.createdAt || new Date().toISOString(),
     })),
     meetingAttendance: data.meetingAttendance ?? {},
-    repoUpdates: data.repoUpdates ?? [],
+    repoUpdates: (data.repoUpdates ?? []).filter(
+      (update) => !update.taskId || taskIds.has(update.taskId),
+    ),
     profileRequests: data.profileRequests ?? [],
     meta: data.meta ?? DEFAULT_DATA.meta,
   };
@@ -906,6 +911,25 @@ function StatsMemberDetails({ item }: { item: MemberScore }) {
   );
 }
 
+function LeaderboardStatPill({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string | number;
+  className?: string;
+}) {
+  return (
+    <span className={cn("rounded-md border-[2px] border-ink bg-white/85 px-2 py-1 text-center", className)}>
+      <span className="block text-[10px] font-bold uppercase leading-none text-foreground/50">
+        {label}
+      </span>
+      <span className="mt-1 block text-sm font-bold leading-none">{value}</span>
+    </span>
+  );
+}
+
 function Leaderboard({ scores }: { scores: MemberScore[] }) {
   const [openMemberId, setOpenMemberId] = useState("");
   const worstMemberId = scores[scores.length - 1]?.member.id;
@@ -916,27 +940,12 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
         const isLeader = index === 0;
         const isWorst = item.member.id === worstMemberId && scores.length > 1;
         const isOpen = openMemberId === item.member.id;
-        const rowColor = isLeader ? "bg-yellow-50" : "bg-white";
-
-        if (isWorst) {
-          return (
-            <button
-              key={item.member.id}
-              type="button"
-              onClick={() => setOpenMemberId(isOpen ? "" : item.member.id)}
-              className="leaderboard-row-worst border border-black bg-white p-2 text-left font-serif text-black shadow-none"
-              dir="rtl"
-            >
-              <div>
-                {index + 1}. {item.member.name} - {item.points} pts / {item.completed} tasks
-              </div>
-              {item.member.publicFlag && (
-                <div className="text-red-700">[{item.member.publicFlag}]</div>
-              )}
-              {isOpen && <MemberDetails item={item} />}
-            </button>
-          );
-        }
+        const rowColor = isLeader ? "bg-yellow-50" : isWorst ? "bg-red-50" : "bg-white";
+        const currentSubmitted = Math.max(0, item.submitted - item.baseCompleted);
+        const responseLabel =
+          item.assignedTasks > 0
+            ? `Current submitted ${currentSubmitted}/${item.assignedTasks}`
+            : "No active assignments";
 
         return (
           <button
@@ -963,25 +972,29 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
                 <span className="block truncate text-lg font-bold leading-tight">
                   {item.member.name}
                   {isLeader && <span className="leaderboard-top-tag ms-2">TOP</span>}
+                  {isWorst && <span className="ms-2 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-bold text-red-700">Needs follow-up</span>}
                   {item.member.publicFlag && (
                     <span className="ms-2 text-xs font-bold text-red-600">
                       {item.member.publicFlag}
                     </span>
                   )}
                 </span>
-                <span className="mt-1 block h-2 overflow-hidden rounded-full border-[1.5px] border-ink bg-white/70">
+                <span className="mt-1 block text-xs font-bold text-foreground/55">
+                  {responseLabel} | Approval {formatPercent(item.approvalRate)}
+                </span>
+                <span className="mt-2 block h-2 overflow-hidden rounded-full border-[1.5px] border-ink bg-white/70">
                   <span
                     className="leaderboard-progress block h-full rounded-full bg-emerald-400"
                     style={{
-                      width: `${Math.max(8, Math.min(100, item.responseRate || item.approvalRate || 0))}%`,
+                      width: `${item.assignedTasks > 0 ? Math.max(8, Math.min(100, item.responseRate)) : 0}%`,
                     }}
                   />
                 </span>
               </span>
-              <span className="leaderboard-points shrink-0 rounded-full border-[2px] border-ink bg-white/80 px-3 py-1 text-sm font-bold">
-                {item.points} pts
-                <span className="mx-1 text-foreground/45">/</span>
-                {item.completed}
+              <span className="grid shrink-0 grid-cols-3 gap-1" dir="ltr">
+                <LeaderboardStatPill label="Points" value={item.points} className="min-w-16" />
+                <LeaderboardStatPill label="Done" value={item.completed} className="min-w-14" />
+                <LeaderboardStatPill label="Assigned" value={item.assignedTasks} className="min-w-16" />
               </span>
             </div>
             {isOpen && (
@@ -1082,6 +1095,7 @@ function MemberView({
 
   function setMemberFeedback(key: string, feedback: ActionFeedback) {
     setActionFeedback((current) => ({ ...current, [key]: feedback }));
+    clearFeedbackAfterSuccess(key, feedback, setActionFeedback);
   }
 
   function blockMemberAction(key: string, fields: string[]) {
@@ -1401,7 +1415,6 @@ function MemberView({
                       className={actionButtonClass(
                         "border-[2px] border-ink doodle-shadow-sm",
                         finalFeedback,
-                        Boolean(finalSent),
                       )}
                     >
                       <Save data-icon="inline-start" />
@@ -1466,7 +1479,6 @@ function MemberView({
                         className={actionButtonClass(
                           "border-[2px] border-ink bg-yellow-100 doodle-shadow-sm",
                           progressFeedback,
-                          Boolean(progressSent),
                         )}
                       >
                         <Save data-icon="inline-start" />
@@ -1882,6 +1894,7 @@ type ActionResult = boolean | void | Promise<boolean | void>;
 
 const ACTION_SUCCESS_CLASS =
   "border-emerald-700 bg-emerald-600 text-white hover:bg-emerald-700 shadow-[0_0_0_3px_rgba(16,185,129,0.22)]";
+const ACTION_SUCCESS_FLASH_MS = 2500;
 
 function missingFieldsMessage(fields: string[]) {
   return `Missing: ${fields.join(", ")}. Fill ${fields.length === 1 ? "it" : "them"} and press again.`;
@@ -1906,6 +1919,23 @@ function ActionFeedbackLine({ feedback }: { feedback?: ActionFeedback }) {
       {feedback.message}
     </p>
   );
+}
+
+function clearFeedbackAfterSuccess(
+  key: string,
+  feedback: ActionFeedback,
+  setFeedback: Dispatch<SetStateAction<Record<string, ActionFeedback>>>,
+) {
+  if (feedback.tone !== "success" || typeof window === "undefined") return;
+  window.setTimeout(() => {
+    setFeedback((current) => {
+      const active = current[key];
+      if (active?.tone !== "success" || active.message !== feedback.message) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, ACTION_SUCCESS_FLASH_MS);
 }
 
 function CompactMetric({ label, value }: { label: string; value: string | number }) {
@@ -1989,7 +2019,7 @@ function AdminView({
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
   onMarkRepoUpdateSeen: (updateId: string) => ActionResult;
   onReviewProfileRequest: (requestId: string, status: "approved" | "rejected") => ActionResult;
-  onRefreshAdminQueue: () => void;
+  onRefreshAdminQueue: () => ActionResult;
   onTokenDraftChange: (value: string) => void;
   onCloseTokenDialog: () => void;
   onConfirmTokenAndSave: () => ActionResult;
@@ -2024,6 +2054,8 @@ function AdminView({
   const [logMode, setLogMode] = useState<"task" | "member">("task");
   const [query, setQuery] = useState("");
   const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
+  const refreshAdminKey = "admin:refresh-data";
+  const saveGithubKey = "admin:save-github";
 
   const activeTasks = data.tasks.filter(isActiveTask);
   const archivedTasks = data.tasks.filter((task) => taskStatus(task) === "archived");
@@ -2084,6 +2116,7 @@ function AdminView({
 
   function setAdminFeedback(key: string, feedback: ActionFeedback) {
     setActionFeedback((current) => ({ ...current, [key]: feedback }));
+    clearFeedbackAfterSuccess(key, feedback, setActionFeedback);
   }
 
   function blockAdminAction(key: string, fields: string[]) {
@@ -2316,6 +2349,9 @@ function AdminView({
     const manualApproveKey = `admin:manual-approve:${task.id}`;
     const addProgressKey = `admin:add-progress:${task.id}`;
     const saveTaskKey = `admin:save-task:${task.id}`;
+    const archiveTaskKey = `admin:archive-task:${task.id}`;
+    const restoreTaskKey = `admin:restore-task:${task.id}`;
+    const deleteTaskKey = `admin:delete-task:${task.id}`;
     const editDraft = taskEditDraft(task);
 
     return (
@@ -2342,8 +2378,15 @@ function AdminView({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => onUpdateTask(task.id, { status: "archived" })}
-                className="border border-ink/20 bg-paper"
+                onClick={() =>
+                  void runAdminAction(
+                    archiveTaskKey,
+                    () => onUpdateTask(task.id, { status: "archived" }),
+                    "Task archived.",
+                    "Archive failed. Try again.",
+                  )
+                }
+                className={actionButtonClass("border border-ink/20 bg-paper", actionFeedback[archiveTaskKey])}
               >
                 <Archive data-icon="inline-start" />
                 Archive
@@ -2351,8 +2394,15 @@ function AdminView({
             ) : (
               <Button
                 type="button"
-                onClick={() => onUpdateTask(task.id, { status: "active" })}
-                className="border border-ink/20"
+                onClick={() =>
+                  void runAdminAction(
+                    restoreTaskKey,
+                    () => onUpdateTask(task.id, { status: "active" }),
+                    "Task restored.",
+                    "Restore failed. Try again.",
+                  )
+                }
+                className={actionButtonClass("border border-ink/20", actionFeedback[restoreTaskKey])}
               >
                 <RotateCcw data-icon="inline-start" />
                 Restore
@@ -2362,8 +2412,18 @@ function AdminView({
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => onRemoveTask(task.id)}
-              className="border border-red-200 bg-red-50 text-red-700"
+              onClick={() =>
+                void runAdminAction(
+                  deleteTaskKey,
+                  () => onRemoveTask(task.id),
+                  "Task deleted.",
+                  "Delete failed. Try again.",
+                )
+              }
+              className={actionButtonClass(
+                "border border-red-200 bg-red-50 text-red-700",
+                actionFeedback[deleteTaskKey],
+              )}
               aria-label="Delete task"
             >
               <Trash2 className="size-4" />
@@ -2988,6 +3048,8 @@ function AdminView({
     if (!meeting) return null;
     const attendanceMap = data.meetingAttendance?.[meeting.id] ?? {};
     const totalScore = Object.values(attendanceMap).reduce((sum, item) => sum + item.score, 0);
+    const archiveMeetingKey = `admin:archive-meeting:${meeting.id}`;
+    const restoreMeetingKey = `admin:restore-meeting:${meeting.id}`;
 
     return (
       <section className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
@@ -3010,8 +3072,15 @@ function AdminView({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onUpdateMeeting(meeting.id, { status: "archived" })}
-              className="border border-ink/20 bg-paper"
+              onClick={() =>
+                void runAdminAction(
+                  archiveMeetingKey,
+                  () => onUpdateMeeting(meeting.id, { status: "archived" }),
+                  "Meeting archived.",
+                  "Archive failed. Try again.",
+                )
+              }
+              className={actionButtonClass("border border-ink/20 bg-paper", actionFeedback[archiveMeetingKey])}
             >
               <Archive data-icon="inline-start" />
               Archive
@@ -3019,8 +3088,15 @@ function AdminView({
           ) : (
             <Button
               type="button"
-              onClick={() => onUpdateMeeting(meeting.id, { status: "active" })}
-              className="border border-ink/20"
+              onClick={() =>
+                void runAdminAction(
+                  restoreMeetingKey,
+                  () => onUpdateMeeting(meeting.id, { status: "active" }),
+                  "Meeting restored.",
+                  "Restore failed. Try again.",
+                )
+              }
+              className={actionButtonClass("border border-ink/20", actionFeedback[restoreMeetingKey])}
             >
               <RotateCcw data-icon="inline-start" />
               Restore
@@ -3065,6 +3141,7 @@ function AdminView({
         <div className="mt-5 grid gap-2">
           {data.members.map((member) => {
             const attendance = attendanceMap[member.id];
+            const attendanceKey = `admin:meeting-attendance:${meeting.id}:${member.id}`;
             return (
               <div
                 key={member.id}
@@ -3087,8 +3164,18 @@ function AdminView({
                 </div>
                 <Button
                   type="button"
-                  onClick={() => onRecordMeetingAttendance(meeting, member)}
-                  className={attendance ? "bg-emerald-600 text-white hover:bg-emerald-700" : ""}
+                  onClick={() =>
+                    void runAdminAction(
+                      attendanceKey,
+                      () => onRecordMeetingAttendance(meeting, member),
+                      "Attendance saved.",
+                      "Attendance failed. Try again.",
+                    )
+                  }
+                  className={actionButtonClass(
+                    attendance ? "bg-emerald-600 text-white hover:bg-emerald-700" : "",
+                    actionFeedback[attendanceKey],
+                  )}
                 >
                   <Check data-icon="inline-start" />
                   {attendance ? "Checked" : "Check"}
@@ -3273,13 +3360,35 @@ function AdminView({
               <Button
                 type="button"
                 variant="outline"
-                onClick={onRefreshAdminQueue}
-                className="hidden border border-ink/20 bg-white sm:inline-flex"
+                onClick={() =>
+                  void runAdminAction(
+                    refreshAdminKey,
+                    onRefreshAdminQueue,
+                    "Data refreshed.",
+                    "Refresh failed. Try again.",
+                  )
+                }
+                className={actionButtonClass(
+                  "hidden border border-ink/20 bg-white sm:inline-flex",
+                  actionFeedback[refreshAdminKey],
+                )}
               >
                 <RefreshCw data-icon="inline-start" />
                 Refresh
               </Button>
-              <Button type="button" onClick={onSaveToGithub} disabled={isSaving}>
+              <Button
+                type="button"
+                onClick={() =>
+                  void runAdminAction(
+                    saveGithubKey,
+                    onSaveToGithub,
+                    "Saved to GitHub.",
+                    "Save failed. Try again.",
+                  )
+                }
+                disabled={isSaving}
+                className={actionButtonClass("", actionFeedback[saveGithubKey])}
+              >
                 <Save data-icon="inline-start" />
                 {isSaving ? "Saving" : "Save"}
               </Button>
@@ -3323,6 +3432,8 @@ function AdminView({
                   ) : (
                     pendingProfileRequests.map((request) => {
                       const member = data.members.find((item) => item.id === request.memberId);
+                      const approveProfileKey = `admin:profile-approve:${request.id}`;
+                      const rejectProfileKey = `admin:profile-reject:${request.id}`;
                       return (
                         <div key={request.id} className="rounded-lg border border-sky-200 bg-white p-3">
                           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3372,7 +3483,19 @@ function AdminView({
                                   Open new Drive
                                 </Button>
                               )}
-                              <Button type="button" size="sm" onClick={() => onReviewProfileRequest(request.id, "approved")}>
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={() =>
+                                  void runAdminAction(
+                                    approveProfileKey,
+                                    () => onReviewProfileRequest(request.id, "approved"),
+                                    "Profile approved.",
+                                    "Approve failed. Try again.",
+                                  )
+                                }
+                                className={actionButtonClass("", actionFeedback[approveProfileKey])}
+                              >
                                 <Check data-icon="inline-start" />
                                 Approve
                               </Button>
@@ -3380,8 +3503,18 @@ function AdminView({
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                onClick={() => onReviewProfileRequest(request.id, "rejected")}
-                                className="border border-ink/20 bg-white"
+                                onClick={() =>
+                                  void runAdminAction(
+                                    rejectProfileKey,
+                                    () => onReviewProfileRequest(request.id, "rejected"),
+                                    "Profile rejected.",
+                                    "Reject failed. Try again.",
+                                  )
+                                }
+                                className={actionButtonClass(
+                                  "border border-ink/20 bg-white",
+                                  actionFeedback[rejectProfileKey],
+                                )}
                               >
                                 Reject
                               </Button>
@@ -3417,6 +3550,7 @@ function AdminView({
                       const task = update.taskId
                         ? data.tasks.find((item) => item.id === update.taskId)
                         : undefined;
+                      const markSeenKey = `admin:mark-seen:${update.id}`;
                       return (
                         <div key={update.id} className="rounded-lg border border-yellow-200 bg-white p-3">
                           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3457,7 +3591,23 @@ function AdminView({
                                   Open Drive
                                 </Button>
                               )}
-                              <Button type="button" size="sm" variant="outline" onClick={() => onMarkRepoUpdateSeen(update.id)} className="border border-ink/20 bg-white">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  void runAdminAction(
+                                    markSeenKey,
+                                    () => onMarkRepoUpdateSeen(update.id),
+                                    "Marked done.",
+                                    "Could not mark done.",
+                                  )
+                                }
+                                className={actionButtonClass(
+                                  "border border-ink/20 bg-white",
+                                  actionFeedback[markSeenKey],
+                                )}
+                              >
                                 Done
                               </Button>
                             </div>
@@ -3868,6 +4018,7 @@ function AdminView({
                   ) : (
                     unseenUpdates.map((update) => {
                       const member = data.members.find((item) => item.id === update.memberId);
+                      const settingsMarkSeenKey = `admin:settings-mark-seen:${update.id}`;
                       return (
                         <div key={update.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ink/10 bg-paper p-3">
                           <div>
@@ -3895,7 +4046,25 @@ function AdminView({
                                 Drive
                               </Button>
                             )}
-                            <Button type="button" size="sm" variant="outline" onClick={() => onMarkRepoUpdateSeen(update.id)} className="border border-ink/20 bg-white">Done</Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                void runAdminAction(
+                                  settingsMarkSeenKey,
+                                  () => onMarkRepoUpdateSeen(update.id),
+                                  "Marked done.",
+                                  "Could not mark done.",
+                                )
+                              }
+                              className={actionButtonClass(
+                                "border border-ink/20 bg-white",
+                                actionFeedback[settingsMarkSeenKey],
+                              )}
+                            >
+                              Done
+                            </Button>
                           </div>
                         </div>
                       );
@@ -3914,7 +4083,24 @@ function AdminView({
                         <strong>{item.memberName}</strong>
                         <p className="text-sm">{item.note}</p>
                         <div className="mt-2 flex gap-2">
-                          <Button type="button" size="sm" onClick={() => onSaveQueuedProgress(item)}>Save</Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() =>
+                              void runAdminAction(
+                                `admin:save-queued-progress:${item.id}`,
+                                () => onSaveQueuedProgress(item),
+                                "Progress saved.",
+                                "Progress save failed.",
+                              )
+                            }
+                            className={actionButtonClass(
+                              "",
+                              actionFeedback[`admin:save-queued-progress:${item.id}`],
+                            )}
+                          >
+                            Save
+                          </Button>
                           <Button type="button" size="sm" variant="outline" onClick={() => onDismissQueuedProgress(item.id)} className="border border-ink/20 bg-white">Dismiss</Button>
                         </div>
                       </div>
@@ -5236,7 +5422,7 @@ function LegacyStatsView({
     {
       label: "أفضل أداء",
       value: best?.member.name ?? "N/A",
-      detail: best ? `${best.points} pts / ${best.completed} tasks` : "لسه مفيش بيانات",
+      detail: best ? `Points ${best.points} | Done ${best.completed}` : "لسه مفيش بيانات",
     },
     {
       label: "أعلى نقاط",
@@ -5273,7 +5459,7 @@ function LegacyStatsView({
     {
       label: "الأضعف في الليدر بورد",
       value: worst?.member.name ?? "N/A",
-      detail: worst ? `${worst.points} pts / ${worst.completed} tasks` : "لسه مفيش بيانات",
+      detail: worst ? `Points ${worst.points} | Done ${worst.completed}` : "لسه مفيش بيانات",
     },
   ];
 
@@ -5625,8 +5811,10 @@ function Index() {
       setData(freshData);
       setIsDirty(false);
       setQueueStatus("Data refreshed from the shared backend.");
+      return true;
     } catch (error) {
       setQueueStatus(error instanceof Error ? error.message : "Could not refresh shared data.");
+      return false;
     }
   }, []);
 
@@ -5646,7 +5834,7 @@ function Index() {
   async function saveCurrentData() {
     if (!adminPassword) {
       setSaveStatus("سجل دخول الأدمن مرة تانية عشان نقدر نحفظ.");
-      return;
+      return false;
     }
 
     setIsSaving(true);
@@ -5656,10 +5844,12 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("تم الحفظ على GitHub.");
+      return true;
     } catch (error) {
       setSaveStatus(
         error instanceof Error ? `فشل الحفظ: ${error.message}` : "فشل الحفظ، التغيير لم يتم اعتماده.",
       );
+      return false;
     } finally {
       setIsSaving(false);
     }

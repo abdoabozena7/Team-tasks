@@ -258,6 +258,23 @@ function withReviewEvent(
 }
 
 function normalizeData(data: StudioData): StudioData {
+  const tasks = (data.tasks ?? []).map((task) => ({
+    ...task,
+    scope: task.scope === "member" ? "member" : "all",
+    memberId:
+      task.scope === "member"
+        ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
+        : undefined,
+    memberIds:
+      task.scope === "member"
+        ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
+        : [],
+    startAt: task.startAt ?? task.createdAt,
+    deadlineAt: task.deadlineAt ?? "",
+    status: task.status === "archived" ? "archived" : "active",
+  }));
+  const taskIds = new Set(tasks.map((task) => task.id));
+
   return {
     projectName: data.projectName || "Hivo Studio",
     announcement: data.announcement ?? "",
@@ -272,21 +289,7 @@ function normalizeData(data: StudioData): StudioData {
       driveUrl: member.driveUrl ?? "",
       repoUrl: member.repoUrl ?? "",
     })),
-    tasks: (data.tasks ?? []).map((task) => ({
-      ...task,
-      scope: task.scope === "member" ? "member" : "all",
-      memberId:
-        task.scope === "member"
-          ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
-          : undefined,
-      memberIds:
-        task.scope === "member"
-          ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
-          : [],
-      startAt: task.startAt ?? task.createdAt,
-      deadlineAt: task.deadlineAt ?? "",
-      status: task.status === "archived" ? "archived" : "active",
-    })),
+    tasks,
     responses: data.responses ?? {},
     taskSkips: data.taskSkips ?? {},
     progressUpdates: data.progressUpdates ?? {},
@@ -300,7 +303,9 @@ function normalizeData(data: StudioData): StudioData {
       createdAt: meeting.createdAt || new Date().toISOString(),
     })),
     meetingAttendance: data.meetingAttendance ?? {},
-    repoUpdates: data.repoUpdates ?? [],
+    repoUpdates: (data.repoUpdates ?? []).filter(
+      (update) => !update.taskId || taskIds.has(update.taskId),
+    ),
     profileRequests: data.profileRequests ?? [],
     meta: data.meta ?? { updatedAt: new Date().toISOString() },
   };
@@ -830,6 +835,7 @@ export default {
               responses,
               progressUpdates,
               taskSkips,
+              repoUpdates: (data.repoUpdates ?? []).filter((update) => update.taskId !== taskId),
             };
           }
 
