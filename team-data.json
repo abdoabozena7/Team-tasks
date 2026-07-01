@@ -214,6 +214,18 @@
       "startAt": "2026-07-01T16:41:00.000Z",
       "deadlineAt": "2026-07-05T16:41:00.000Z",
       "status": "active"
+    },
+    {
+      "id": "task-1782924886724",
+      "title": "123",
+      "question": "321",
+      "points": 1,
+      "scope": "member",
+      "memberId": "renad",
+      "createdAt": "2026-07-01T16:54:46.724Z",
+      "startAt": "2026-07-08T16:54:00.000Z",
+      "deadlineAt": "2026-07-10T16:54:00.000Z",
+      "status": "active"
     }
   ],
   "responses": {
@@ -384,6 +396,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-01T16:52:54.107Z"
+    "updatedAt": "2026-07-01T16:54:46.724Z"
   }
 }
