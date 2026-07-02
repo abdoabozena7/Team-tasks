@@ -377,6 +377,26 @@
         "awardedPoints": 1.5,
         "lateSubmission": false,
         "scoreOverride": true
+      },
+      "rodina": {
+        "memberId": "rodina",
+        "memberName": "rodina",
+        "answer": "Manual approval outside the website.",
+        "status": "approved",
+        "submittedAt": "2026-07-02T15:02:14.864Z",
+        "reviewEvents": [
+          {
+            "id": "review-1783004534864",
+            "status": "approved",
+            "reviewedAt": "2026-07-02T15:02:14.864Z",
+            "awardedPoints": 2,
+            "scoreOverride": true
+          }
+        ],
+        "reviewedAt": "2026-07-02T15:02:14.864Z",
+        "awardedPoints": 2,
+        "lateSubmission": false,
+        "scoreOverride": true
       }
     }
   },
@@ -591,6 +611,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T15:00:38.470Z"
+    "updatedAt": "2026-07-02T15:02:14.864Z"
   }
 }
