@@ -281,6 +281,26 @@
         "awardedPoints": 5,
         "lateSubmission": false,
         "scoreOverride": true
+      },
+      "abo-grir": {
+        "memberId": "abo-grir",
+        "memberName": "Abo grir",
+        "answer": "Manual approval outside the website.",
+        "status": "approved",
+        "submittedAt": "2026-07-02T13:59:26.056Z",
+        "reviewEvents": [
+          {
+            "id": "review-1783000766056",
+            "status": "approved",
+            "reviewedAt": "2026-07-02T13:59:26.056Z",
+            "awardedPoints": 3,
+            "scoreOverride": true
+          }
+        ],
+        "reviewedAt": "2026-07-02T13:59:26.056Z",
+        "awardedPoints": 3,
+        "lateSubmission": true,
+        "scoreOverride": true
       }
     },
     "task-1782934576642": {
@@ -308,6 +328,7 @@
   },
   "taskSkips": {},
   "progressUpdates": {},
+  "taskUpdates": {},
   "meetings": [
     {
       "title": "task 1",
@@ -506,6 +527,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T13:33:05.769Z"
+    "updatedAt": "2026-07-02T13:59:26.056Z"
   }
 }
