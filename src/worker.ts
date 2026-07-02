@@ -65,6 +65,13 @@ type TaskProgressUpdate = {
   createdAt: string;
 };
 
+type TaskAnnouncement = {
+  id: string;
+  taskId: string;
+  message: string;
+  createdAt: string;
+};
+
 type Meeting = {
   id: string;
   title: string;
@@ -122,6 +129,7 @@ type StudioData = {
   responses: Record<string, Record<string, TaskResponse>>;
   taskSkips?: Record<string, Record<string, TaskSkip>>;
   progressUpdates?: Record<string, TaskProgressUpdate[]>;
+  taskUpdates?: Record<string, TaskAnnouncement[]>;
   meetings?: Meeting[];
   meetingAttendance?: Record<string, Record<string, MeetingAttendance>>;
   repoUpdates?: RepoUpdate[];
@@ -293,6 +301,22 @@ function normalizeData(data: StudioData): StudioData {
     responses: data.responses ?? {},
     taskSkips: data.taskSkips ?? {},
     progressUpdates: data.progressUpdates ?? {},
+    taskUpdates: Object.fromEntries(
+      Object.entries(data.taskUpdates ?? {})
+        .filter(([taskId]) => taskIds.has(taskId))
+        .map(([taskId, updates]) => [
+          taskId,
+          updates
+            .filter((update) => update.message?.trim())
+            .map((update) => ({
+              ...update,
+              taskId,
+              message: update.message.trim(),
+              createdAt: update.createdAt || new Date().toISOString(),
+            }))
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+        ]),
+    ),
     meetings: (data.meetings ?? []).map((meeting) => ({
       ...meeting,
       title: meeting.title || "Meeting",
@@ -535,6 +559,27 @@ function mergeProgressUpdates(latest: StudioData, incoming: StudioData) {
   return progressUpdates;
 }
 
+function mergeTaskUpdates(latest: StudioData, incoming: StudioData) {
+  const allowedTaskIds = new Set(incoming.tasks.map((task) => task.id));
+  const taskIds = new Set([
+    ...Object.keys(latest.taskUpdates ?? {}),
+    ...Object.keys(incoming.taskUpdates ?? {}),
+  ]);
+  const taskUpdates: NonNullable<StudioData["taskUpdates"]> = {};
+
+  for (const taskId of taskIds) {
+    if (!allowedTaskIds.has(taskId)) continue;
+    const byId = new Map<string, TaskAnnouncement>();
+    for (const update of latest.taskUpdates?.[taskId] ?? []) byId.set(update.id, update);
+    for (const update of incoming.taskUpdates?.[taskId] ?? []) byId.set(update.id, update);
+    taskUpdates[taskId] = Array.from(byId.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }
+
+  return taskUpdates;
+}
+
 function mergeTaskSkips(latest: StudioData, incoming: StudioData) {
   const allowedTaskIds = new Set(incoming.tasks.map((task) => task.id));
   const taskIds = new Set([
@@ -596,6 +641,7 @@ function mergeAdminReplacement(latest: StudioData, incomingPayload: StudioData) 
     responses: mergeResponses(latest, incoming),
     taskSkips: mergeTaskSkips(latest, incoming),
     progressUpdates: mergeProgressUpdates(latest, incoming),
+    taskUpdates: mergeTaskUpdates(latest, incoming),
     meetingAttendance: mergeMeetingAttendance(latest, incoming),
     repoUpdates: mergeRepoUpdates(latest, incoming),
     profileRequests: mergeProfileRequests(latest, incoming),
@@ -820,21 +866,44 @@ export default {
             };
           }
 
+          if (action === "addTaskUpdate") {
+            const taskId = String(payload.taskId ?? "");
+            getTask(data, taskId);
+            const message = String(payload.message ?? "").trim();
+            if (!message) throw new Error("Task update message is required.");
+            const update: TaskAnnouncement = {
+              id: `task-update-${taskId}-${Date.now()}`,
+              taskId,
+              message,
+              createdAt: new Date().toISOString(),
+            };
+            return {
+              ...data,
+              taskUpdates: {
+                ...(data.taskUpdates ?? {}),
+                [taskId]: [update, ...((data.taskUpdates ?? {})[taskId] ?? [])],
+              },
+            };
+          }
+
           if (action === "removeTask") {
             const taskId = String(payload.taskId ?? "");
             getTask(data, taskId);
             const responses = { ...data.responses };
             const progressUpdates = { ...(data.progressUpdates ?? {}) };
             const taskSkips = { ...(data.taskSkips ?? {}) };
+            const taskUpdates = { ...(data.taskUpdates ?? {}) };
             delete responses[taskId];
             delete progressUpdates[taskId];
             delete taskSkips[taskId];
+            delete taskUpdates[taskId];
             return {
               ...data,
               tasks: data.tasks.filter((task) => task.id !== taskId),
               responses,
               progressUpdates,
               taskSkips,
+              taskUpdates,
               repoUpdates: (data.repoUpdates ?? []).filter((update) => update.taskId !== taskId),
             };
           }

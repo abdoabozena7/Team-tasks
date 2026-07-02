@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ClipboardList,
+  Copy,
   Crown,
   ExternalLink,
   Eye,
@@ -114,6 +115,13 @@ type TaskProgressUpdate = {
   createdAt: string;
 };
 
+type TaskAnnouncement = {
+  id: string;
+  taskId: string;
+  message: string;
+  createdAt: string;
+};
+
 type Meeting = {
   id: string;
   title: string;
@@ -211,6 +219,7 @@ type StudioData = {
   responses: Record<string, Record<string, TaskResponse>>;
   taskSkips?: Record<string, Record<string, TaskSkip>>;
   progressUpdates?: Record<string, TaskProgressUpdate[]>;
+  taskUpdates?: Record<string, TaskAnnouncement[]>;
   meetings?: Meeting[];
   meetingAttendance?: Record<string, Record<string, MeetingAttendance>>;
   repoUpdates?: RepoUpdate[];
@@ -275,6 +284,7 @@ const MEMBER_DRAFTS_KEY = "hivo-studio-member-drafts";
 const MEMBER_SENT_STATE_KEY = "hivo-studio-member-sent-state";
 const LOCAL_QUEUE_KEY = "hivo-studio-local-admin-queue";
 const SEEN_MEETINGS_KEY = "hivo-studio-seen-meetings";
+const SEEN_TASK_UPDATES_KEY = "hivo-studio-seen-task-updates";
 const GITHUB_OWNER = "abdoabozena7";
 const GITHUB_REPO = "Team-tasks";
 const GITHUB_BRANCH = "main";
@@ -298,6 +308,7 @@ const DEFAULT_DATA: StudioData = {
   responses: {},
   taskSkips: {},
   progressUpdates: {},
+  taskUpdates: {},
   meetings: [],
   meetingAttendance: {},
   repoUpdates: [],
@@ -336,6 +347,25 @@ function readSeenMeetingIds(memberId: string) {
 function writeSeenMeetingIds(memberId: string, ids: string[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(seenMeetingsStorageKey(memberId), JSON.stringify(uniqueText(ids)));
+}
+
+function seenTaskUpdatesStorageKey(memberId: string) {
+  return `${SEEN_TASK_UPDATES_KEY}:${memberId}`;
+}
+
+function readSeenTaskUpdateIds(memberId: string) {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(seenTaskUpdatesStorageKey(memberId)) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSeenTaskUpdateIds(memberId: string, ids: string[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(seenTaskUpdatesStorageKey(memberId), JSON.stringify(uniqueText(ids)));
 }
 
 function isStatsLoginName(value: string) {
@@ -468,6 +498,22 @@ function sanitizeData(data: StudioData): StudioData {
     responses: data.responses ?? {},
     taskSkips: data.taskSkips ?? {},
     progressUpdates: data.progressUpdates ?? {},
+    taskUpdates: Object.fromEntries(
+      Object.entries(data.taskUpdates ?? {})
+        .filter(([taskId]) => taskIds.has(taskId))
+        .map(([taskId, updates]) => [
+          taskId,
+          updates
+            .filter((update) => update.message?.trim())
+            .map((update) => ({
+              ...update,
+              taskId,
+              message: update.message.trim(),
+              createdAt: update.createdAt || new Date().toISOString(),
+            }))
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+        ]),
+    ),
     meetings: (data.meetings ?? []).map((meeting) => ({
       ...meeting,
       title: meeting.title || "Meeting",
@@ -1290,6 +1336,11 @@ function MemberView({
   const [seenMeetingIds, setSeenMeetingIds] = useState(() =>
     readSeenMeetingIds(activeMember.member.id),
   );
+  const [seenTaskUpdateIds, setSeenTaskUpdateIds] = useState(() =>
+    readSeenTaskUpdateIds(activeMember.member.id),
+  );
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState("");
   const [nowTime, setNowTime] = useState(() => Date.now());
   const memberTasks = data.tasks.filter((task) => {
     if (!taskIsForMember(task, activeMember.member.id)) return false;
@@ -1304,6 +1355,17 @@ function MemberView({
     const seenIds = new Set(seenMeetingIds);
     return memberVisibleMeetings(data.meetings ?? [], nowDate).filter((meeting) => !seenIds.has(meeting.id));
   }, [data.meetings, nowDate, seenMeetingIds]);
+  const visibleTaskUpdateNotices = useMemo(() => {
+    const seenIds = new Set(seenTaskUpdateIds);
+    return memberTasks
+      .map((task) => ({
+        task,
+        updates: (data.taskUpdates?.[task.id] ?? []).filter((update) => !seenIds.has(update.id)),
+      }))
+      .filter((item) => item.updates.length > 0);
+  }, [data.taskUpdates, memberTasks, seenTaskUpdateIds]);
+  const expandedTask = expandedTaskId ? memberTasks.find((task) => task.id === expandedTaskId) : undefined;
+  const expandedTaskUpdates = expandedTask ? data.taskUpdates?.[expandedTask.id] ?? [] : [];
   const activeMemberScore = useMemo(
     () => stats.memberStats.find((item) => item.member.id === activeMember.member.id),
     [activeMember.member.id, stats.memberStats],
@@ -1334,12 +1396,22 @@ function MemberView({
 
   useEffect(() => {
     setSeenMeetingIds(readSeenMeetingIds(activeMember.member.id));
+    setSeenTaskUpdateIds(readSeenTaskUpdateIds(activeMember.member.id));
   }, [activeMember.member.id]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowTime(Date.now()), 30000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!expandedTaskId) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [expandedTaskId]);
 
   async function refreshMemberData() {
     setRefreshing(true);
@@ -1363,6 +1435,21 @@ function MemberView({
       writeSeenMeetingIds(activeMember.member.id, next);
       return next;
     });
+  }
+
+  function markTaskUpdatesSeen(updateIds: string[]) {
+    setSeenTaskUpdateIds((current) => {
+      const next = uniqueText([...current, ...updateIds]);
+      writeSeenTaskUpdateIds(activeMember.member.id, next);
+      return next;
+    });
+  }
+
+  async function copyExpandedTaskText() {
+    if (!expandedTask) return;
+    await copyTextToClipboard(buildTaskCopyText(expandedTask, expandedTaskUpdates));
+    setCopyFeedback("Copied.");
+    window.setTimeout(() => setCopyFeedback(""), 2000);
   }
 
   function setMemberFeedback(key: string, feedback: ActionFeedback) {
@@ -1500,6 +1587,80 @@ function MemberView({
         </div>
       )}
 
+      {expandedTask && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 px-4 py-6">
+          <section
+            data-testid="task-details-modal"
+            className="scrollbar-none max-h-[88vh] w-full max-w-2xl overflow-y-auto overscroll-contain border-[2.5px] border-ink bg-card p-4 doodle-shadow"
+            style={{ borderRadius: "22px 28px 18px 26px / 24px 18px 28px 20px" }}
+          >
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-wide text-foreground/50">
+                  Task details
+                </p>
+                <h2
+                  className={cn("mt-1 break-words text-2xl font-bold", textAlignClass(expandedTask.title))}
+                  dir={textDirection(expandedTask.title)}
+                >
+                  {expandedTask.title}
+                </h2>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => setExpandedTaskId(null)}
+                className="shrink-0 border-[2px] border-ink bg-white"
+                aria-label="Close task details"
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+            <div
+              className={cn(
+                "rounded-xl border-[2px] border-ink/20 bg-paper p-3",
+                textAlignClass(expandedTask.question),
+              )}
+              dir={textDirection(expandedTask.question)}
+            >
+              <TaskMessageBody text={expandedTask.question} />
+            </div>
+            {expandedTaskUpdates.length > 0 && (
+              <div className="mt-4 grid gap-2">
+                <h3 className="font-bold">Task updates</h3>
+                {expandedTaskUpdates.map((update) => (
+                  <div
+                    key={update.id}
+                    className={cn(
+                      "rounded-lg border border-sky-200 bg-sky-50 p-3",
+                      textAlignClass(update.message),
+                    )}
+                    dir={textDirection(update.message)}
+                  >
+                    <TaskMessageBody text={update.message} compact />
+                    <p className="mt-1 text-xs font-bold text-sky-900/55">
+                      {formatDateTime(update.createdAt)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                onClick={() => void copyExpandedTaskText()}
+                className="border-[2px] border-ink doodle-shadow-sm"
+              >
+                <Copy data-icon="inline-start" />
+                Copy task text
+              </Button>
+              {copyFeedback && <span className="text-sm font-bold text-emerald-700">{copyFeedback}</span>}
+            </div>
+          </section>
+        </div>
+      )}
+
       <div className="mx-auto max-w-4xl px-5 py-10 md:py-14">
         <div className="mb-4 flex justify-end gap-3">
           <button
@@ -1609,6 +1770,53 @@ function MemberView({
           </section>
         )}
 
+        {visibleTaskUpdateNotices.length > 0 && (
+          <section
+            className="mb-7 grid gap-3 border-[2.5px] border-yellow-700 bg-yellow-50 p-4 text-yellow-950 doodle-shadow-sm"
+            style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
+          >
+            {visibleTaskUpdateNotices.map(({ task, updates }) => {
+              const latestUpdate = updates[0];
+              return (
+                <div key={task.id} className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold uppercase tracking-wide text-yellow-800">
+                      تحديث جديد على التاسك
+                    </p>
+                    <h2
+                      className={cn("mt-1 break-words text-xl font-bold", textAlignClass(task.title))}
+                      dir={textDirection(task.title)}
+                    >
+                      {task.title}
+                    </h2>
+                    <p
+                      className={cn("mt-1 text-sm font-bold leading-6 text-yellow-900/80", textAlignClass(latestUpdate.message))}
+                      dir={textDirection(latestUpdate.message)}
+                    >
+                      {latestUpdate.message}
+                    </p>
+                    {updates.length > 1 && (
+                      <p className="mt-1 text-xs font-bold text-yellow-900/60">
+                        +{updates.length - 1} تحديث كمان
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => markTaskUpdatesSeen(updates.map((update) => update.id))}
+                    className="shrink-0 border border-yellow-700 bg-white text-yellow-950"
+                  >
+                    <Eye data-icon="inline-start" />
+                    Seen
+                  </Button>
+                </div>
+              );
+            })}
+          </section>
+        )}
+
         {activeMember.member.publicFlag?.trim() && (
           <section
             className="mb-7 border-[2.5px] border-red-700 bg-red-50 p-4 text-lg font-bold text-red-700 doodle-shadow-sm"
@@ -1678,6 +1886,9 @@ function MemberView({
               const taskQuestionDir = textDirection(task.question);
               const taskQuestionLooksLight =
                 task.question.trim().length <= 90 && task.question.trim().split(/\s+/).length <= 12;
+              const taskQuestionIsLong =
+                task.question.trim().length > 180 || task.question.trim().split(/\n/).length > 3;
+              const taskUpdates = data.taskUpdates?.[task.id] ?? [];
               const taskPoints = sanitizePositiveNumber(task.points, 1);
               const taskAudienceLabel = task.scope === "all" ? "تاسك عام لكل التيم" : "تاسك مخصص ليك";
               const taskPointsLabel = formatTaskPointsLabel(taskPoints);
@@ -1730,16 +1941,49 @@ function MemberView({
                       </span>
                     )}
                   </div>
-                  <p
+                  <button
+                    type="button"
+                    data-testid={`task-text-preview-${task.id}`}
+                    onClick={() => {
+                      setExpandedTaskId(task.id);
+                      setCopyFeedback("");
+                    }}
                     className={cn(
-                      "mb-4 leading-7",
+                      "mb-4 w-full rounded-xl text-start leading-7 transition",
+                      taskQuestionIsLong
+                        ? "border-[2px] border-ink/20 bg-paper/70 p-3 hover:border-ink/45 hover:bg-white"
+                        : "border-0 bg-transparent p-0",
                       taskQuestionLooksLight ? "text-lg font-semibold leading-8" : "text-base",
                       textAlignClass(task.question),
                     )}
                     dir={taskQuestionDir}
                   >
-                    {task.question}
-                  </p>
+                    <span
+                      className="block whitespace-pre-wrap"
+                      style={
+                        taskQuestionIsLong
+                          ? {
+                              display: "-webkit-box",
+                              WebkitLineClamp: 4,
+                              WebkitBoxOrient: "vertical",
+                              overflow: "hidden",
+                            }
+                          : undefined
+                      }
+                    >
+                      {task.question}
+                    </span>
+                    {taskQuestionIsLong && (
+                      <span className="mt-2 inline-flex rounded-full border border-ink/20 bg-white px-3 py-1 text-xs font-bold text-foreground/60">
+                        افتح الكلام كله
+                      </span>
+                    )}
+                    {taskUpdates.length > 0 && (
+                      <span className="mt-2 block text-xs font-bold text-sky-700">
+                        فيه {taskUpdates.length} تحديث إضافي
+                      </span>
+                    )}
+                  </button>
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <strong className="text-base">اكتب الرد أو التحديث</strong>
                   </div>
@@ -2090,6 +2334,90 @@ function formatDateTime(value?: string) {
   return date.toLocaleString();
 }
 
+function buildTaskCopyText(task: StudioTask, updates: TaskAnnouncement[]) {
+  const parts = [
+    `Task: ${task.title}`,
+    `Deadline: ${formatDateTime(task.deadlineAt)}`,
+    `Points: ${sanitizePositiveNumber(task.points, 1)}`,
+    "",
+    task.question,
+  ];
+
+  if (updates.length > 0) {
+    parts.push(
+      "",
+      "Task updates:",
+      ...updates.map((update) => `${formatDateTime(update.createdAt)}\n${update.message}`),
+    );
+  }
+
+  return parts.join("\n").trim();
+}
+
+async function copyTextToClipboard(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+function TaskMessageBody({ text, compact = false }: { text: string; compact?: boolean }) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+
+  return (
+    <div className={cn("grid", compact ? "gap-1.5" : "gap-2.5")}>
+      {lines.map((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={`${index}-space`} className={compact ? "h-1" : "h-2"} />;
+        if (/^-{3,}$/.test(trimmed)) {
+          return <div key={`${index}-rule`} className="my-2 border-t-[2px] border-ink/15" />;
+        }
+
+        const isNumbered = /^\d+[\).]\s+/.test(trimmed);
+        const isBullet = /^[-*•]\s+/.test(trimmed);
+        const isHeading =
+          !isNumbered &&
+          !isBullet &&
+          trimmed.length <= 72 &&
+          !/[.!?؟،,;:]$/.test(trimmed);
+        const direction = textDirection(trimmed);
+
+        return (
+          <p
+            key={`${index}-${trimmed.slice(0, 16)}`}
+            dir={direction}
+            className={cn(
+              "break-words",
+              textAlignClass(trimmed),
+              isHeading
+                ? compact
+                  ? "text-base font-bold text-foreground"
+                  : "mt-1 text-lg font-bold text-foreground"
+                : compact
+                  ? "text-sm leading-6 text-foreground/85"
+                  : "text-base leading-8 text-foreground/90",
+              isNumbered && "font-bold",
+              isBullet && (direction === "rtl" ? "pe-3" : "ps-3"),
+            )}
+          >
+            {trimmed}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 function toDateTimeInputValue(value?: string) {
   if (!value) return "";
   const date = new Date(value);
@@ -2335,6 +2663,7 @@ function AdminView({
   onLogout,
   onAddTask,
   onUpdateTask,
+  onAddTaskUpdate,
   onAddMeeting,
   onUpdateMeeting,
   onRecordMeetingAttendance,
@@ -2370,6 +2699,7 @@ function AdminView({
   onLogout: () => void;
   onAddTask: (task: Omit<StudioTask, "id" | "createdAt">) => ActionResult;
   onUpdateTask: (taskId: string, updates: Partial<StudioTask>) => ActionResult;
+  onAddTaskUpdate: (taskId: string, message: string) => ActionResult;
   onAddMeeting: (meeting: Omit<Meeting, "id" | "createdAt">) => ActionResult;
   onUpdateMeeting: (meetingId: string, updates: Partial<Meeting>) => ActionResult;
   onRecordMeetingAttendance: (meeting: Meeting, member: Member) => ActionResult;
@@ -2426,6 +2756,7 @@ function AdminView({
   const [taskEditDrafts, setTaskEditDrafts] = useState<
     Record<string, { title: string; question: string; points: string; scope: "all" | "member"; memberIds: string[] }>
   >({});
+  const [taskUpdateDrafts, setTaskUpdateDrafts] = useState<Record<string, string>>({});
   const [logMode, setLogMode] = useState<"task" | "member">("task");
   const [query, setQuery] = useState("");
   const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
@@ -2763,7 +3094,10 @@ function AdminView({
     const archiveTaskKey = `admin:archive-task:${task.id}`;
     const restoreTaskKey = `admin:restore-task:${task.id}`;
     const deleteTaskKey = `admin:delete-task:${task.id}`;
+    const taskUpdateKey = `admin:task-update:${task.id}`;
     const editDraft = taskEditDraft(task);
+    const taskUpdateDraft = taskUpdateDrafts[task.id] ?? "";
+    const taskUpdates = data.taskUpdates?.[task.id] ?? [];
 
     return (
       <section className="min-w-0 rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
@@ -2959,6 +3293,66 @@ function AdminView({
             </div>
             <ActionFeedbackLine feedback={actionFeedback[saveTaskKey]} />
           </div>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-sky-100 bg-sky-50 p-3">
+          <div className="mb-3 flex items-center gap-2 font-bold text-sky-950">
+            <Bell className="size-4" />
+            Send task update
+          </div>
+          <Textarea
+            value={taskUpdateDraft}
+            onChange={(event) =>
+              setTaskUpdateDrafts((current) => ({
+                ...current,
+                [task.id]: event.target.value,
+              }))
+            }
+            placeholder="اكتب تحديث جديد يظهر للناس فوق التاسك من غير ما تغير الوصف الأصلي..."
+            className="min-h-20 border border-sky-200 bg-white"
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              data-testid={`admin-add-task-update-${task.id}`}
+              onClick={() => {
+                if (!taskUpdateDraft.trim()) {
+                  blockAdminAction(taskUpdateKey, ["task update message"]);
+                  return;
+                }
+                void runAdminAction(
+                  taskUpdateKey,
+                  () => onAddTaskUpdate(task.id, taskUpdateDraft.trim()),
+                  "Task update sent.",
+                  "Task update failed. Try again.",
+                ).then((ok) => {
+                  if (ok) {
+                    setTaskUpdateDrafts((current) => ({ ...current, [task.id]: "" }));
+                  }
+                });
+              }}
+              className={actionButtonClass("bg-sky-500 text-white hover:bg-sky-600", actionFeedback[taskUpdateKey])}
+            >
+              <Bell data-icon="inline-start" />
+              Send update
+            </Button>
+            <span className="text-xs font-bold text-sky-900/65">
+              ده إضافة جديدة للتاسك، مش تعديل على الكلام القديم.
+            </span>
+          </div>
+          <ActionFeedbackLine feedback={actionFeedback[taskUpdateKey]} />
+          {taskUpdates.length > 0 && (
+            <div className="mt-3 grid gap-2 border-t border-sky-200 pt-3">
+              {taskUpdates.map((update) => (
+                <div key={update.id} className="rounded-md border border-sky-200 bg-white p-2 text-sm">
+                  <p className="whitespace-pre-wrap leading-6">{update.message}</p>
+                  <p className="mt-1 text-xs font-bold text-foreground/45">
+                    {formatDateTime(update.createdAt)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr]">
@@ -6363,6 +6757,31 @@ function Index() {
     }
   }
 
+  async function addTaskUpdate(taskId: string, message: string) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Sending task update...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "addTaskUpdate", {
+        taskId,
+        message: message.trim(),
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Task update sent.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   function addMeeting(meeting: Omit<Meeting, "id" | "createdAt">) {
     updateData((current) => ({
       ...current,
@@ -6953,6 +7372,7 @@ function Index() {
         onLogout={logout}
         onAddTask={addTask}
         onUpdateTask={updateTask}
+        onAddTaskUpdate={addTaskUpdate}
         onAddMeeting={addMeeting}
         onUpdateMeeting={updateMeeting}
         onRecordMeetingAttendance={recordMeetingAttendance}

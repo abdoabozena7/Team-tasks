@@ -254,6 +254,15 @@
   perspective: 900px;
 }
 
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 .leaderboard-podium-shell {
   border: 3px solid var(--ink);
   border-radius: 22px 26px 20px 24px / 24px 20px 28px 22px;
