@@ -615,6 +615,15 @@
   },
   "repoUpdates": [
     {
+      "id": "repo-manual-tasneem-task-1782933583973-1783006553171",
+      "memberId": "tasneem",
+      "taskId": "task-1782933583973",
+      "source": "manual",
+      "excerpt": "GitHub attention requested for single agent code",
+      "createdAt": "2026-07-02T15:35:53.171Z",
+      "seen": false
+    },
+    {
       "id": "repo-manual-abozena-task-1782984779472-1783001409260",
       "memberId": "abozena",
       "taskId": "task-1782984779472",
@@ -658,6 +667,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T15:10:06.052Z"
+    "updatedAt": "2026-07-02T15:35:53.171Z"
   }
 }
