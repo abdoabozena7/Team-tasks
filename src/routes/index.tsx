@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ClipboardList,
+  Crown,
   ExternalLink,
   Eye,
   EyeOff,
@@ -993,11 +994,16 @@ function LeaderboardStatPill({
   className?: string;
 }) {
   return (
-    <span className={cn("min-w-0 rounded-md border-[2px] border-ink bg-white/85 px-2 py-1 text-center", className)}>
-      <span className="block text-[10px] font-bold leading-none text-foreground/50">
+    <span
+      className={cn(
+        "min-w-0 rounded-md border-[1.5px] border-ink bg-white/90 px-2 py-1.5 text-center shadow-[1px_1px_0_0_var(--ink)]",
+        className,
+      )}
+    >
+      <span className="block text-base font-bold leading-none">{value}</span>
+      <span className="mt-1 block text-[10px] font-semibold leading-none text-foreground/55">
         {label}
       </span>
-      <span className="mt-1 block text-sm font-bold leading-none">{value}</span>
     </span>
   );
 }
@@ -1005,6 +1011,13 @@ function LeaderboardStatPill({
 function memberArabicName(member: Member) {
   const arabicAlias = member.aliases.find((alias) => /[\u0600-\u06FF]/.test(alias));
   return arabicAlias?.trim() || member.name;
+}
+
+function podiumMemberName(member: Member) {
+  const name = memberArabicName(member);
+  if (/يوسف|yossef|youssef|yousef/i.test(name)) return "يوسف";
+  if (/grir|grier|جري/i.test(name)) return "أبو جرير";
+  return name;
 }
 
 function textDirection(value: string) {
@@ -1024,90 +1037,206 @@ function formatTaskPointsLabel(points: number) {
 
 function Leaderboard({ scores }: { scores: MemberScore[] }) {
   const [openMemberId, setOpenMemberId] = useState("");
-  const worstMemberId = scores[scores.length - 1]?.member.id;
+  const leader = scores[0];
+  const podiumSideMembers = scores.slice(1, 3);
+  const remainingMembers = scores.slice(3);
+  const worstRemainingId = remainingMembers[remainingMembers.length - 1]?.member.id;
+
+  function renderExpandedDetails(item: MemberScore, isOpen: boolean) {
+    if (!isOpen) return null;
+    return (
+      <div className="relative z-10">
+        <MemberDetails item={item} />
+      </div>
+    );
+  }
+
+  function renderPodiumCard(
+    item: MemberScore,
+    rank: number,
+    options: { featured?: boolean; side?: "left" | "right" } = {},
+  ) {
+    const isOpen = openMemberId === item.member.id;
+
+    return (
+      <button
+        key={item.member.id}
+        type="button"
+        onClick={() => setOpenMemberId(isOpen ? "" : item.member.id)}
+        className={cn(
+          "leaderboard-podium-card group relative text-right transition",
+          options.featured ? "leaderboard-podium-card-featured" : "leaderboard-podium-card-side",
+          !options.featured ? "leaderboard-podium-card-rank-float" : "",
+          options.side === "left" ? "leaderboard-podium-card-left" : "",
+          options.side === "right" ? "leaderboard-podium-card-right" : "",
+        )}
+        style={{
+          borderRadius: options.featured
+            ? "18px 22px 16px 24px / 22px 16px 24px 18px"
+            : "16px 18px 14px 20px / 18px 14px 20px 16px",
+        }}
+      >
+        <div className="relative z-10 grid gap-3">
+          <div className={cn("leaderboard-podium-head", options.featured ? "leaderboard-podium-head-featured" : "")}>
+            {options.featured && (
+              <span className="leaderboard-crown-mark" aria-hidden="true">
+                <Crown className="size-5" />
+              </span>
+            )}
+            <span
+              className={cn(
+                options.featured
+                  ? "inline-flex items-center justify-center gap-2"
+                  : "leaderboard-side-name-wrap",
+              )}
+            >
+              {!options.featured && (
+                <span
+                  className={cn(
+                    "leaderboard-badge leaderboard-side-rank-badge grid shrink-0 place-items-center rounded-full border-[2px] border-ink font-bold",
+                    rankingBadgeClass(rank - 1),
+                  )}
+                >
+                  {rank}
+                </span>
+              )}
+              {options.featured && (
+                <span
+                  className={cn(
+                    "leaderboard-badge grid size-10 shrink-0 place-items-center rounded-full border-[2px] border-ink text-lg font-bold",
+                    rankingBadgeClass(rank - 1),
+                  )}
+                >
+                  {rank}
+                </span>
+              )}
+              <span
+                className={cn(
+                  "min-w-0 break-words text-center font-semibold leading-tight",
+                  options.featured ? "text-lg sm:text-xl" : "leaderboard-side-member-name",
+                )}
+              >
+                {podiumMemberName(item.member)}
+              </span>
+            </span>
+            {options.featured && <span className="leaderboard-top-tag shrink-0">متصدر</span>}
+          </div>
+
+          <div className="grid justify-items-center gap-2 text-center">
+            <span
+              className={cn(
+                "rounded-full border-[2px] border-ink bg-accent px-3 py-1 text-center font-bold shadow-[2px_2px_0_0_var(--ink)]",
+                options.featured ? "text-lg" : "text-sm",
+              )}
+            >
+              {item.points} نقطة
+            </span>
+            <span className="leaderboard-podium-review">
+              <span>
+                <strong>{item.approved}</strong>
+                <small>Accepted</small>
+              </span>
+              <span>
+                <strong>{item.rejected}</strong>
+                <small>Rejected</small>
+              </span>
+            </span>
+          </div>
+        </div>
+        {renderExpandedDetails(item, isOpen)}
+      </button>
+    );
+  }
+
+  function renderListRow(item: MemberScore, rank: number) {
+    const isOpen = openMemberId === item.member.id;
+    const isWorst = item.member.id === worstRemainingId && remainingMembers.length > 0;
+    const progressWidth =
+      item.assignedTasks > 0 && item.completed > 0
+        ? Math.max(8, Math.min(100, (item.completed / item.assignedTasks) * 100))
+        : 0;
+
+    return (
+      <button
+        key={item.member.id}
+        type="button"
+        onClick={() => setOpenMemberId(isOpen ? "" : item.member.id)}
+        className={cn(
+          "leaderboard-list-row group relative overflow-hidden text-right transition",
+          isWorst ? "leaderboard-list-row-worst" : "leaderboard-list-row-normal",
+        )}
+        style={{ borderRadius: "16px 18px 14px 20px / 18px 14px 20px 16px" }}
+      >
+        <div className="relative z-10 grid gap-3">
+          <div className="flex items-center justify-between gap-3" dir="rtl">
+            <span className="inline-flex min-w-0 items-center gap-2">
+              <span
+                className={cn(
+                  "leaderboard-badge grid size-8 shrink-0 place-items-center rounded-full border-[2px] border-ink text-sm font-bold",
+                  rankingBadgeClass(rank - 1),
+                )}
+              >
+                {rank}
+              </span>
+              <span className="min-w-0 break-words text-right text-base font-semibold leading-tight">
+                {memberArabicName(item.member)}
+              </span>
+            </span>
+            <span className="inline-flex flex-wrap items-center justify-end gap-2">
+              {isWorst && <span className="leaderboard-warning-tag">يحتاج متابعة</span>}
+              {item.member.publicFlag && (
+                <span className="shrink-0 text-xs font-bold text-red-600">
+                  {item.member.publicFlag}
+                </span>
+              )}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-3" dir="rtl">
+            <span className="text-sm font-bold text-foreground/70">
+              {item.points} نقطة
+            </span>
+            <span className="text-xs font-bold text-foreground/55">
+              القبول {formatPercent(item.approvalRate)}
+            </span>
+          </div>
+
+          <span className="grid grid-cols-4 gap-2" dir="ltr">
+            <LeaderboardStatPill label="درجات" value={item.points} />
+            <LeaderboardStatPill label="مقبول" value={item.approved} className="bg-emerald-100/70" />
+            <LeaderboardStatPill label="Assigned" value={item.assignedTasks} className="bg-sky-100/70" />
+            <LeaderboardStatPill label="مرفوض" value={item.rejected} className="bg-red-100/70" />
+          </span>
+
+          <span className="block h-2 overflow-hidden rounded-full border border-ink/80 bg-white/75" dir="ltr">
+            <span
+              className="leaderboard-progress block h-full rounded-full bg-emerald-400"
+              style={{ width: `${progressWidth}%` }}
+            />
+          </span>
+        </div>
+        {renderExpandedDetails(item, isOpen)}
+      </button>
+    );
+  }
 
   return (
-    <div className="leaderboard-stage grid gap-3 md:grid-cols-2" dir="rtl">
-      {scores.map((item, index) => {
-        const isLeader = index === 0;
-        const isWorst = item.member.id === worstMemberId && scores.length > 1;
-        const isOpen = openMemberId === item.member.id;
-        const rowColor = isLeader ? "bg-yellow-50" : isWorst ? "bg-red-50" : "bg-white";
-        const currentSubmitted = Math.max(0, item.submitted - item.baseCompleted);
-        const progressWidth =
-          item.assignedTasks > 0 && item.responseRate > 0
-            ? Math.max(8, Math.min(100, item.responseRate))
-            : 0;
+    <div className="leaderboard-stage grid gap-4" dir="rtl">
+      {scores.length > 0 && (
+        <div className="leaderboard-podium-shell">
+          <div className="leaderboard-podium-grid">
+            {podiumSideMembers[0] ? renderPodiumCard(podiumSideMembers[0], 2, { side: "left" }) : <div />}
+            {leader ? renderPodiumCard(leader, 1, { featured: true }) : <div />}
+            {podiumSideMembers[1] ? renderPodiumCard(podiumSideMembers[1], 3, { side: "right" }) : <div />}
+          </div>
+        </div>
+      )}
 
-        return (
-          <button
-            key={item.member.id}
-            type="button"
-            onClick={() => setOpenMemberId(isOpen ? "" : item.member.id)}
-            className={`leaderboard-row group relative overflow-hidden text-right border-[2.5px] border-ink px-3 py-3 doodle-shadow-sm transition ${rowColor} ${
-              isLeader ? "leaderboard-row-top md:col-span-2" : ""
-            }`}
-            style={{
-              borderRadius: "14px 18px 12px 16px / 16px 12px 18px 14px",
-              animationDelay: `${index * 80}ms`,
-            }}
-          >
-            <div className="relative z-10 grid gap-3">
-              <div className="grid justify-items-end gap-1.5">
-                <span className="block w-full text-right">
-                  <span
-                    className="flex w-full flex-wrap items-start justify-between gap-1.5 text-lg font-bold leading-tight sm:text-xl"
-                    dir="rtl"
-                  >
-                    <span className="inline-flex min-w-0 shrink-0 items-center gap-1.5" dir="rtl">
-                      <span
-                        className={`leaderboard-badge grid size-11 shrink-0 place-items-center rounded-full border-[2.5px] border-ink font-bold ${rankingBadgeClass(
-                          index,
-                        )}`}
-                      >
-                        {index + 1}
-                      </span>
-                      <span className="min-w-0 break-words text-right">{memberArabicName(item.member)}</span>
-                    </span>
-                    <span className="ml-2 inline-flex min-w-0 flex-wrap items-center justify-end gap-2.5 sm:ml-3">
-                      {isLeader && <span className="leaderboard-top-tag shrink-0">متصدر</span>}
-                      {isWorst && (
-                        <span className="shrink-0 rounded-full border border-red-200 bg-white px-2 py-0.5 text-xs font-bold text-red-700">
-                          يحتاج متابعة
-                        </span>
-                      )}
-                      {item.member.publicFlag && (
-                        <span className="shrink-0 text-xs font-bold text-red-600">
-                          {item.member.publicFlag}
-                        </span>
-                      )}
-                    </span>
-                  </span>
-                  <span className="mt-1 block w-full text-right text-xs font-bold leading-5 text-foreground/55">
-                    القبول {formatPercent(item.approvalRate)}
-                  </span>
-                </span>
-              </div>
-              <span className="block h-2 overflow-hidden rounded-full border-[1.5px] border-ink bg-white/70" dir="ltr">
-                <span
-                  className="leaderboard-progress block h-full rounded-full bg-emerald-400"
-                  style={{ width: `${progressWidth}%` }}
-                />
-              </span>
-              <span className="grid min-w-0 grid-cols-3 gap-1">
-                <LeaderboardStatPill label="أخذ" value={item.assignedTasks} />
-                <LeaderboardStatPill label="خلص منهم" value={item.completed} />
-                <LeaderboardStatPill label="درجات" value={item.points} />
-              </span>
-            </div>
-            {isOpen && (
-              <div className="relative z-10">
-                <MemberDetails item={item} />
-              </div>
-            )}
-          </button>
-        );
-      })}
+      {remainingMembers.length > 0 && (
+        <div className="grid gap-3">
+          {remainingMembers.map((item, index) => renderListRow(item, index + 4))}
+        </div>
+      )}
     </div>
   );
 }
