@@ -832,6 +832,24 @@
   ],
   "profileRequests": [
     {
+      "id": "profile-yossef-sharawy-1783030330439",
+      "memberId": "yossef-sharawy",
+      "memberName": "yossef sharawy",
+      "createdAt": "2026-07-02T22:12:10.439Z",
+      "status": "pending",
+      "nickname": "Shaarawy",
+      "previousAliases": [
+        "yossef sharawy",
+        "youssef sharawy",
+        "youssef shaarawy",
+        "يوسف شعراوي",
+        "يوسف",
+        "youssef"
+      ],
+      "previousRepoUrl": "",
+      "previousDriveUrl": ""
+    },
+    {
       "id": "profile-fatema-1783022699952",
       "memberId": "fatema",
       "memberName": "fatema",
@@ -951,6 +969,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T22:11:19.263Z"
+    "updatedAt": "2026-07-02T22:12:10.439Z"
   }
 }
