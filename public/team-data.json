@@ -100,7 +100,7 @@
       ],
       "hidden": false,
       "baseCompleted": 0,
-      "basePoints": 0,
+      "basePoints": 1,
       "adminNote": "",
       "baseApproved": 0,
       "baseRejected": 0,
@@ -771,6 +771,13 @@
         "checkedAt": "2026-07-02T15:09:31.651Z",
         "lateMinutes": 98,
         "score": 0
+      },
+      "yossef-sharawy": {
+        "memberId": "yossef-sharawy",
+        "memberName": "yossef sharawy",
+        "checkedAt": "2026-07-02T22:13:05.794Z",
+        "lateMinutes": 521,
+        "score": 0
       }
     }
   },
@@ -969,6 +976,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T22:12:14.895Z"
+    "updatedAt": "2026-07-02T22:13:21.905Z"
   }
 }
