@@ -158,8 +158,8 @@
       "baseApproved": 0,
       "baseRejected": 0,
       "publicFlag": "",
-      "repoUrl": "",
-      "driveUrl": ""
+      "repoUrl": "https://github.com/rodinaasfour665-ctrl/Multi_Coding_agents",
+      "driveUrl": "https://drive.google.com/drive/folders/1MWQA13V2XpqtF5OrJHbDUa_UYxxKbe7q?usp=sharing"
     },
     {
       "id": "fatema",
@@ -887,7 +887,7 @@
       "memberId": "rodina",
       "memberName": "rodina",
       "createdAt": "2026-07-02T22:59:22.221Z",
-      "status": "pending",
+      "status": "approved",
       "repoUrl": "https://github.com/rodinaasfour665-ctrl/Multi_Coding_agents",
       "driveUrl": "https://drive.google.com/drive/folders/1MWQA13V2XpqtF5OrJHbDUa_UYxxKbe7q?usp=sharing",
       "previousAliases": [
@@ -896,7 +896,8 @@
         "رودينا"
       ],
       "previousRepoUrl": "",
-      "previousDriveUrl": ""
+      "previousDriveUrl": "",
+      "reviewedAt": "2026-07-02T23:24:52.862Z"
     },
     {
       "id": "profile-yossef-sharawy-1783030330439",
@@ -1036,6 +1037,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T22:59:22.221Z"
+    "updatedAt": "2026-07-02T23:24:52.862Z"
   }
 }
