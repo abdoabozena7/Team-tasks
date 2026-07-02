@@ -192,7 +192,7 @@
       ],
       "hidden": false,
       "baseCompleted": 0,
-      "basePoints": 0,
+      "basePoints": 1,
       "adminNote": "",
       "baseApproved": 0,
       "baseRejected": 0,
@@ -603,6 +603,13 @@
         "checkedAt": "2026-07-02T13:33:01.846Z",
         "lateMinutes": 1,
         "score": 1
+      },
+      "marihan": {
+        "memberId": "marihan",
+        "memberName": "marihan",
+        "checkedAt": "2026-07-02T15:09:31.651Z",
+        "lateMinutes": 98,
+        "score": 0
       }
     }
   },
@@ -651,6 +658,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T15:02:50.737Z"
+    "updatedAt": "2026-07-02T15:10:06.052Z"
   }
 }
