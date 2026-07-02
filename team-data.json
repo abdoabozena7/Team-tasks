@@ -323,7 +323,7 @@
       "startsAt": "2026-07-02T13:24:00.000Z",
       "durationMinutes": 60,
       "points": 1,
-      "status": "active",
+      "status": "archived",
       "id": "meeting-1782998675325",
       "createdAt": "2026-07-02T13:24:35.325Z"
     }
@@ -426,8 +426,8 @@
       "marihan": {
         "memberId": "marihan",
         "memberName": "marihan",
-        "checkedAt": "2026-07-02T13:24:54.719Z",
-        "lateMinutes": 1,
+        "checkedAt": "2026-07-02T13:31:40.661Z",
+        "lateMinutes": 8,
         "score": 1
       }
     }
@@ -467,6 +467,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T13:24:58.735Z"
+    "updatedAt": "2026-07-02T13:32:08.879Z"
   }
 }
