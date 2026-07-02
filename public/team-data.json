@@ -883,6 +883,22 @@
   ],
   "profileRequests": [
     {
+      "id": "profile-rodina-1783033162221",
+      "memberId": "rodina",
+      "memberName": "rodina",
+      "createdAt": "2026-07-02T22:59:22.221Z",
+      "status": "pending",
+      "repoUrl": "https://github.com/rodinaasfour665-ctrl/Multi_Coding_agents",
+      "driveUrl": "https://drive.google.com/drive/folders/1MWQA13V2XpqtF5OrJHbDUa_UYxxKbe7q?usp=sharing",
+      "previousAliases": [
+        "rodina",
+        "rudina",
+        "رودينا"
+      ],
+      "previousRepoUrl": "",
+      "previousDriveUrl": ""
+    },
+    {
       "id": "profile-yossef-sharawy-1783030330439",
       "memberId": "yossef-sharawy",
       "memberName": "yossef sharawy",
@@ -1020,6 +1036,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T22:52:21.611Z"
+    "updatedAt": "2026-07-02T22:59:22.221Z"
   }
 }
