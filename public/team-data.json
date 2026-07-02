@@ -621,7 +621,7 @@
       "source": "manual",
       "excerpt": "GitHub attention requested for single agent code",
       "createdAt": "2026-07-02T15:35:53.171Z",
-      "seen": false
+      "seen": true
     },
     {
       "id": "repo-manual-abozena-task-1782984779472-1783001409260",
@@ -667,6 +667,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T15:35:53.171Z"
+    "updatedAt": "2026-07-02T15:38:25.023Z"
   }
 }
