@@ -540,6 +540,26 @@
         "awardedPoints": 2,
         "lateSubmission": true,
         "scoreOverride": true
+      },
+      "yossef-sharawy": {
+        "memberId": "yossef-sharawy",
+        "memberName": "yossef sharawy",
+        "answer": "Manual approval outside the website.",
+        "status": "approved",
+        "submittedAt": "2026-07-02T22:10:50.276Z",
+        "reviewEvents": [
+          {
+            "id": "review-1783030250276",
+            "status": "approved",
+            "reviewedAt": "2026-07-02T22:10:50.276Z",
+            "awardedPoints": 2,
+            "scoreOverride": true
+          }
+        ],
+        "reviewedAt": "2026-07-02T22:10:50.276Z",
+        "awardedPoints": 2,
+        "lateSubmission": true,
+        "scoreOverride": true
       }
     },
     "task-1782984779472": {
@@ -917,6 +937,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T22:10:32.600Z"
+    "updatedAt": "2026-07-02T22:10:50.276Z"
   }
 }
