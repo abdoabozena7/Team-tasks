@@ -20,7 +20,7 @@
       "hidden": true,
       "baseCompleted": 0,
       "basePoints": 0,
-      "adminNote": "عامل ايه",
+      "adminNote": "سلم",
       "baseApproved": 0,
       "baseRejected": 0,
       "publicFlag": "",
@@ -848,6 +848,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T21:20:52.293Z"
+    "updatedAt": "2026-07-02T21:22:02.615Z"
   }
 }
