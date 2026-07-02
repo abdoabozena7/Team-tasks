@@ -688,7 +688,7 @@
       "memberId": "fatema",
       "memberName": "fatema",
       "createdAt": "2026-07-02T20:04:51.356Z",
-      "status": "pending",
+      "status": "approved",
       "nickname": "fatma",
       "previousAliases": [
         "fatema",
@@ -697,7 +697,8 @@
         "فاطمة"
       ],
       "previousRepoUrl": "",
-      "previousDriveUrl": ""
+      "previousDriveUrl": "",
+      "reviewedAt": "2026-07-02T20:05:12.800Z"
     },
     {
       "id": "profile-tasneem-1783022677417",
@@ -783,6 +784,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T20:05:08.452Z"
+    "updatedAt": "2026-07-02T20:05:12.800Z"
   }
 }
