@@ -258,6 +258,18 @@
       "startAt": "2026-07-02T09:32:00.000Z",
       "deadlineAt": "2026-07-03T09:32:00.000Z",
       "status": "active"
+    },
+    {
+      "id": "task-1783008997895",
+      "title": "Task 2 harness engineering",
+      "question": "Task #2 – Harness Engineering\n\nGoal\n\nImprove your Single Coding Agent by building a clean harness around it.\n\nThe agent should not only create or edit files, but also be able to run the code, detect errors, and try to fix them.\n\n---\n\nRequirements\n\n1. System Prompt\n\nCreate a clear system prompt that defines:\n\n- Agent role\n- Safety rules\n- Workspace limits\n- How to handle unclear requests\n- How to handle code errors\n\n---\n\n2. Tool Layer\n\nOrganize the agent actions into clear tools/functions, such as:\n\n- Read File\n- Write File\n- Edit File\n- Backup File\n- List Files\n- Run File / Run Command\n\nThe Run File / Run Command tool is required.\n\nIt should be able to run simple code files inside the selected workspace, for example:\n\n- Python files\n- JavaScript files\n- C++ files if supported\n\n---\n\n3. Simple Project Memory\n\nCreate a lightweight memory file that stores useful information, such as:\n\n- Current workspace\n- Recent files\n- Previous operations\n- Last error message\n- Last fix attempt\n\nUse any simple format like JSON or YAML.\n\n---\n\n4. Execution Flow\n\nImplement a clear flow:\n\nUser Request\n→ Understand Request\n→ Select Tool\n→ Execute Tool\n→ Show Result\n\nFor code fixing, the flow should be:\n\nRead Code\n→ Run Code\n→ Detect Error\n→ Ask the model for a fix\n→ Backup File\n→ Apply Fix\n→ Run Again\n→ Show Final Result\n\n---\n\n5. Safety\n\n- Never access files outside the workspace.\n- Always create a backup before editing.\n- Do not run dangerous commands.\n- Only run commands inside the workspace.\n- Handle missing files and invalid model responses clearly.\n\n---\n\n6. Logging\n\nPrint clear logs in the terminal, such as:\n\n- User Request\n- Selected Tool\n- Target File\n- Run Result\n- Error Message\n- Fix Attempt\n- Final Status\n\n---\n\nDeliverables\n\n- Source Code\n- README\n- Short document explaining:\n  - System Prompt\n  - Tool Layer\n  - Run Tool\n  - Memory\n  - Execution Flow\n  - Safety Rules\n\n---\n\nEvaluation\n\nBe ready to demonstrate:\n\n1. Create a file.\n2. Read and explain a file.\n3. Modify a file.\n4. Run a file.\n5. Fix a file that contains an error, then run it again.\n\nExample evaluation command:\n\n“Open \"app.py\", run it, find the error, fix it, and run it again.”",
+      "points": 5,
+      "scope": "all",
+      "memberIds": [],
+      "createdAt": "2026-07-02T16:16:37.895Z",
+      "startAt": "2026-07-02T16:15:00.000Z",
+      "deadlineAt": "2026-07-06T21:01:00.000Z",
+      "status": "active"
     }
   ],
   "responses": {
@@ -667,6 +679,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T15:38:25.023Z"
+    "updatedAt": "2026-07-02T16:16:37.895Z"
   }
 }
