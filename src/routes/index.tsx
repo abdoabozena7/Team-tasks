@@ -1313,7 +1313,9 @@ function MemberView({
     driveDraft.trim() !== (activeMember.member.driveUrl ?? "");
   const hasNicknameChange =
     nicknameDraft.trim().length > 0 && nicknameDraft.trim() !== activeMember.displayName.trim();
+  const nicknameActionKey = `nickname:${activeMember.member.id}`;
   const profileActionKey = `profile:${activeMember.member.id}`;
+  const nicknameFeedback = actionFeedback[nicknameActionKey];
   const profileFeedback = actionFeedback[profileActionKey];
   const loginAliases = useMemo(
     () =>
@@ -1384,6 +1386,7 @@ function MemberView({
       tone: ok ? "success" : "error",
       message: ok ? successMessage : failureMessage,
     });
+    return ok;
   }
 
   function renderMemberTaskLog() {
@@ -1926,16 +1929,37 @@ function MemberView({
               />
               <Button
                 type="button"
-                disabled={!hasNicknameChange}
+                data-testid="nickname-request-submit"
+                disabled={isSubmitting || !hasNicknameChange}
                 onClick={() => {
-                  if (!hasNicknameChange) return;
-                  onSaveNickname(nicknameDraft.trim());
-                  setNicknameDraft("");
+                  if (!hasNicknameChange) {
+                    blockMemberAction(nicknameActionKey, ["new nickname"]);
+                    return;
+                  }
+                  void runMemberAction(
+                    nicknameActionKey,
+                    () =>
+                      onProfileChangeRequest({
+                        memberId: activeMember.member.id,
+                        nickname: nicknameDraft.trim(),
+                      }),
+                    "Nickname request sent to admin.",
+                    "Could not send nickname request.",
+                  ).then((ok) => {
+                    if (ok) setNicknameDraft("");
+                  });
                 }}
-                className="mt-2 border-[2px] border-ink doodle-shadow-sm"
+                className={actionButtonClass(
+                  "mt-2 border-[2px] border-ink doodle-shadow-sm",
+                  nicknameFeedback,
+                )}
               >
-                حفظ الاسم
+                إرسال الاسم للأدمن
               </Button>
+              <p className="mt-1 text-xs font-bold text-foreground/55">
+                الاسم الجديد مش هيتضاف للدخول غير بعد موافقة الأدمن.
+              </p>
+              <ActionFeedbackLine feedback={nicknameFeedback} />
 
               <div className="mt-4 border-t-[2px] border-ink/15 pt-3">
                 {!activeMember.member.repoUrl && (
@@ -1988,7 +2012,6 @@ function MemberView({
                     () =>
                       onProfileChangeRequest({
                         memberId: activeMember.member.id,
-                        nickname: "",
                         repoUrl: repoDraft.trim(),
                         driveUrl: driveDraft.trim(),
                       }),
@@ -6569,16 +6592,6 @@ function Index() {
     }
   }
 
-  function saveMemberNickname(nickname: string) {
-    if (!activeMember) return;
-    const nextDisplayName = nickname.trim() || activeMember.displayName;
-    window.localStorage.setItem(ACTIVE_DISPLAY_NAME_KEY, nextDisplayName);
-    setActiveMember((current) =>
-      current ? { ...current, displayName: nextDisplayName } : current,
-    );
-    setRefreshStatus("تم حفظ الاسم الجديد على جهازك.");
-  }
-
   async function reviewAnswer(
     taskId: string,
     memberId: string,
@@ -6992,7 +7005,6 @@ function Index() {
         onRepoAttention={sendRepoAttention}
         onDriveAttention={sendDriveAttention}
         onProfileChangeRequest={submitProfileChangeRequest}
-        onSaveNickname={saveMemberNickname}
         onLogout={logout}
         onRefreshData={refreshData}
       />
