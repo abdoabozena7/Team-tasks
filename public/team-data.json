@@ -519,7 +519,17 @@
       }
     }
   },
-  "repoUpdates": [],
+  "repoUpdates": [
+    {
+      "id": "repo-manual-abozena-task-1782984779472-1783001409260",
+      "memberId": "abozena",
+      "taskId": "task-1782984779472",
+      "source": "manual",
+      "excerpt": "GitHub attention requested for Task 2",
+      "createdAt": "2026-07-02T14:10:09.260Z",
+      "seen": false
+    }
+  ],
   "profileRequests": [
     {
       "id": "profile-renad-1782924762111",
@@ -554,6 +564,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T14:02:57.025Z"
+    "updatedAt": "2026-07-02T14:10:09.260Z"
   }
 }
