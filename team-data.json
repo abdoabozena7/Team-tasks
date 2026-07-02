@@ -527,7 +527,7 @@
       "source": "manual",
       "excerpt": "GitHub attention requested for Task 2",
       "createdAt": "2026-07-02T14:10:09.260Z",
-      "seen": false
+      "seen": true
     }
   ],
   "profileRequests": [
@@ -564,6 +564,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-02T14:10:09.260Z"
+    "updatedAt": "2026-07-02T14:59:58.972Z"
   }
 }
