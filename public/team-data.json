@@ -516,6 +516,12 @@
         "submittedAt": "2026-07-02T08:03:05.536Z",
         "reviewEvents": [
           {
+            "id": "review-1783118103806",
+            "status": "approved",
+            "reviewedAt": "2026-07-03T22:35:03.806Z",
+            "awardedPoints": 2
+          },
+          {
             "id": "review-1782979385536",
             "status": "approved",
             "reviewedAt": "2026-07-02T08:03:05.536Z",
@@ -523,10 +529,10 @@
             "scoreOverride": true
           }
         ],
-        "reviewedAt": "2026-07-02T08:03:05.536Z",
+        "reviewedAt": "2026-07-03T22:35:03.806Z",
         "awardedPoints": 2,
         "lateSubmission": false,
-        "scoreOverride": true
+        "scoreOverride": false
       },
       "abo-grir": {
         "memberId": "abo-grir",
@@ -986,6 +992,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-03T14:50:58.577Z"
+    "updatedAt": "2026-07-03T22:35:03.806Z"
   }
 }
