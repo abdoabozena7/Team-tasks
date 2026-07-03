@@ -240,6 +240,7 @@ type MemberScore = {
   rejected: number;
   pending: number;
   reviewed: number;
+  rejectionRate: number;
   baseCompleted: number;
   baseApproved: number;
   baseRejected: number;
@@ -251,6 +252,10 @@ type MemberScore = {
   avgHours: number | null;
   responseRate: number;
   approvalRate: number;
+  attendedMeetings: number;
+  accountableMeetings: number;
+  meetingAttendanceRate: number;
+  avgMeetingLateMinutes: number | null;
 };
 
 type TaskMetric = {
@@ -752,6 +757,11 @@ function createStats(data: StudioData) {
   const activeTasks = data.tasks.filter(isActiveTask);
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const scoreMeetings = data.meetings ?? [];
+  const accountableMeetings = scoreMeetings.filter((meeting) => {
+    if (meetingStatus(meeting) === "archived") return true;
+    const phase = meetingPhase(meeting);
+    return phase === "live" || phase === "ended";
+  });
   const memberOrder = new Map(data.members.map((member, index) => [member.id, index]));
   const memberStats = data.members.map((member) => {
     const assignedTasks = activeTasks.filter(
@@ -787,9 +797,21 @@ function createStats(data: StudioData) {
     const pending = responses.filter((item) => item.response.status === "submitted").length;
     const submitted = responses.length;
     const reviewed = approved + rejected;
+    const rejectionRate = reviewed > 0 ? (rejected / reviewed) * 100 : 0;
     const responseRate =
       assignedTasks.length > 0 ? (responses.length / assignedTasks.length) * 100 : 0;
     const approvalRate = reviewed > 0 ? (approved / reviewed) * 100 : 0;
+    const meetingAttendances = accountableMeetings
+      .map((meeting) => data.meetingAttendance?.[meeting.id]?.[member.id])
+      .filter((attendance): attendance is MeetingAttendance => Boolean(attendance));
+    const meetingLateSamples = meetingAttendances.map((attendance) => sanitizeNumber(attendance.lateMinutes));
+    const avgMeetingLateMinutes =
+      meetingLateSamples.length > 0
+        ? meetingLateSamples.reduce((sum, value) => sum + value, 0) / meetingLateSamples.length
+        : null;
+    const attendedMeetings = meetingAttendances.length;
+    const meetingAttendanceRate =
+      accountableMeetings.length > 0 ? (attendedMeetings / accountableMeetings.length) * 100 : 100;
 
     return {
       member,
@@ -799,6 +821,7 @@ function createStats(data: StudioData) {
       rejected,
       pending,
       reviewed,
+      rejectionRate,
       baseCompleted,
       baseApproved,
       baseRejected,
@@ -810,15 +833,34 @@ function createStats(data: StudioData) {
       avgHours,
       responseRate,
       approvalRate,
+      attendedMeetings,
+      accountableMeetings: accountableMeetings.length,
+      meetingAttendanceRate,
+      avgMeetingLateMinutes,
     };
   });
   const visibleStats = memberStats.filter((item) => !item.member.hidden);
   const rankedMembers = [...visibleStats].sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    if (b.approvalRate !== a.approvalRate) return b.approvalRate - a.approvalRate;
-    if (b.assignedTasks !== a.assignedTasks) return b.assignedTasks - a.assignedTasks;
     if (b.submitted !== a.submitted) return b.submitted - a.submitted;
+    if (b.responseRate !== a.responseRate) return b.responseRate - a.responseRate;
+    if (a.rejectionRate !== b.rejectionRate) return a.rejectionRate - b.rejectionRate;
+    if (b.approvalRate !== a.approvalRate) return b.approvalRate - a.approvalRate;
+    if (a.avgHours !== b.avgHours) {
+      if (a.avgHours === null) return 1;
+      if (b.avgHours === null) return -1;
+      return a.avgHours - b.avgHours;
+    }
+    if (b.meetingAttendanceRate !== a.meetingAttendanceRate) {
+      return b.meetingAttendanceRate - a.meetingAttendanceRate;
+    }
+    if (a.avgMeetingLateMinutes !== b.avgMeetingLateMinutes) {
+      if (a.avgMeetingLateMinutes === null) return 1;
+      if (b.avgMeetingLateMinutes === null) return -1;
+      return a.avgMeetingLateMinutes - b.avgMeetingLateMinutes;
+    }
     if (b.completed !== a.completed) return b.completed - a.completed;
+    if (b.points !== a.points) return b.points - a.points;
+    if (b.assignedTasks !== a.assignedTasks) return b.assignedTasks - a.assignedTasks;
     return (memberOrder.get(a.member.id) ?? 0) - (memberOrder.get(b.member.id) ?? 0);
   });
   const taskMetrics = activeTasks.map((task) => {
@@ -5915,8 +5957,6 @@ function StatsView({
   const activeTasks = data.tasks.filter(isActiveTask);
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const visibleStats = stats.memberStats;
-  const highestMember = stats.leader;
-  const lowestMember = stats.worst;
   const expectedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.expected, 0);
   const receivedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.received, 0);
   const completionRate = expectedTotal > 0 ? Math.round((receivedTotal / expectedTotal) * 100) : 0;
@@ -5924,53 +5964,12 @@ function StatsView({
   const reviewed = visibleStats.reduce((sum, item) => sum + item.reviewed, 0);
   const teamApprovalRate = reviewed > 0 ? Math.round((approved / reviewed) * 100) : 0;
   const totalPoints = Math.round(stats.pointsTotal * 100) / 100;
-  const teamHealth =
-    completionRate >= 80 && stats.pendingTotal <= 2
-      ? "Stable"
-      : completionRate >= 45
-        ? "Needs follow-up"
-        : "At risk";
-  const teamHealthLabel =
-    teamHealth === "Stable" ? "مستقر" : teamHealth === "Needs follow-up" ? "محتاج متابعة" : "في خطر";
-  const healthTone =
-    teamHealth === "Stable"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-      : teamHealth === "Needs follow-up"
-        ? "border-yellow-200 bg-yellow-50 text-yellow-900"
-        : "border-red-200 bg-red-50 text-red-700";
-
-  function memberState(item: MemberScore) {
-    if (item.assignedTasks === 0) return "No active assignments";
-    if (item.responseRate < 50 || (item.reviewed > 0 && item.approvalRate < 50)) return "At risk";
-    if (item.responseRate >= 80 && item.pending === 0) return "On track";
-    return "Needs follow-up";
-  }
-
-  function memberTone(item: MemberScore) {
-    const state = memberState(item);
-    if (state === "At risk") return "border-red-300 bg-red-50 shadow-[0_0_0_3px_rgba(239,68,68,0.18)]";
-    if (state === "Needs follow-up") return "border-yellow-200 bg-yellow-50";
-    if (state === "On track") return "border-emerald-200 bg-emerald-50";
-    return "border-ink/10 bg-paper";
-  }
-
-  function memberStateLabel(state: string) {
-    if (state === "No active assignments") return "مفيش تاسكات";
-    if (state === "At risk") return "في خطر";
-    if (state === "On track") return "ماشي كويس";
-    return "محتاج متابعة";
-  }
-
-  function memberInsightLabel(text: string) {
-    if (text.startsWith("Earned ")) return text.replace("Earned ", "بونص ").replace(" bonus pts", " نقطة");
-    if (text === "Finished everything") return "خلص كل حاجة";
-    if (text === "Missing recent meetings") return "غايب عن ميتينج";
-    if (text === "Late to meetings") return "بيتأخر في الميتينج";
-    if (text === "Submits late") return "تسليماته متأخرة";
-    if (text === "Submits quickly") return "بيسلم بسرعة";
-    if (text === "No active assignments") return "مفيش تكليفات شغالة";
-    return "محتاج متابعة خفيفة";
-  }
+  const activeMemberCount = visibleStats.length;
+  const topMember = stats.leader;
+  const nextDeadlineTask = [...activeTasks]
+    .filter((task) => task.deadlineAt && new Date(task.deadlineAt).getTime() >= Date.now())
+    .sort((a, b) => new Date(a.deadlineAt ?? 0).getTime() - new Date(b.deadlineAt ?? 0).getTime())[0];
+  const now = Date.now();
 
   function activeTaskMembers(task: StudioTask) {
     return data.members.filter(
@@ -5979,6 +5978,59 @@ function StatsView({
         taskIsForMember(task, member.id) &&
         !isTaskSkipped(data, task.id, member.id),
     );
+  }
+
+  function memberHasOverdueMissingTask(item: MemberScore) {
+    return activeTasks.some((task) => {
+      if (!task.deadlineAt || !taskIsForMember(task, item.member.id) || isTaskSkipped(data, task.id, item.member.id)) {
+        return false;
+      }
+      const deadlineMs = new Date(task.deadlineAt).getTime();
+      const response = getResponse(data, task.id, item.member.id);
+      return Number.isFinite(deadlineMs) && deadlineMs < now && !response;
+    });
+  }
+
+  function isStrictCriticalMember(item: MemberScore) {
+    const enoughReviewedForQuality = item.reviewed >= 2;
+    const enoughAssignmentsForDelivery = item.assignedTasks >= 2;
+    return (
+      (enoughReviewedForQuality && item.approvalRate < 50) ||
+      (enoughAssignmentsForDelivery && item.responseRate < 50) ||
+      memberHasOverdueMissingTask(item)
+    );
+  }
+
+  function memberState(item: MemberScore) {
+    if (item.assignedTasks === 0) return "No active assignments";
+    if (isStrictCriticalMember(item)) return "Critical";
+    return "Stable";
+  }
+
+  function memberTone(item: MemberScore) {
+    const state = memberState(item);
+    if (state === "Critical") return "border-red-300 bg-red-50 shadow-[0_0_0_3px_rgba(239,68,68,0.16)]";
+    if (state === "No active assignments") return "border-ink/10 bg-paper";
+    return "border-emerald-200 bg-emerald-50";
+  }
+
+  function memberStateLabel(state: string) {
+    if (state === "No active assignments") return "بدون تكليف";
+    if (state === "Critical") return "حرج";
+    return "مستقر";
+  }
+
+  function memberInsight(item: MemberScore) {
+    if (isStrictCriticalMember(item)) {
+      if (item.reviewed >= 2 && item.approvalRate < 50) return "قبوله أقل من المطلوب";
+      if (item.assignedTasks >= 2 && item.responseRate < 50) return "تسليماته ناقصة بوضوح";
+      return "عنده تكليف عدى موعده";
+    }
+    if (item.assignedTasks === 0) return "بدون تكليفات شغالة";
+    if (item.assignedTasks > 0 && item.approved === item.assignedTasks) return "خلص كل التكليفات";
+    if (item.pending > 0) return "فيه تسليمات قيد المراجعة";
+    if (item.avgHours !== null && item.avgHours <= 24 && item.submitted > 0) return "سرعة التسليم ممتازة";
+    return "الأداء مستقر";
   }
 
   function statusSegments(total: number, counts: { approved: number; pending: number; rejected: number }) {
@@ -6036,6 +6088,17 @@ function StatsView({
     });
   }
 
+  function taskSubmissionDetails(task: StudioTask) {
+    const members = activeTaskMembers(task);
+    const responses = data.responses[task.id] ?? {};
+    const receivedMembers = members.filter((member) => Boolean(responses[member.id]));
+    const rejectedMembers = members.filter((member) => rejectionCount(responses[member.id]) > 0);
+    return {
+      singleSubmitter: receivedMembers.length === 1 ? memberArabicName(receivedMembers[0]) : "",
+      rejectedNames: rejectedMembers.map((member) => memberArabicName(member)),
+    };
+  }
+
   function SegmentedStatusBar({ segments, total }: { segments: ReturnType<typeof statusSegments>; total: number }) {
     const safeTotal = Math.max(1, total);
     return (
@@ -6052,63 +6115,19 @@ function StatsView({
     );
   }
 
-  function memberInsight(item: MemberScore) {
-    const assignedTasks = activeTasks.filter(
-      (task) => taskIsForMember(task, item.member.id) && !isTaskSkipped(data, task.id, item.member.id),
-    );
-    const taskResponses = assignedTasks
-      .map((task) => ({ task, response: getResponse(data, task.id, item.member.id) }))
-      .filter((entry): entry is { task: StudioTask; response: TaskResponse } =>
-        Boolean(entry.response),
-      );
-    const approvedResponses = taskResponses.filter((entry) => entry.response.status === "approved");
-    const bonusPoints = approvedResponses.reduce(
-      (sum, entry) =>
-        sum +
-        Math.max(
-          0,
-          responseAwardedPoints(entry.task, entry.response) -
-            sanitizePositiveNumber(entry.task.points, 1),
-        ),
-      0,
-    );
-    const meetingAttendance = activeMeetings
-      .map((meeting) => data.meetingAttendance?.[meeting.id]?.[item.member.id])
-      .filter((attendance): attendance is MeetingAttendance => Boolean(attendance));
-    const missedActiveMeetings = activeMeetings.length > 0 && meetingAttendance.length === 0;
-    const lateMeeting = meetingAttendance.some((attendance) => attendance.lateMinutes > 0);
-    const lateSubmission = taskResponses.some((entry) => responseIsLate(entry.task, entry.response));
-    const finishedAll =
-      assignedTasks.length > 0 && approvedResponses.length === assignedTasks.length;
-
-    if (bonusPoints >= 5) {
-      return { text: `Earned ${Math.round(bonusPoints * 100) / 100} bonus pts`, tone: "bg-emerald-100 text-emerald-900 border-emerald-200" };
-    }
-    if (finishedAll) {
-      return { text: "Finished everything", tone: "bg-emerald-100 text-emerald-900 border-emerald-200" };
-    }
-    if (missedActiveMeetings) {
-      return { text: "Missing recent meetings", tone: "bg-red-100 text-red-700 border-red-200" };
-    }
-    if (lateMeeting) {
-      return { text: "Late to meetings", tone: "bg-yellow-100 text-yellow-900 border-yellow-200" };
-    }
-    if (lateSubmission) {
-      return { text: "Submits late", tone: "bg-yellow-100 text-yellow-900 border-yellow-200" };
-    }
-    if (item.avgHours !== null && item.avgHours <= 24 && item.submitted > 0) {
-      return { text: "Submits quickly", tone: "bg-sky-100 text-sky-900 border-sky-200" };
-    }
-    if (item.assignedTasks === 0) {
-      return { text: "No active assignments", tone: "bg-zinc-100 text-zinc-600 border-zinc-200" };
-    }
-    return { text: "Needs light follow-up", tone: "bg-white text-foreground/65 border-ink/10" };
-  }
-
   const missingTotal = Math.max(0, expectedTotal - receivedTotal);
-  const nextDeadlineTask = [...activeTasks]
-    .filter((task) => task.deadlineAt)
-    .sort((a, b) => new Date(a.deadlineAt || "").getTime() - new Date(b.deadlineAt || "").getTime())[0];
+  const submissionHourSamples = activeTasks.flatMap((task) =>
+    activeTaskMembers(task)
+      .map((member) => {
+        const response = getResponse(data, task.id, member.id);
+        return response ? hoursBetween(task.createdAt, response.submittedAt) : null;
+      })
+      .filter((value): value is number => value !== null),
+  );
+  const teamAverageSubmissionHours =
+    submissionHourSamples.length > 0
+      ? submissionHourSamples.reduce((sum, value) => sum + value, 0) / submissionHourSamples.length
+      : null;
   const lowestProgressMember =
     [...visibleStats]
       .filter((item) => item.assignedTasks > 0)
@@ -6116,8 +6135,21 @@ function StatsView({
         if (a.responseRate !== b.responseRate) return a.responseRate - b.responseRate;
         if (a.approvalRate !== b.approvalRate) return a.approvalRate - b.approvalRate;
         return a.points - b.points;
-      })[0] ?? lowestMember;
-  const topMember = highestMember;
+      })[0] ?? stats.worst;
+  const highestProgressMember =
+    [...visibleStats]
+      .filter((item) => item.assignedTasks > 0)
+      .sort((a, b) => {
+        if (b.responseRate !== a.responseRate) return b.responseRate - a.responseRate;
+        if (b.approvalRate !== a.approvalRate) return b.approvalRate - a.approvalRate;
+        return b.points - a.points;
+      })[0] ?? stats.leader;
+  const strictCriticalMembers = visibleStats.filter(isStrictCriticalMember);
+  const hasCriticalState = strictCriticalMembers.length > 0;
+  const teamHealthLabel = hasCriticalState ? "حالة حرجة" : "مستقر";
+  const healthTone = hasCriticalState
+    ? "border-red-200 bg-red-50 text-red-700"
+    : "border-emerald-200 bg-emerald-50 text-emerald-900";
   const meetingExpectedTotal = stats.meetingMetrics.reduce((sum, item) => sum + item.expected, 0);
   const meetingAttendedTotal = stats.meetingMetrics.reduce((sum, item) => sum + item.attended, 0);
   const meetingPulseRate =
@@ -6336,7 +6368,7 @@ function StatsView({
             <div className="stats-spotlight-icon">
               <Bell className="size-6" />
             </div>
-            <span>محتاج متابعة</span>
+            <span>حالة حرجة</span>
             <strong>{lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "N/A"}</strong>
             <p>
               {lowestProgressMember
@@ -6377,7 +6409,7 @@ function StatsView({
                             <strong>{memberArabicName(item.member)}</strong>
                             <span>{memberStateLabel(state)}</span>
                           </div>
-                          <div className="stats-member-insight">{memberInsightLabel(insight.text)}</div>
+                          <div className="stats-member-insight">{insight}</div>
                         </div>
                         <div className="stats-member-numbers">
                           <strong>{item.points}</strong>
@@ -6444,6 +6476,510 @@ function StatsView({
             </div>
           </section>
         )}
+      </main>
+    </div>
+  );
+}
+
+function DeanStatsView({
+  data,
+  stats,
+  onLogout,
+}: {
+  data: StudioData;
+  stats: ReturnType<typeof createStats>;
+  onLogout: () => void;
+}) {
+  const activeTasks = data.tasks.filter(isActiveTask);
+  const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
+  const visibleStats = stats.memberStats;
+  const expectedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.expected, 0);
+  const receivedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.received, 0);
+  const completionRate = expectedTotal > 0 ? Math.round((receivedTotal / expectedTotal) * 100) : 0;
+  const approvedTotal = visibleStats.reduce((sum, item) => sum + item.approved, 0);
+  const reviewedTotal = visibleStats.reduce((sum, item) => sum + item.reviewed, 0);
+  const teamApprovalRate = reviewedTotal > 0 ? Math.round((approvedTotal / reviewedTotal) * 100) : 0;
+  const totalPoints = Math.round(stats.pointsTotal * 100) / 100;
+  const missingTotal = Math.max(0, expectedTotal - receivedTotal);
+  const activeMemberCount = visibleStats.length;
+  const now = Date.now();
+
+  function activeTaskMembers(task: StudioTask) {
+    return data.members.filter(
+      (member) =>
+        !member.hidden &&
+        taskIsForMember(task, member.id) &&
+        !isTaskSkipped(data, task.id, member.id),
+    );
+  }
+
+  function statusSegments(total: number, counts: { approved: number; pending: number; rejected: number }) {
+    const safeTotal = Math.max(0, total);
+    if (safeTotal === 0) {
+      return [{ key: "none", label: "No assignments", count: 1, className: "bg-zinc-200" }];
+    }
+    const approvedCount = Math.max(0, counts.approved);
+    const pendingCount = Math.max(0, counts.pending);
+    const rejectedCount = Math.max(0, counts.rejected);
+    const missingCount = Math.max(0, safeTotal - approvedCount - pendingCount - rejectedCount);
+    return [
+      { key: "approved", label: "Approved", count: approvedCount, className: "bg-emerald-500" },
+      { key: "pending", label: "Pending", count: pendingCount, className: "bg-yellow-400" },
+      { key: "rejected", label: "Rejected", count: rejectedCount, className: "bg-red-500" },
+      { key: "missing", label: "Missing", count: missingCount, className: "bg-zinc-200" },
+    ].filter((segment) => segment.count > 0);
+  }
+
+  function taskSegments(task: StudioTask) {
+    const members = activeTaskMembers(task);
+    const responses = data.responses[task.id] ?? {};
+    return statusSegments(members.length, {
+      approved: members.filter((member) => responses[member.id]?.status === "approved").length,
+      pending: members.filter((member) => responses[member.id]?.status === "submitted").length,
+      rejected: members.filter((member) => rejectionCount(responses[member.id]) > 0).length,
+    });
+  }
+
+  function memberSegments(memberId: string) {
+    const assignedTasks = activeTasks.filter(
+      (task) => taskIsForMember(task, memberId) && !isTaskSkipped(data, task.id, memberId),
+    );
+    return statusSegments(assignedTasks.length, {
+      approved: assignedTasks.filter((task) => getResponse(data, task.id, memberId)?.status === "approved").length,
+      pending: assignedTasks.filter((task) => getResponse(data, task.id, memberId)?.status === "submitted").length,
+      rejected: assignedTasks.filter((task) => rejectionCount(getResponse(data, task.id, memberId)) > 0).length,
+    });
+  }
+
+  function taskSubmissionDetails(task: StudioTask) {
+    const members = activeTaskMembers(task);
+    const responses = data.responses[task.id] ?? {};
+    const receivedMembers = members.filter((member) => Boolean(responses[member.id]));
+    const rejectedMembers = members.filter((member) => rejectionCount(responses[member.id]) > 0);
+    return {
+      singleSubmitter: receivedMembers.length === 1 ? memberArabicName(receivedMembers[0]) : "",
+      rejectedNames: rejectedMembers.map((member) => memberArabicName(member)),
+    };
+  }
+
+  function memberHasOverdueMissingTask(item: MemberScore) {
+    return activeTasks.some((task) => {
+      if (!task.deadlineAt || !taskIsForMember(task, item.member.id) || isTaskSkipped(data, task.id, item.member.id)) {
+        return false;
+      }
+      const deadlineMs = new Date(task.deadlineAt).getTime();
+      const response = getResponse(data, task.id, item.member.id);
+      return Number.isFinite(deadlineMs) && deadlineMs + 24 * 36e5 < now && !response;
+    });
+  }
+
+  function isStrictCriticalMember(item: MemberScore) {
+    return (
+      (item.reviewed >= 2 && item.approvalRate < 50) ||
+      (item.assignedTasks >= 2 && item.responseRate < 50) ||
+      memberHasOverdueMissingTask(item)
+    );
+  }
+
+  function memberState(item: MemberScore) {
+    if (item.assignedTasks === 0) return "بدون تكليف";
+    if (isStrictCriticalMember(item)) return "حرج";
+    return item.approvalRate >= 80 || item.responseRate >= 80 ? "تمام" : "مستقر";
+  }
+
+  function memberTone(item: MemberScore) {
+    if (isStrictCriticalMember(item)) return "border-red-300 bg-red-50 shadow-[0_0_0_3px_rgba(239,68,68,0.16)]";
+    if (item.assignedTasks === 0) return "border-ink/10 bg-paper";
+    return "border-emerald-200 bg-emerald-50";
+  }
+
+  function memberInsight(item: MemberScore) {
+    if (isStrictCriticalMember(item)) {
+      if (item.reviewed >= 2 && item.approvalRate < 50) return "نسبة القبول محتاجة تدخل";
+      if (item.assignedTasks >= 2 && item.responseRate < 50) return "التسليمات ناقصة بشكل واضح";
+      return "فيه تكليف عدى موعده بوضوح";
+    }
+    if (item.assignedTasks === 0) return "مفيش تكليفات شغالة عليه";
+    if (item.approved === item.assignedTasks) return "خلص كل التكليفات";
+    if (item.pending > 0) return "فيه تسليمات قيد المراجعة";
+    return "الأداء مستقر";
+  }
+
+  function SegmentedStatusBar({ segments, total }: { segments: ReturnType<typeof statusSegments>; total: number }) {
+    const safeTotal = Math.max(1, total);
+    return (
+      <div className="stats-segmented-bar">
+        {segments.map((segment) => (
+          <div
+            key={segment.key}
+            title={`${segment.label}: ${segment.count}`}
+            className={`stats-segment ${segment.className}`}
+            style={{ width: `${total > 0 ? (segment.count / safeTotal) * 100 : 100}%` }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  function AnimatedProgressRing({
+    value,
+    label,
+    caption,
+  }: {
+    value: number;
+    label: string;
+    caption: string;
+  }) {
+    const safeValue = Math.max(0, Math.min(100, Math.round(value)));
+    const radius = 48;
+    const circumference = Math.round(2 * Math.PI * radius * 100) / 100;
+    const offset = Math.round((circumference - (safeValue / 100) * circumference) * 100) / 100;
+
+    return (
+      <div className="stats-ring" aria-label={`${label} ${safeValue}%`}>
+        <svg className="stats-ring-svg" viewBox="0 0 120 120" role="img">
+          <circle className="stats-ring-track" cx="60" cy="60" r={radius} />
+          <circle
+            className="stats-ring-value"
+            cx="60"
+            cy="60"
+            r={radius}
+            style={{
+              strokeDasharray: circumference,
+              strokeDashoffset: offset,
+            }}
+          />
+        </svg>
+        <div className="stats-ring-copy">
+          <strong>{safeValue}%</strong>
+          <span>{caption}</span>
+        </div>
+      </div>
+    );
+  }
+
+  function VisualMetric({ label, value }: { label: string; value: string | number }) {
+    return (
+      <div className="stats-visual-metric">
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    );
+  }
+
+  const submissionHourSamples = activeTasks.flatMap((task) =>
+    activeTaskMembers(task)
+      .map((member) => {
+        const response = getResponse(data, task.id, member.id);
+        return response ? hoursBetween(task.createdAt, response.submittedAt) : null;
+      })
+      .filter((value): value is number => value !== null),
+  );
+  const teamAverageSubmissionHours =
+    submissionHourSamples.length > 0
+      ? submissionHourSamples.reduce((sum, value) => sum + value, 0) / submissionHourSamples.length
+      : null;
+  const highestProgressMember =
+    [...visibleStats]
+      .filter((item) => item.assignedTasks > 0)
+      .sort((a, b) => {
+        if (b.responseRate !== a.responseRate) return b.responseRate - a.responseRate;
+        if (b.approvalRate !== a.approvalRate) return b.approvalRate - a.approvalRate;
+        return b.points - a.points;
+      })[0] ?? stats.leader;
+  const lowestProgressMember =
+    [...visibleStats]
+      .filter((item) => item.assignedTasks > 0)
+      .sort((a, b) => {
+        if (a.responseRate !== b.responseRate) return a.responseRate - b.responseRate;
+        if (a.approvalRate !== b.approvalRate) return a.approvalRate - b.approvalRate;
+        return a.points - b.points;
+      })[0] ?? stats.worst;
+  const strictCriticalMembers = visibleStats.filter(isStrictCriticalMember);
+  const hasCriticalState = strictCriticalMembers.length > 0;
+  const teamHealthLabel = hasCriticalState ? "حالة حرجة" : "مستقر";
+  const healthTone = hasCriticalState
+    ? "border-red-200 bg-red-50 text-red-700"
+    : "border-emerald-200 bg-emerald-50 text-emerald-900";
+  const meetingExpectedTotal = stats.meetingMetrics.reduce((sum, item) => sum + item.expected, 0);
+  const meetingAttendedTotal = stats.meetingMetrics.reduce((sum, item) => sum + item.attended, 0);
+  const meetingPulseRate =
+    meetingExpectedTotal > 0 ? Math.round((meetingAttendedTotal / meetingExpectedTotal) * 100) : 0;
+  const visibleMemberRows = visibleStats.slice(0, 8);
+
+  return (
+    <div className="stats-page min-h-screen text-foreground" dir="rtl">
+      <main className="stats-shell mx-auto grid gap-4 px-3 py-4">
+        <header className="stats-hero stats-appear">
+          <div className="stats-hero-copy">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <img
+                  src={`${import.meta.env.BASE_URL}hivo.png`}
+                  alt="Hivo Studio logo"
+                  className="size-16 shrink-0 rounded-full border-[2.5px] border-ink object-cover doodle-shadow-sm"
+                />
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-foreground/55">Hivo Studio</div>
+                  <h1 className="mt-1 text-4xl font-bold leading-tight">
+                    <span className="highlight-yellow">لوحة التيم</span>
+                  </h1>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={onLogout}
+                className="size-11 shrink-0 rounded-full border-[2px] border-ink bg-card doodle-shadow-sm"
+                aria-label="تسجيل خروج"
+              >
+                <LogOut className="size-5" />
+              </Button>
+            </div>
+            <p className="mt-4 text-lg leading-8 text-foreground/70">
+              حضرتك هنا شايفة أداء التيم بسرعة: التسليمات، القبول، السرعة، والدرجات.
+            </p>
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+              <span className={`stats-health-pill ${healthTone}`}>{teamHealthLabel}</span>
+              <span className="stats-soft-pill">
+                <Users className="size-4" />
+                {activeMemberCount} أعضاء شغالين حاليا
+              </span>
+              <span className="stats-soft-pill">
+                <ListChecks className="size-4" />
+                {activeTasks.length} تاسكات شغالة
+              </span>
+            </div>
+          </div>
+
+          <div className="stats-hero-panel">
+            <AnimatedProgressRing value={completionRate} label="Team completion" caption="تسليمات التيم" />
+            <div className="stats-hero-metrics">
+              <VisualMetric label="أعضاء شغالين" value={activeMemberCount} />
+              <VisualMetric label="تاسكات شغالة" value={activeTasks.length} />
+              <VisualMetric label="التسليمات" value={`${receivedTotal}/${expectedTotal}`} />
+              <VisualMetric label="القبول / الدرجات" value={`${teamApprovalRate}% / ${totalPoints}`} />
+            </div>
+          </div>
+        </header>
+
+        <section className="stats-attention-strip stats-appear" aria-label="Important dean attention points">
+          <div className="stats-attention-heading">
+            <Bell className="size-5" />
+            <div>
+              <h2>اللي حضرتك محتاج تبص عليه</h2>
+              <p>أربع مؤشرات مختصرة لأداء التيم ككل.</p>
+            </div>
+          </div>
+          <div className="stats-attention-grid">
+            <div className="stats-attention-card is-calm">
+              <span>أعلى تقدم</span>
+              <strong>{highestProgressMember ? memberArabicName(highestProgressMember.member) : "مفيش"}</strong>
+              <small>{highestProgressMember ? formatPercent(highestProgressMember.responseRate) : "0%"}</small>
+            </div>
+            <div className={cn("stats-attention-card", missingTotal > 0 ? "is-warn" : "is-calm")}>
+              <span>تسليمات ناقصة</span>
+              <strong>{missingTotal}</strong>
+            </div>
+            <div className="stats-attention-card is-soft">
+              <span>أقل تقدم</span>
+              <strong>{lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "تمام"}</strong>
+              <small>{lowestProgressMember ? formatPercent(lowestProgressMember.responseRate) : "0%"}</small>
+            </div>
+            <div className="stats-attention-card is-soft">
+              <span>متوسط سرعة التسليم</span>
+              <strong>{teamAverageSubmissionHours === null ? "لسه" : formatHours(teamAverageSubmissionHours)}</strong>
+              <small>على مستوى التيم</small>
+            </div>
+          </div>
+        </section>
+
+        {stats.meetingMetrics.length > 0 && (
+          <section className="stats-panel stats-meetings-panel stats-appear">
+            <div className="stats-section-head">
+              <div>
+                <h2>
+                  <span className="highlight-yellow">نبض الاجتماعات</span>
+                </h2>
+                <p>عدد الميتينج الشغالة ونسبة حضور التيم.</p>
+              </div>
+              <span className="stats-count-pill">
+                <CalendarClock className="size-4" />
+                {activeMeetings.length} ميتينج
+              </span>
+            </div>
+            <div className="stats-meeting-summary">
+              <AnimatedProgressRing value={meetingPulseRate} label="Meeting attendance" caption="حضور" />
+              <div className="stats-meeting-lines">
+                <div className="stats-meeting-row is-summary">
+                  <div>
+                    <strong>{meetingPulseRate}% حضور عام</strong>
+                    <span>
+                      {meetingAttendedTotal}/{meetingExpectedTotal} حضور مسجل
+                    </span>
+                  </div>
+                  <div className="stats-mini-meter" aria-label={`${meetingPulseRate}% attendance`}>
+                    <span style={{ width: `${meetingPulseRate}%` }} />
+                  </div>
+                </div>
+                {stats.meetingMetrics.map((item) => {
+                  const attendanceRate = item.expected > 0 ? Math.round((item.attended / item.expected) * 100) : 0;
+                  return (
+                    <div key={item.meeting.id} className="stats-meeting-row">
+                      <div>
+                        <strong dir={textDirection(item.meeting.title)}>{item.meeting.title}</strong>
+                        <span>
+                          {item.attended}/{item.expected} حضور • {item.totalScore} درجات
+                        </span>
+                      </div>
+                      <div className="stats-mini-meter" aria-label={`${attendanceRate}% attendance`}>
+                        <span style={{ width: `${attendanceRate}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        )}
+
+        <section className="stats-panel stats-appear">
+          <div className="stats-section-head">
+            <div>
+              <h2>
+                <span className="highlight-yellow">تقدم التاسكات</span>
+              </h2>
+              <p>كل تاسك ظاهر مع نسبة التسليم، القبول، الرفض، والناقص.</p>
+            </div>
+            <span className="stats-count-pill">
+              <ListChecks className="size-4" />
+              {activeTasks.length} تاسكات شغالة
+            </span>
+          </div>
+
+          <div className="stats-task-board">
+            {stats.taskMetrics.length === 0 ? (
+              <p className="stats-empty-state">مفيش تاسكات شغالة دلوقتي.</p>
+            ) : (
+              stats.taskMetrics.map((metric, index) => {
+                const segments = taskSegments(metric.task);
+                const taskRate = metric.expected > 0 ? Math.round((metric.received / metric.expected) * 100) : 0;
+                const submissionDetails = taskSubmissionDetails(metric.task);
+                return (
+                  <article
+                    key={metric.task.id}
+                    className="stats-task-card"
+                    style={{ animationDelay: `${index * 80}ms` }}
+                  >
+                    <div className="stats-task-main">
+                      <div className="min-w-0">
+                        <h3 dir={textDirection(metric.task.title)} className={textAlignClass(metric.task.title)}>
+                          {metric.task.title}
+                        </h3>
+                        <p>
+                          deadline: {formatDateTime(metric.task.deadlineAt)} • {formatTaskPointsLabel(metric.task.points || 1)}
+                        </p>
+                      </div>
+                      <div className="stats-task-score">
+                        <strong>{metric.received}/{metric.expected}</strong>
+                        <span>تسليم</span>
+                      </div>
+                    </div>
+                    <div className="stats-task-progress-line">
+                      <SegmentedStatusBar segments={segments} total={metric.expected} />
+                      <span>{taskRate}%</span>
+                    </div>
+                    <div className="stats-task-meta">
+                      <span className="is-approved">مقبول {metric.approved}</span>
+                      <span className="is-pending">مراجعة {metric.submitted}</span>
+                      {submissionDetails.rejectedNames.length > 0 ? (
+                        <details className="stats-rejected-details">
+                          <summary className="is-rejected">مرفوض {metric.rejected}</summary>
+                          <div className="stats-rejected-list">{submissionDetails.rejectedNames.join("، ")}</div>
+                        </details>
+                      ) : (
+                        <span className="is-rejected">مرفوض {metric.rejected}</span>
+                      )}
+                      <span>متابعات {metric.progressUpdates}</span>
+                      {submissionDetails.singleSubmitter && (
+                        <span className="is-single-submitter">سلّم: {submissionDetails.singleSubmitter}</span>
+                      )}
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+
+          <div className="stats-legend">
+            <span><i className="bg-emerald-500" /> مقبول</span>
+            <span><i className="bg-yellow-400" /> مراجعة</span>
+            <span><i className="bg-red-500" /> مرفوض</span>
+            <span><i className="bg-zinc-200" /> ناقص</span>
+          </div>
+        </section>
+
+        <section className="stats-panel stats-members-panel stats-appear">
+          <div className="stats-section-head">
+            <div>
+              <h2>
+                <span className="highlight-yellow">أداء الأعضاء</span>
+              </h2>
+              <p>كل صف يوضح الدرجات، نسبة التسليم، القبول، والحالة بشكل سريع.</p>
+            </div>
+            <span className="stats-count-pill">
+              <BarChart3 className="size-4" />
+              {teamApprovalRate}% قبول
+            </span>
+          </div>
+          <div className="stats-member-list">
+            {visibleMemberRows.map((item, index) => {
+              const state = memberState(item);
+              const insight = memberInsight(item);
+              const segments = memberSegments(item.member.id);
+              return (
+                <details
+                  key={item.member.id}
+                  className={cn("stats-member-row", memberTone(item))}
+                  style={{ animationDelay: `${index * 55}ms` }}
+                >
+                  <summary className="cursor-pointer list-none">
+                    <div className="stats-member-summary">
+                      <div className="stats-member-rank">{index + 1}</div>
+                      <div className="min-w-0">
+                        <div className="stats-member-name-line">
+                          <strong>{memberArabicName(item.member)}</strong>
+                          <span>{state}</span>
+                        </div>
+                        <div className="stats-member-insight">{insight}</div>
+                      </div>
+                      <div className="stats-member-numbers">
+                        <strong>{item.points}</strong>
+                        <span>درجات</span>
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <SegmentedStatusBar segments={segments} total={item.assignedTasks} />
+                    </div>
+                    <div className="stats-member-meta">
+                      <span>{formatPercent(item.responseRate)} تسليم</span>
+                      <span>{formatPercent(item.approvalRate)} قبول</span>
+                      <span>خلص {item.approved}/{item.assignedTasks}</span>
+                      <span>{item.pending} مراجعة</span>
+                    </div>
+                  </summary>
+                  <StatsMemberDetails item={item} />
+                </details>
+              );
+            })}
+          </div>
+          {visibleStats.length > visibleMemberRows.length && (
+            <p className="mt-3 text-center text-sm font-bold text-foreground/45">
+              +{visibleStats.length - visibleMemberRows.length} أعضاء موجودين في الداتا.
+            </p>
+          )}
+        </section>
       </main>
     </div>
   );
@@ -6534,7 +7070,7 @@ function LegacyStatsView({
             <span className="highlight-yellow">Statistics</span>
           </h1>
           <p className="text-lg text-foreground/75">
-            شاشة قراءة فقط: مين شغال، مين سريع، ومين محتاج متابعة.
+            شاشة قراءة فقط: مين شغال، مين سريع، ومين محتاج تدخل واضح.
           </p>
           <Button
             type="button"
@@ -7684,7 +8220,7 @@ function Index() {
   }
 
   if (activeStats) {
-    return <StatsView data={data} stats={stats} onLogout={logout} />;
+    return <DeanStatsView data={data} stats={stats} onLogout={logout} />;
   }
 
   if (activeMember) {

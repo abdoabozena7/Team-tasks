@@ -619,6 +619,10 @@
     100% 100%;
 }
 
+.stats-shell {
+  width: min(100%, 520px);
+}
+
 .stats-appear {
   animation: stats-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -635,11 +639,11 @@
 .stats-hero {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  gap: 18px;
+  grid-template-columns: 1fr;
+  gap: 14px;
   overflow: hidden;
   border-radius: 24px 30px 20px 28px / 28px 22px 30px 22px;
-  padding: 22px;
+  padding: 16px;
   background:
     radial-gradient(circle at 12% 18%, rgba(253, 230, 138, 0.72), transparent 23%),
     radial-gradient(circle at 86% 10%, rgba(186, 230, 253, 0.78), transparent 28%),
@@ -662,6 +666,10 @@
 .stats-hero-panel {
   position: relative;
   z-index: 1;
+}
+
+.stats-hero-copy {
+  text-align: center;
 }
 
 .stats-health-pill,
@@ -695,7 +703,7 @@
 
 .stats-ring {
   position: relative;
-  width: min(220px, 72vw);
+  width: min(190px, 68vw);
   aspect-ratio: 1;
   display: grid;
   place-items: center;
@@ -733,7 +741,7 @@
 }
 
 .stats-ring-copy strong {
-  font-size: 3.5rem;
+  font-size: 2.85rem;
   line-height: 0.9;
 }
 
@@ -747,7 +755,7 @@
 .stats-hero-metrics {
   display: grid;
   width: 100%;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -776,18 +784,20 @@
 
 .stats-attention-strip {
   display: grid;
-  grid-template-columns: minmax(180px, 0.55fr) minmax(0, 1.45fr);
-  gap: 14px;
+  grid-template-columns: 1fr;
+  gap: 12px;
   border-color: #a16207;
   border-radius: 18px 24px 18px 22px / 22px 18px 24px 18px;
   background: #fff7cc;
-  padding: 16px;
+  padding: 14px;
 }
 
 .stats-attention-heading {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
+  text-align: center;
 }
 
 .stats-attention-heading > svg {
@@ -816,7 +826,7 @@
 
 .stats-attention-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -826,6 +836,7 @@
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.72);
   padding: 10px;
+  text-align: center;
 }
 
 .stats-attention-card span,
@@ -866,15 +877,17 @@
 
 .stats-panel {
   border-radius: 22px 26px 18px 24px / 24px 18px 26px 20px;
-  padding: 18px;
+  padding: 14px;
 }
 
 .stats-section-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 12px;
   margin-bottom: 16px;
+  text-align: center;
 }
 
 .stats-task-board,
@@ -899,9 +912,11 @@
 .stats-member-summary,
 .stats-meeting-row {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  text-align: center;
 }
 
 .stats-task-main h3 {
@@ -909,6 +924,7 @@
   font-size: 1.2rem;
   font-weight: 800;
   line-height: 1.25;
+  text-align: center;
 }
 
 .stats-task-main p,
@@ -964,6 +980,7 @@
 
 .stats-task-progress-line > .stats-segmented-bar {
   flex: 1 1 auto;
+  width: 100%;
 }
 
 .stats-task-progress-line > span {
@@ -983,6 +1000,7 @@
 .stats-member-meta {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 7px;
   margin-top: 10px;
   font-size: 0.78rem;
@@ -1007,6 +1025,38 @@
 
 .stats-task-meta .is-rejected {
   background: #fee2e2;
+}
+
+.stats-rejected-details {
+  min-width: 0;
+}
+
+.stats-rejected-details summary {
+  cursor: pointer;
+  list-style: none;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-weight: 800;
+}
+
+.stats-rejected-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.stats-rejected-list {
+  margin-top: 6px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  border: 1.5px solid rgba(220, 38, 38, 0.24);
+  border-radius: 12px;
+  background: rgba(254, 226, 226, 0.78);
+  padding: 7px;
+  text-align: center;
+}
+
+.stats-task-meta .is-single-submitter {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .stats-legend span {
@@ -1113,6 +1163,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: center;
   gap: 7px;
 }
 
@@ -1134,18 +1185,20 @@
   margin-top: 5px;
   font-size: 0.78rem;
   font-weight: 800;
+  text-align: center;
   color: rgba(26, 26, 26, 0.5);
 }
 
 .stats-meeting-summary {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: 1fr;
+  gap: 14px;
   align-items: center;
 }
 
 .stats-meetings-panel .stats-ring {
-  width: 160px;
+  width: min(150px, 62vw);
+  margin-inline: auto;
 }
 
 .stats-meeting-row {
@@ -1159,8 +1212,8 @@
 }
 
 .stats-mini-meter {
-  width: 150px;
-  max-width: 34vw;
+  width: 100%;
+  max-width: none;
   height: 9px;
   overflow: hidden;
   border: 1.5px solid rgba(26, 26, 26, 0.4);
