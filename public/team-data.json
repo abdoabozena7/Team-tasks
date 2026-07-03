@@ -729,63 +729,8 @@
   "taskSkips": {},
   "progressUpdates": {},
   "taskUpdates": {},
-  "meetings": [
-    {
-      "title": "meet1",
-      "startsAt": "2026-07-02T13:32:00.000Z",
-      "durationMinutes": 60,
-      "points": 1,
-      "status": "active",
-      "id": "meeting-1782999164958",
-      "createdAt": "2026-07-02T13:32:44.958Z"
-    }
-  ],
-  "meetingAttendance": {
-    "meeting-1782999164958": {
-      "abozena": {
-        "memberId": "abozena",
-        "memberName": "Abozena",
-        "checkedAt": "2026-07-02T13:32:54.267Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "abo-grir": {
-        "memberId": "abo-grir",
-        "memberName": "Abo grir",
-        "checkedAt": "2026-07-02T13:32:57.275Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "renad": {
-        "memberId": "renad",
-        "memberName": "renad",
-        "checkedAt": "2026-07-02T13:33:00.178Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "rodina": {
-        "memberId": "rodina",
-        "memberName": "rodina",
-        "checkedAt": "2026-07-02T13:33:01.846Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "marihan": {
-        "memberId": "marihan",
-        "memberName": "marihan",
-        "checkedAt": "2026-07-02T15:09:31.651Z",
-        "lateMinutes": 98,
-        "score": 0
-      },
-      "yossef-sharawy": {
-        "memberId": "yossef-sharawy",
-        "memberName": "yossef sharawy",
-        "checkedAt": "2026-07-02T22:13:05.794Z",
-        "lateMinutes": 521,
-        "score": 0
-      }
-    }
-  },
+  "meetings": [],
+  "meetingAttendance": {},
   "repoUpdates": [
     {
       "id": "repo-manual-tasneem-task-1783008997895-1783045246194",
@@ -1025,6 +970,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-03T14:40:45.819Z"
+    "updatedAt": "2026-07-03T14:40:53.548Z"
   }
 }
