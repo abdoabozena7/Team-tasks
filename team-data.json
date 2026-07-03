@@ -154,7 +154,7 @@
       ],
       "hidden": false,
       "baseCompleted": 0,
-      "basePoints": 0,
+      "basePoints": 8,
       "adminNote": "",
       "baseApproved": 0,
       "baseRejected": 0,
@@ -970,6 +970,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-03T14:42:00.828Z"
+    "updatedAt": "2026-07-03T14:42:48.894Z"
   }
 }
