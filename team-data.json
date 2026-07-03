@@ -731,15 +731,6 @@
   "taskUpdates": {},
   "meetings": [
     {
-      "title": "task 1",
-      "startsAt": "2026-07-02T13:00:00.000Z",
-      "durationMinutes": 60,
-      "points": 1,
-      "status": "archived",
-      "id": "meeting-1782933670298",
-      "createdAt": "2026-07-01T19:21:10.298Z"
-    },
-    {
       "title": "Task 1",
       "startsAt": "2026-07-02T13:24:00.000Z",
       "durationMinutes": 60,
@@ -759,36 +750,6 @@
     }
   ],
   "meetingAttendance": {
-    "meeting-1782933670298": {
-      "renad": {
-        "memberId": "renad",
-        "memberName": "renad",
-        "checkedAt": "2026-07-02T13:23:29.247Z",
-        "lateMinutes": 23,
-        "score": 0.78
-      },
-      "abozena": {
-        "memberId": "abozena",
-        "memberName": "Abozena",
-        "checkedAt": "2026-07-02T13:23:35.375Z",
-        "lateMinutes": 24,
-        "score": 0.77
-      },
-      "rodina": {
-        "memberId": "rodina",
-        "memberName": "rodina",
-        "checkedAt": "2026-07-02T13:23:39.209Z",
-        "lateMinutes": 24,
-        "score": 0.77
-      },
-      "abo-grir": {
-        "memberId": "abo-grir",
-        "memberName": "Abo grir",
-        "checkedAt": "2026-07-02T13:23:51.359Z",
-        "lateMinutes": 24,
-        "score": 0.77
-      }
-    },
     "meeting-1782998675325": {
       "abozena": {
         "memberId": "abozena",
@@ -1145,6 +1106,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-03T14:39:53.512Z"
+    "updatedAt": "2026-07-03T14:40:40.260Z"
   }
 }
