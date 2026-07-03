@@ -266,7 +266,7 @@ function withReviewEvent(
 }
 
 function normalizeData(data: StudioData): StudioData {
-  const tasks = (data.tasks ?? []).map((task) => ({
+  const tasks: StudioTask[] = (data.tasks ?? []).map((task) => ({
     ...task,
     scope: task.scope === "member" ? "member" : "all",
     memberId:
@@ -282,6 +282,16 @@ function normalizeData(data: StudioData): StudioData {
     status: task.status === "archived" ? "archived" : "active",
   }));
   const taskIds = new Set(tasks.map((task) => task.id));
+  const meetings: Meeting[] = (data.meetings ?? []).map((meeting) => ({
+    ...meeting,
+    title: meeting.title || "Meeting",
+    startsAt: meeting.startsAt || meeting.createdAt || new Date().toISOString(),
+    durationMinutes: Math.floor(positiveNumber(meeting.durationMinutes, 60)),
+    points: positiveNumber(meeting.points, 1),
+    status: meeting.status === "archived" ? "archived" : "active",
+    createdAt: meeting.createdAt || new Date().toISOString(),
+  }));
+  const meetingIds = new Set(meetings.map((meeting) => meeting.id));
 
   return {
     projectName: data.projectName || "Hivo Studio",
@@ -317,16 +327,10 @@ function normalizeData(data: StudioData): StudioData {
             .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
         ]),
     ),
-    meetings: (data.meetings ?? []).map((meeting) => ({
-      ...meeting,
-      title: meeting.title || "Meeting",
-      startsAt: meeting.startsAt || meeting.createdAt || new Date().toISOString(),
-      durationMinutes: Math.floor(positiveNumber(meeting.durationMinutes, 60)),
-      points: positiveNumber(meeting.points, 1),
-      status: meeting.status === "archived" ? "archived" : "active",
-      createdAt: meeting.createdAt || new Date().toISOString(),
-    })),
-    meetingAttendance: data.meetingAttendance ?? {},
+    meetings,
+    meetingAttendance: Object.fromEntries(
+      Object.entries(data.meetingAttendance ?? {}).filter(([meetingId]) => meetingIds.has(meetingId)),
+    ),
     repoUpdates: (data.repoUpdates ?? []).filter(
       (update) => !update.taskId || taskIds.has(update.taskId),
     ),
@@ -504,6 +508,34 @@ function getTask(data: StudioData, taskId: string) {
 
 function taskStatus(task: StudioTask) {
   return task.status === "archived" ? "archived" : "active";
+}
+
+function getMeeting(data: StudioData, meetingId: string) {
+  const meeting = (data.meetings ?? []).find((item) => item.id === meetingId);
+  if (!meeting) throw new Error("Meeting not found.");
+  return meeting;
+}
+
+function meetingStatus(meeting: Meeting) {
+  return meeting.status === "archived" ? "archived" : "active";
+}
+
+function calculateMeetingAttendance(meeting: Meeting, checkedAt = new Date().toISOString()) {
+  const startTime = new Date(meeting.startsAt).getTime();
+  const checkTime = new Date(checkedAt).getTime();
+  const duration = Math.max(1, Math.floor(positiveNumber(meeting.durationMinutes, 60)));
+  const lateMinutes =
+    Number.isFinite(startTime) && Number.isFinite(checkTime)
+      ? Math.max(0, Math.round((checkTime - startTime) / 60000))
+      : 0;
+  const billableLateMinutes = Math.max(0, lateMinutes - 10);
+  const penaltyRate = Math.min(1, billableLateMinutes / duration);
+  const score = Math.max(0, positiveNumber(meeting.points, 1) * (1 - penaltyRate));
+
+  return {
+    lateMinutes,
+    score: Math.round(score * 100) / 100,
+  };
 }
 
 function getMember(data: StudioData, memberId: string) {
@@ -882,6 +914,96 @@ export default {
               taskUpdates: {
                 ...(data.taskUpdates ?? {}),
                 [taskId]: [update, ...((data.taskUpdates ?? {})[taskId] ?? [])],
+              },
+            };
+          }
+
+          if (action === "addMeeting") {
+            const meeting = payload.meeting as Partial<Meeting> | undefined;
+            const title = String(meeting?.title ?? "").trim();
+            if (!title) throw new Error("Meeting title is required.");
+            const nextMeeting: Meeting = {
+              id: `meeting-${Date.now()}`,
+              title,
+              startsAt: meeting?.startsAt || new Date().toISOString(),
+              durationMinutes: Math.floor(positiveNumber(meeting?.durationMinutes, 60)),
+              points: positiveNumber(meeting?.points, 1),
+              status: meeting?.status === "archived" ? "archived" : "active",
+              createdAt: new Date().toISOString(),
+            };
+            return { ...data, meetings: [...(data.meetings ?? []), nextMeeting] };
+          }
+
+          if (action === "updateMeeting") {
+            const meetingId = String(payload.meetingId ?? "");
+            const existingMeeting = getMeeting(data, meetingId);
+            const updates = (payload.updates ?? {}) as Partial<Meeting>;
+            return {
+              ...data,
+              meetings: (data.meetings ?? []).map((meeting) =>
+                meeting.id === meetingId
+                  ? {
+                      ...meeting,
+                      ...updates,
+                      title: updates.title === undefined ? meeting.title : String(updates.title).trim() || meeting.title,
+                      startsAt: updates.startsAt || meeting.startsAt,
+                      durationMinutes:
+                        updates.durationMinutes === undefined
+                          ? meeting.durationMinutes
+                          : Math.floor(positiveNumber(updates.durationMinutes, meeting.durationMinutes || 60)),
+                      points:
+                        updates.points === undefined
+                          ? meeting.points
+                          : positiveNumber(updates.points, meeting.points || 1),
+                      status:
+                        updates.status === "archived"
+                          ? "archived"
+                          : updates.status === "active"
+                            ? "active"
+                            : meetingStatus(existingMeeting),
+                    }
+                  : meeting,
+              ),
+            };
+          }
+
+          if (action === "removeMeeting") {
+            const meetingId = String(payload.meetingId ?? "");
+            getMeeting(data, meetingId);
+            const meetingAttendance = { ...(data.meetingAttendance ?? {}) };
+            delete meetingAttendance[meetingId];
+            return {
+              ...data,
+              meetings: (data.meetings ?? []).filter((meeting) => meeting.id !== meetingId),
+              meetingAttendance,
+            };
+          }
+
+          if (action === "recordMeetingAttendance") {
+            const meetingId = String(payload.meetingId ?? "");
+            const memberId = String(payload.memberId ?? "");
+            const meeting = getMeeting(data, meetingId);
+            const member = getMember(data, memberId);
+            const checkedAt = new Date().toISOString();
+            const startTime = new Date(meeting.startsAt).getTime();
+            if (Number.isFinite(startTime) && checkedAt && Date.now() < startTime) {
+              throw new Error("Attendance is not open yet.");
+            }
+            const calculated = calculateMeetingAttendance(meeting, checkedAt);
+            return {
+              ...data,
+              meetingAttendance: {
+                ...(data.meetingAttendance ?? {}),
+                [meeting.id]: {
+                  ...((data.meetingAttendance ?? {})[meeting.id] ?? {}),
+                  [member.id]: {
+                    memberId: member.id,
+                    memberName: member.name,
+                    checkedAt,
+                    lateMinutes: calculated.lateMinutes,
+                    score: calculated.score,
+                  },
+                },
               },
             };
           }

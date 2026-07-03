@@ -454,7 +454,7 @@ function memberVisibleMeetings(meetings: Meeting[], now = new Date()) {
 }
 
 function sanitizeData(data: StudioData): StudioData {
-  const tasks = (data.tasks ?? []).map((task) => ({
+  const tasks: StudioTask[] = (data.tasks ?? []).map((task) => ({
     ...task,
     points: sanitizeNumber(task.points) || 1,
     scope: task.scope === "member" ? "member" : "all",
@@ -471,6 +471,16 @@ function sanitizeData(data: StudioData): StudioData {
     status: task.status === "archived" ? "archived" : "active",
   }));
   const taskIds = new Set(tasks.map((task) => task.id));
+  const meetings: Meeting[] = (data.meetings ?? []).map((meeting) => ({
+    ...meeting,
+    title: meeting.title || "Meeting",
+    startsAt: meeting.startsAt || meeting.createdAt || new Date().toISOString(),
+    durationMinutes: sanitizeNumber(meeting.durationMinutes) || 60,
+    points: sanitizePositiveNumber(meeting.points, 1),
+    status: meeting.status === "archived" ? "archived" : "active",
+    createdAt: meeting.createdAt || new Date().toISOString(),
+  }));
+  const meetingIds = new Set(meetings.map((meeting) => meeting.id));
 
   return {
     ...DEFAULT_DATA,
@@ -514,16 +524,10 @@ function sanitizeData(data: StudioData): StudioData {
             .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
         ]),
     ),
-    meetings: (data.meetings ?? []).map((meeting) => ({
-      ...meeting,
-      title: meeting.title || "Meeting",
-      startsAt: meeting.startsAt || meeting.createdAt || new Date().toISOString(),
-      durationMinutes: sanitizeNumber(meeting.durationMinutes) || 60,
-      points: sanitizePositiveNumber(meeting.points, 1),
-      status: meeting.status === "archived" ? "archived" : "active",
-      createdAt: meeting.createdAt || new Date().toISOString(),
-    })),
-    meetingAttendance: data.meetingAttendance ?? {},
+    meetings,
+    meetingAttendance: Object.fromEntries(
+      Object.entries(data.meetingAttendance ?? {}).filter(([meetingId]) => meetingIds.has(meetingId)),
+    ),
     repoUpdates: (data.repoUpdates ?? []).filter(
       (update) => !update.taskId || taskIds.has(update.taskId),
     ),
@@ -747,6 +751,8 @@ function formatPercent(value: number) {
 function createStats(data: StudioData) {
   const activeTasks = data.tasks.filter(isActiveTask);
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
+  const scoreMeetings = data.meetings ?? [];
+  const memberOrder = new Map(data.members.map((member, index) => [member.id, index]));
   const memberStats = data.members.map((member) => {
     const assignedTasks = activeTasks.filter(
       (task) => taskIsForMember(task, member.id) && !isTaskSkipped(data, task.id, member.id),
@@ -768,19 +774,18 @@ function createStats(data: StudioData) {
       speedSamples.length > 0
         ? speedSamples.reduce((sum, value) => sum + value, 0) / speedSamples.length
         : null;
-    const baseCompleted = sanitizeNumber(member.baseCompleted);
-    const baseApproved = sanitizeNumber(member.baseApproved);
-    const baseRejected = sanitizeNumber(member.baseRejected);
+    const baseCompleted = 0;
+    const baseApproved = 0;
+    const baseRejected = 0;
     const basePoints = sanitizeNumber(member.basePoints);
-    const meetingPoints = activeMeetings.reduce(
+    const meetingPoints = scoreMeetings.reduce(
       (sum, meeting) => sum + (data.meetingAttendance?.[meeting.id]?.[member.id]?.score ?? 0),
       0,
     );
-    const approved = approvedTasks.length + baseApproved;
-    const rejected =
-      responses.reduce((sum, item) => sum + rejectionCount(item.response), 0) + baseRejected;
+    const approved = approvedTasks.length;
+    const rejected = responses.reduce((sum, item) => sum + rejectionCount(item.response), 0);
     const pending = responses.filter((item) => item.response.status === "submitted").length;
-    const submitted = responses.length + baseCompleted;
+    const submitted = responses.length;
     const reviewed = approved + rejected;
     const responseRate =
       assignedTasks.length > 0 ? (responses.length / assignedTasks.length) * 100 : 0;
@@ -797,7 +802,7 @@ function createStats(data: StudioData) {
       baseCompleted,
       baseApproved,
       baseRejected,
-      completed: baseCompleted + approvedTasks.length,
+      completed: approvedTasks.length,
       taskPoints,
       basePoints,
       meetingPoints,
@@ -810,7 +815,11 @@ function createStats(data: StudioData) {
   const visibleStats = memberStats.filter((item) => !item.member.hidden);
   const rankedMembers = [...visibleStats].sort((a, b) => {
     if (b.points !== a.points) return b.points - a.points;
-    return b.completed - a.completed;
+    if (b.approvalRate !== a.approvalRate) return b.approvalRate - a.approvalRate;
+    if (b.assignedTasks !== a.assignedTasks) return b.assignedTasks - a.assignedTasks;
+    if (b.submitted !== a.submitted) return b.submitted - a.submitted;
+    if (b.completed !== a.completed) return b.completed - a.completed;
+    return (memberOrder.get(a.member.id) ?? 0) - (memberOrder.get(b.member.id) ?? 0);
   });
   const taskMetrics = activeTasks.map((task) => {
     const visibleMemberIds = new Set(
@@ -1003,7 +1012,6 @@ function MemberDetails({ item }: { item: MemberScore }) {
       <span>مسلم: {item.submitted}</span>
       <span>مستني مراجعة: {item.pending}</span>
       <span>مقبول: {item.approved}</span>
-      <span>مرفوض: {item.rejected}</span>
       <span>نقاط: {item.points}</span>
       <span>تاسكات محسوبة: {item.completed}</span>
       <span>نسبة التسليم: {formatPercent(item.responseRate)}</span>
@@ -1020,7 +1028,6 @@ function StatsMemberDetails({ item }: { item: MemberScore }) {
       <span>Submitted: {item.submitted}</span>
       <span>Pending review: {item.pending}</span>
       <span>Approved: {item.approved}</span>
-      <span>Rejected: {item.rejected}</span>
       <span>Points: {item.points}</span>
       <span>Counted tasks: {item.completed}</span>
       <span>Submission rate: {formatPercent(item.responseRate)}</span>
@@ -1179,12 +1186,8 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
             </span>
             <span className="leaderboard-podium-review">
               <span>
-                <strong>{item.approved}</strong>
-                <small>Accepted</small>
-              </span>
-              <span>
-                <strong>{item.rejected}</strong>
-                <small>Rejected</small>
+                <strong>{formatPercent(item.approvalRate)}</strong>
+                <small>Acceptance</small>
               </span>
             </span>
           </div>
@@ -1251,7 +1254,7 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
             <LeaderboardStatPill label="درجات" value={item.points} />
             <LeaderboardStatPill label="مقبول" value={item.approved} className="bg-emerald-100/70" />
             <LeaderboardStatPill label="Assigned" value={item.assignedTasks} className="bg-sky-100/70" />
-            <LeaderboardStatPill label="مرفوض" value={item.rejected} className="bg-red-100/70" />
+            <LeaderboardStatPill label="القبول" value={formatPercent(item.approvalRate)} className="bg-emerald-50" />
           </span>
 
           <span className="block h-2 overflow-hidden rounded-full border border-ink/80 bg-white/75" dir="ltr">
@@ -1482,7 +1485,7 @@ function MemberView({
       Boolean(getResponse(data, task.id, activeMember.member.id)),
     ).length;
     const logApproved = activeMemberScore?.approved ?? 0;
-    const logRejected = activeMemberScore?.rejected ?? 0;
+    const logApprovalRate = activeMemberScore?.approvalRate ?? 0;
 
     return (
       <section className="mb-7 grid gap-3">
@@ -1490,7 +1493,7 @@ function MemberView({
           <CompactMetric label="Assigned" value={logAssigned} />
           <CompactMetric label="Done" value={logSubmitted} />
           <CompactMetric label="Accepted" value={logApproved} />
-          <CompactMetric label="Rejected" value={logRejected} />
+          <CompactMetric label="Acceptance" value={formatPercent(logApprovalRate)} />
         </div>
         {memberLogTasks.length === 0 ? (
           <div
@@ -1889,6 +1892,7 @@ function MemberView({
               const taskQuestionIsLong =
                 task.question.trim().length > 180 || task.question.trim().split(/\n/).length > 3;
               const taskUpdates = data.taskUpdates?.[task.id] ?? [];
+              const unseenTaskUpdates = taskUpdates.filter((update) => !seenTaskUpdateIds.includes(update.id));
               const taskPoints = sanitizePositiveNumber(task.points, 1);
               const taskAudienceLabel = task.scope === "all" ? "تاسك عام لكل التيم" : "تاسك مخصص ليك";
               const taskPointsLabel = formatTaskPointsLabel(taskPoints);
@@ -1984,6 +1988,58 @@ function MemberView({
                       </span>
                     )}
                   </button>
+                  {taskUpdates.length > 0 && (
+                    <div className="mb-4 rounded-xl border-[2px] border-sky-200 bg-sky-50 p-3 text-sky-950">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <strong className="text-base">Latest updates</strong>
+                          {unseenTaskUpdates.length > 0 && (
+                            <span className="rounded-full border border-yellow-700 bg-yellow-100 px-2 py-0.5 text-xs font-bold text-yellow-900">
+                              New
+                            </span>
+                          )}
+                        </div>
+                        {unseenTaskUpdates.length > 0 && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => markTaskUpdatesSeen(unseenTaskUpdates.map((update) => update.id))}
+                            className="border border-sky-300 bg-white text-sky-950"
+                          >
+                            <Eye data-icon="inline-start" />
+                            Seen
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid gap-2">
+                        {taskUpdates.slice(0, 2).map((update) => (
+                          <div
+                            key={update.id}
+                            className={cn("rounded-lg bg-white/75 p-2", textAlignClass(update.message))}
+                            dir={textDirection(update.message)}
+                          >
+                            <TaskMessageBody text={update.message} compact />
+                            <p className="mt-1 text-xs font-bold text-sky-900/55">
+                              {formatDateTime(update.createdAt)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                      {taskUpdates.length > 2 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedTaskId(task.id);
+                            setCopyFeedback("");
+                          }}
+                          className="mt-2 text-xs font-bold text-sky-700 underline underline-offset-4"
+                        >
+                          Show all updates
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <strong className="text-base">اكتب الرد أو التحديث</strong>
                   </div>
@@ -2143,24 +2199,36 @@ function MemberView({
       </div>
 
       {settingsOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 px-4">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 px-4 py-4">
           <section
-            className="w-full max-w-md border-[2.5px] border-ink bg-card p-4 doodle-shadow"
+            className="relative max-h-[calc(100vh-2rem)] w-full max-w-sm overflow-y-auto border-[2.5px] border-ink bg-card p-3 doodle-shadow scrollbar-none"
             style={{ borderRadius: "22px 28px 18px 26px / 24px 18px 28px 20px" }}
           >
-            <h2 className="mb-2 text-3xl font-bold">
-              <span className="highlight-yellow">Settings</span>
-            </h2>
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <h2 className="text-2xl font-bold">
+                <span className="highlight-yellow">Settings</span>
+              </h2>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => setSettingsOpen(false)}
+                className="size-9 shrink-0 border-[2px] border-ink bg-paper doodle-shadow-sm"
+                aria-label="Close settings"
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
             <p className="mb-2 text-sm text-foreground/65">الأسماء المتاحة للدخول:</p>
             <div className="mb-3 flex flex-wrap gap-2">
               {loginAliases.map((alias) => (
-                <span key={alias} className="border-[2px] border-ink bg-paper px-2 py-1 text-sm">
+                <span key={alias} className="border-[1.5px] border-ink bg-paper px-2 py-0.5 text-xs">
                   {alias}
                 </span>
               ))}
             </div>
 
-            <div className="mt-2 border-[2px] border-ink bg-paper p-3 text-sm leading-6">
+            <div className="mt-2 border-[2px] border-ink bg-paper p-3 text-sm leading-5">
               <label className="block font-bold" htmlFor="member-nickname">
                 Nickname
               </label>
@@ -2205,19 +2273,7 @@ function MemberView({
               </p>
               <ActionFeedbackLine feedback={nicknameFeedback} />
 
-              <div className="mt-4 border-t-[2px] border-ink/15 pt-3">
-                {!activeMember.member.repoUrl && (
-                  <p className="mb-2 rounded-md border-[2px] border-yellow-700 bg-yellow-100 p-2 font-bold text-yellow-900">
-                    ضيف GitHub repo بتاعك علشان لسه مش مضاف هنا.
-                  </p>
-                )}
-                {!activeMember.member.driveUrl && (
-                  <p className="mb-2 rounded-md border-[2px] border-yellow-700 bg-yellow-100 p-2 font-bold text-yellow-900">
-                    Add your Drive link for files that are not code.
-                  </p>
-                )}
-              </div>
-              <label className="mt-3 block font-bold" htmlFor="member-repo">
+              <label className="mt-3 block border-t-[2px] border-ink/15 pt-2 font-bold" htmlFor="member-repo">
                 GitHub repo
               </label>
               <Input
@@ -2283,9 +2339,7 @@ function MemberView({
                   <ExternalLink data-icon="inline-start" />
                   فتح الريبو بتاعي
                 </Button>
-              ) : (
-                <p className="mt-2 font-bold text-red-700">لا يوجد ريبو محفوظ رسميًا.</p>
-              )}
+              ) : null}
               {activeMember.member.driveUrl ? (
                 <Button
                   type="button"
@@ -2297,16 +2351,14 @@ function MemberView({
                   <FolderOpen data-icon="inline-start" />
                   Open my Drive
                 </Button>
-              ) : (
-                <p className="mt-2 font-bold text-red-700">No official Drive link saved.</p>
-              )}
+              ) : null}
             </div>
 
             <Button
               type="button"
               variant="outline"
               onClick={() => setSettingsOpen(false)}
-              className="mt-4 w-full border-[2px] border-ink bg-paper doodle-shadow-sm"
+              className="mt-3 w-full border-[2px] border-ink bg-paper py-2 doodle-shadow-sm"
             >
               رجوع
             </Button>
@@ -2667,6 +2719,7 @@ function AdminView({
   onAddMeeting,
   onUpdateMeeting,
   onRecordMeetingAttendance,
+  onRemoveMeeting,
   onRemoveTask,
   onManualApprove,
   onSkipTaskMember,
@@ -2703,6 +2756,7 @@ function AdminView({
   onAddMeeting: (meeting: Omit<Meeting, "id" | "createdAt">) => ActionResult;
   onUpdateMeeting: (meetingId: string, updates: Partial<Meeting>) => ActionResult;
   onRecordMeetingAttendance: (meeting: Meeting, member: Member) => ActionResult;
+  onRemoveMeeting: (meetingId: string) => ActionResult;
   onRemoveTask: (taskId: string) => ActionResult;
   onManualApprove: (task: StudioTask, memberId: string, awardedPoints?: number) => ActionResult;
   onSkipTaskMember: (task: StudioTask, memberId: string, note?: string) => ActionResult;
@@ -2730,7 +2784,7 @@ function AdminView({
   onConfirmTokenAndSave: () => ActionResult;
   onSaveToGithub: () => ActionResult;
 }) {
-  const [section, setSection] = useState<AdminSection>("tasks");
+  const [section, setSection] = useState<AdminSection>("repo-updates");
   const [navOpen, setNavOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskQuestion, setTaskQuestion] = useState("");
@@ -2798,21 +2852,11 @@ function AdminView({
     (request) => request.status === "pending",
   );
 
-  function attentionLandingSection(): AdminSection {
-    if (unseenUpdates.length > 0 || pendingProfileRequests.length > 0) return "repo-updates";
-    if (pendingSubmissions.length > 0) return "reviews";
-    return "tasks";
-  }
-
   useEffect(() => {
     setSection((current) => {
-      if (current === "repo-updates" && unseenUpdates.length === 0 && pendingProfileRequests.length === 0) {
-        return pendingSubmissions.length > 0 ? "reviews" : "tasks";
-      }
       if (current === "reviews" && pendingSubmissions.length === 0) {
-        return unseenUpdates.length > 0 || pendingProfileRequests.length > 0 ? "repo-updates" : "tasks";
+        return unseenUpdates.length > 0 || pendingProfileRequests.length > 0 ? "repo-updates" : "reviews";
       }
-      if (current === "tasks") return attentionLandingSection();
       return current;
     });
   }, [pendingProfileRequests.length, pendingSubmissions.length, unseenUpdates.length]);
@@ -3857,6 +3901,7 @@ function AdminView({
     const totalScore = Object.values(attendanceMap).reduce((sum, item) => sum + item.score, 0);
     const archiveMeetingKey = `admin:archive-meeting:${meeting.id}`;
     const restoreMeetingKey = `admin:restore-meeting:${meeting.id}`;
+    const deleteMeetingKey = `admin:delete-meeting:${meeting.id}`;
     const phase = meetingPhase(meeting, adminNowDate);
     const attendanceOpen = canRecordMeetingAttendance(meeting, adminNowDate);
     const timeWindow = meetingWindow(meeting);
@@ -3882,40 +3927,63 @@ function AdminView({
               <span>Total score: {Math.round(totalScore * 100) / 100}</span>
             </div>
           </div>
-          {isActiveMeeting(meeting) ? (
+          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+            {isActiveMeeting(meeting) ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  void runAdminAction(
+                    archiveMeetingKey,
+                    () => onUpdateMeeting(meeting.id, { status: "archived" }),
+                    "Meeting archived.",
+                    "Archive failed. Try again.",
+                  )
+                }
+                className={actionButtonClass("border border-ink/20 bg-paper", actionFeedback[archiveMeetingKey])}
+              >
+                <Archive data-icon="inline-start" />
+                Archive
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={() =>
+                  void runAdminAction(
+                    restoreMeetingKey,
+                    () => onUpdateMeeting(meeting.id, { status: "active" }),
+                    "Meeting restored.",
+                    "Restore failed. Try again.",
+                  )
+                }
+                className={actionButtonClass("border border-ink/20", actionFeedback[restoreMeetingKey])}
+              >
+                <RotateCcw data-icon="inline-start" />
+                Restore
+              </Button>
+            )}
             <Button
               type="button"
-              variant="outline"
-              onClick={() =>
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                if (!window.confirm("Delete this meeting and all linked attendance/score data?")) return;
                 void runAdminAction(
-                  archiveMeetingKey,
-                  () => onUpdateMeeting(meeting.id, { status: "archived" }),
-                  "Meeting archived.",
-                  "Archive failed. Try again.",
-                )
-              }
-              className={actionButtonClass("border border-ink/20 bg-paper", actionFeedback[archiveMeetingKey])}
+                  deleteMeetingKey,
+                  () => onRemoveMeeting(meeting.id),
+                  "Meeting deleted.",
+                  "Delete failed. Try again.",
+                );
+              }}
+              className={actionButtonClass(
+                "border border-red-200 bg-red-50 text-red-700",
+                actionFeedback[deleteMeetingKey],
+              )}
+              aria-label="Delete meeting"
             >
-              <Archive data-icon="inline-start" />
-              Archive
+              <Trash2 className="size-4" />
             </Button>
-          ) : (
-            <Button
-              type="button"
-              onClick={() =>
-                void runAdminAction(
-                  restoreMeetingKey,
-                  () => onUpdateMeeting(meeting.id, { status: "active" }),
-                  "Meeting restored.",
-                  "Restore failed. Try again.",
-                )
-              }
-              className={actionButtonClass("border border-ink/20", actionFeedback[restoreMeetingKey])}
-            >
-              <RotateCcw data-icon="inline-start" />
-              Restore
-            </Button>
-          )}
+          </div>
         </div>
 
         <div className="mt-4 grid gap-3 lg:grid-cols-3">
@@ -4015,13 +4083,14 @@ function AdminView({
 
   function renderMemberLog(member: Member) {
     const memberTasks = data.tasks.filter((task) => taskIsForMember(task, member.id));
+    const memberScore = stats.allMemberStats.find((item) => item.member.id === member.id);
     return (
       <div className="grid gap-2">
         <div className="grid gap-2 sm:grid-cols-4">
-          <CompactMetric label="Old tasks" value={member.baseCompleted ?? 0} />
-          <CompactMetric label="Old approved" value={member.baseApproved ?? 0} />
-          <CompactMetric label="Old rejected" value={member.baseRejected ?? 0} />
-          <CompactMetric label="Old points" value={member.basePoints ?? 0} />
+          <CompactMetric label="Assigned" value={memberScore?.assignedTasks ?? 0} />
+          <CompactMetric label="Submitted" value={memberScore?.submitted ?? 0} />
+          <CompactMetric label="Accepted" value={memberScore?.approved ?? 0} />
+          <CompactMetric label="Approval" value={formatPercent(memberScore?.approvalRate ?? 0)} />
         </div>
         {(data.meetings ?? []).length > 0 && (
           <div className="grid gap-2">
@@ -4696,7 +4765,7 @@ function AdminView({
                         <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
                           <span>Submitted {memberScore?.submitted ?? 0}</span>
                           <span>Approved {memberScore?.approved ?? 0}</span>
-                          <span>Rejected {memberScore?.rejected ?? 0}</span>
+                          <span>Approval {formatPercent(memberScore?.approvalRate ?? 0)}</span>
                           <span>Points {memberScore?.points ?? 0}</span>
                         </div>
                       </div>
@@ -4730,25 +4799,18 @@ function AdminView({
                             Create task for {member.name}
                           </Button>
                         </div>
-                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                          {([
-                            ["Old tasks", "baseCompleted", "bg-white"],
-                            ["Old approved", "baseApproved", "bg-emerald-50"],
-                            ["Old rejected", "baseRejected", "bg-red-50"],
-                            ["Old points", "basePoints", "bg-yellow-50"],
-                          ] as const).map(([label, field, bg]) => (
-                            <label key={field} className="grid gap-1 text-xs font-bold">
-                              {label}
-                              <Input
-                                type="number"
-                                min={0}
-                                value={member[field] ?? 0}
-                                onChange={(event) => onUpdateMember(member.id, { [field]: sanitizeNumber(event.target.value) })}
-                                className={`border border-ink/20 text-center ${bg}`}
-                              />
-                            </label>
-                          ))}
-                        </div>
+                        <label className="grid gap-1 text-xs font-bold">
+                          Manual grades
+                          <Input
+                            type="number"
+                            min={0}
+                            value={member.basePoints ?? 0}
+                            onChange={(event) =>
+                              onUpdateMember(member.id, { basePoints: sanitizeNumber(event.target.value) })
+                            }
+                            className="max-w-xs border border-ink/20 bg-yellow-50 text-center"
+                          />
+                        </label>
                         <Input value={member.publicFlag ?? ""} onChange={(event) => onUpdateMember(member.id, { publicFlag: event.target.value })} placeholder="Public flag" className="border border-ink/20 bg-red-50" />
                         <Input value={member.adminNote ?? ""} onChange={(event) => onUpdateMember(member.id, { adminNote: event.target.value })} placeholder="Private admin note" className="border border-ink/20 bg-paper" />
                         <Input value={member.repoUrl ?? ""} onChange={(event) => onUpdateMember(member.id, { repoUrl: event.target.value })} placeholder="Repo URL" dir="ltr" className="border border-ink/20 bg-paper text-left" />
@@ -4822,75 +4884,13 @@ function AdminView({
           )}
 
           {section === "settings" && (
-            <section className="grid gap-5 lg:grid-cols-2">
+            <section className="grid gap-5">
               <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
                 <h2 className="text-xl font-bold">Access</h2>
                 <div className="mt-3 grid gap-3">
                   <Input value={data.settings?.adminPassword ?? DEFAULT_ADMIN_PASSWORD} onChange={(event) => onUpdateSettings({ adminPassword: event.target.value })} placeholder="Admin password" className="border border-ink/20 bg-paper" />
                   <Input value={data.settings?.statsPassword ?? DEFAULT_STATS_PASSWORD} onChange={(event) => onUpdateSettings({ statsPassword: event.target.value })} placeholder="Stats password" className="border border-ink/20 bg-paper" />
                   <div className="rounded-lg border border-ink/10 bg-paper p-3 text-sm font-bold" dir="ltr">API: {HIVO_API_URL || "not configured"}</div>
-                </div>
-              </div>
-              <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
-                <h2 className="text-xl font-bold">Repo updates</h2>
-                <div className="mt-3 grid gap-2">
-                  {unseenUpdates.length === 0 ? (
-                    <p className="text-sm text-foreground/55">No unseen repo updates.</p>
-                  ) : (
-                    unseenUpdates.map((update) => {
-                      const member = data.members.find((item) => item.id === update.memberId);
-                      const settingsMarkSeenKey = `admin:settings-mark-seen:${update.id}`;
-                      return (
-                        <div key={update.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ink/10 bg-paper p-3">
-                          <div>
-                            <strong>{member?.name ?? update.memberId}</strong>
-                            {update.source && (
-                              <span className="ms-2 rounded-full border border-ink/10 bg-yellow-50 px-2 py-1 text-xs font-bold text-yellow-800">
-                                {update.source}
-                              </span>
-                            )}
-                            <p className="text-xs text-foreground/50">{formatDateTime(update.createdAt)}</p>
-                            {update.excerpt && (
-                              <p className="mt-1 max-w-md text-sm text-foreground/65">{update.excerpt}</p>
-                            )}
-                          </div>
-                          <div className="flex gap-2">
-                            {member?.repoUrl && update.source !== "drive" && (
-                              <Button type="button" size="sm" onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}>
-                                <ExternalLink data-icon="inline-start" />
-                                Repo
-                              </Button>
-                            )}
-                            {member?.driveUrl && update.source === "drive" && (
-                              <Button type="button" size="sm" onClick={() => window.open(member.driveUrl, "_blank", "noopener,noreferrer")}>
-                                <FolderOpen data-icon="inline-start" />
-                                Drive
-                              </Button>
-                            )}
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                void runAdminAction(
-                                  settingsMarkSeenKey,
-                                  () => onMarkRepoUpdateSeen(update.id),
-                                  "Marked done.",
-                                  "Could not mark done.",
-                                )
-                              }
-                              className={actionButtonClass(
-                                "border border-ink/20 bg-white",
-                                actionFeedback[settingsMarkSeenKey],
-                              )}
-                            >
-                              Done
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
                 </div>
               </div>
               <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm lg:col-span-2">
@@ -5624,7 +5624,7 @@ function LegacyAdminView({
                       <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/65">
                         <span>مسلم: {memberScore?.submitted ?? 0}</span>
                         <span>مقبول: {memberScore?.approved ?? 0}</span>
-                        <span>مرفوض: {memberScore?.rejected ?? 0}</span>
+                        <span>القبول: {formatPercent(memberScore?.approvalRate ?? 0)}</span>
                         <span>نقاط: {memberScore?.points ?? 0}</span>
                       </div>
                     </div>
@@ -5646,69 +5646,20 @@ function LegacyAdminView({
                     </Button>
                   </div>
 
-                  <div className="mb-4">
-                    <p className="mb-2 text-sm font-bold text-foreground/70">
-                      أرقام قديمة تتحسب مع اللي اتقبل على الموقع
-                    </p>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <label className="grid gap-1 text-sm font-bold">
-                        تاسكات قديمة
-                        <Input
-                          type="number"
-                          min={0}
-                          value={member.baseCompleted ?? 0}
-                          onChange={(event) =>
-                            onUpdateMember(member.id, {
-                              baseCompleted: sanitizeNumber(event.target.value),
-                            })
-                          }
-                          className="border-[2px] border-ink bg-card text-center text-lg"
-                        />
-                      </label>
-                      <label className="grid gap-1 text-sm font-bold">
-                        مقبول قديم
-                        <Input
-                          type="number"
-                          min={0}
-                          value={member.baseApproved ?? 0}
-                          onChange={(event) =>
-                            onUpdateMember(member.id, {
-                              baseApproved: sanitizeNumber(event.target.value),
-                            })
-                          }
-                          className="border-[2px] border-ink bg-emerald-50 text-center text-lg"
-                        />
-                      </label>
-                      <label className="grid gap-1 text-sm font-bold">
-                        مرفوض قديم
-                        <Input
-                          type="number"
-                          min={0}
-                          value={member.baseRejected ?? 0}
-                          onChange={(event) =>
-                            onUpdateMember(member.id, {
-                              baseRejected: sanitizeNumber(event.target.value),
-                            })
-                          }
-                          className="border-[2px] border-ink bg-red-50 text-center text-lg"
-                        />
-                      </label>
-                      <label className="grid gap-1 text-sm font-bold">
-                        نقاط قديمة
-                        <Input
-                          type="number"
-                          min={0}
-                          value={member.basePoints ?? 0}
-                          onChange={(event) =>
-                            onUpdateMember(member.id, {
-                              basePoints: sanitizeNumber(event.target.value),
-                            })
-                          }
-                          className="border-[2px] border-ink bg-yellow-50 text-center text-lg"
-                        />
-                      </label>
-                    </div>
-                  </div>
+                  <label className="mb-4 grid max-w-xs gap-1 text-sm font-bold">
+                    درجات يدوية
+                    <Input
+                      type="number"
+                      min={0}
+                      value={member.basePoints ?? 0}
+                      onChange={(event) =>
+                        onUpdateMember(member.id, {
+                          basePoints: sanitizeNumber(event.target.value),
+                        })
+                      }
+                      className="border-[2px] border-ink bg-yellow-50 text-center text-lg"
+                    />
+                  </label>
 
                   <div className="grid gap-3 lg:grid-cols-2">
                     <label className="grid gap-1 text-sm font-bold">
@@ -5860,7 +5811,8 @@ function StatsView({
   const receivedTotal = stats.taskMetrics.reduce((sum, item) => sum + item.received, 0);
   const completionRate = expectedTotal > 0 ? Math.round((receivedTotal / expectedTotal) * 100) : 0;
   const approved = visibleStats.reduce((sum, item) => sum + item.approved, 0);
-  const rejected = visibleStats.reduce((sum, item) => sum + item.rejected, 0);
+  const reviewed = visibleStats.reduce((sum, item) => sum + item.reviewed, 0);
+  const teamApprovalRate = reviewed > 0 ? Math.round((approved / reviewed) * 100) : 0;
   const totalPoints = Math.round(stats.pointsTotal * 100) / 100;
   const teamHealth =
     completionRate >= 80 && stats.pendingTotal <= 2
@@ -5877,7 +5829,7 @@ function StatsView({
 
   function memberState(item: MemberScore) {
     if (item.assignedTasks === 0) return "No active assignments";
-    if (item.responseRate < 50 || item.rejected > 0) return "At risk";
+    if (item.responseRate < 50 || (item.reviewed > 0 && item.approvalRate < 50)) return "At risk";
     if (item.responseRate >= 80 && item.pending === 0) return "On track";
     return "Needs follow-up";
   }
@@ -6158,7 +6110,7 @@ function StatsView({
               </p>
             </div>
             <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-sm font-bold text-red-700">
-              {rejected} rejections
+              {teamApprovalRate}% approval
             </span>
           </div>
           <div className="mt-3 grid gap-2">
@@ -6231,13 +6183,17 @@ function LegacyStatsView({
     .filter((item) => item.avgHours !== null)
     .sort((a, b) => (b.avgHours ?? 0) - (a.avgHours ?? 0))[0];
   const topPoints = [...visibleStats].sort((a, b) => b.points - a.points)[0];
-  const mostRejected = [...visibleStats].sort((a, b) => b.rejected - a.rejected)[0];
+  const lowestApprovalRate = [...visibleStats]
+    .filter((item) => item.reviewed > 0)
+    .sort((a, b) => a.approvalRate - b.approvalRate)[0];
   const mostPending = [...visibleStats].sort((a, b) => b.pending - a.pending)[0];
   const lowestResponseRate = [...visibleStats]
     .filter((item) => item.assignedTasks > 0)
     .sort((a, b) => a.responseRate - b.responseRate)[0];
   const totalSubmitted = visibleStats.reduce((sum, item) => sum + item.submitted, 0);
-  const totalRejected = visibleStats.reduce((sum, item) => sum + item.rejected, 0);
+  const totalReviewed = visibleStats.reduce((sum, item) => sum + item.reviewed, 0);
+  const totalApproved = visibleStats.reduce((sum, item) => sum + item.approved, 0);
+  const totalApprovalRate = totalReviewed > 0 ? formatPercent((totalApproved / totalReviewed) * 100) : "0%";
 
   const insightCards = [
     {
@@ -6261,9 +6217,9 @@ function LegacyStatsView({
       detail: slowest ? formatHours(slowest.avgHours) : "مفيش تسليمات متوقتة",
     },
     {
-      label: "أكثر رفض",
-      value: mostRejected?.member.name ?? "N/A",
-      detail: mostRejected ? `${mostRejected.rejected} rejected` : "مفيش رفض",
+      label: "أقل قبول",
+      value: lowestApprovalRate?.member.name ?? "N/A",
+      detail: lowestApprovalRate ? `${formatPercent(lowestApprovalRate.approvalRate)} approval` : "مفيش مراجعات",
     },
     {
       label: "أكثر Pending",
@@ -6311,7 +6267,7 @@ function LegacyStatsView({
             ["التاسكات", data.tasks.length],
             ["إجمالي التسليم", totalSubmitted],
             ["Pending", stats.pendingTotal],
-            ["Rejected", totalRejected],
+            ["Acceptance", totalApprovalRate],
           ].map(([label, value]) => (
             <div
               key={label}
@@ -6782,58 +6738,100 @@ function Index() {
     }
   }
 
-  function addMeeting(meeting: Omit<Meeting, "id" | "createdAt">) {
-    updateData((current) => ({
-      ...current,
-      meetings: [
-        ...(current.meetings ?? []),
-        {
-          ...meeting,
-          id: `meeting-${Date.now()}`,
-          createdAt: new Date().toISOString(),
-          status: meeting.status ?? "active",
-        },
-      ],
-    }));
-    return true;
+  async function addMeeting(meeting: Omit<Meeting, "id" | "createdAt">) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Saving meeting...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "addMeeting", { meeting });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Meeting saved.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function updateMeeting(meetingId: string, updates: Partial<Meeting>) {
-    updateData((current) => ({
-      ...current,
-      meetings: (current.meetings ?? []).map((meeting) =>
-        meeting.id === meetingId ? { ...meeting, ...updates } : meeting,
-      ),
-    }));
-    return true;
+  async function updateMeeting(meetingId: string, updates: Partial<Meeting>) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Saving meeting update...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "updateMeeting", { meetingId, updates });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Meeting update saved.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function recordMeetingAttendance(meeting: Meeting, member: Member) {
+  async function recordMeetingAttendance(meeting: Meeting, member: Member) {
     if (!canRecordMeetingAttendance(meeting)) {
       setSaveStatus(`Attendance opens at ${formatDateTime(meeting.startsAt)}.`);
       return false;
     }
 
-    const checkedAt = new Date().toISOString();
-    const calculated = calculateMeetingAttendance(meeting, checkedAt);
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
 
-    updateData((current) => ({
-      ...current,
-      meetingAttendance: {
-        ...(current.meetingAttendance ?? {}),
-        [meeting.id]: {
-          ...((current.meetingAttendance ?? {})[meeting.id] ?? {}),
-          [member.id]: {
-            memberId: member.id,
-            memberName: member.name,
-            checkedAt,
-            lateMinutes: calculated.lateMinutes,
-            score: calculated.score,
-          },
-        },
-      },
-    }));
-    return true;
+    setIsSaving(true);
+    setSaveStatus("Saving attendance...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "recordMeetingAttendance", {
+        meetingId: meeting.id,
+        memberId: member.id,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Attendance saved.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function removeMeeting(meetingId: string) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Deleting meeting...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "removeMeeting", { meetingId });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Meeting deleted.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function removeTask(taskId: string) {
@@ -7376,6 +7374,7 @@ function Index() {
         onAddMeeting={addMeeting}
         onUpdateMeeting={updateMeeting}
         onRecordMeetingAttendance={recordMeetingAttendance}
+        onRemoveMeeting={removeMeeting}
         onRemoveTask={removeTask}
         onManualApprove={manualApprove}
         onSkipTaskMember={skipTaskMember}
