@@ -5825,6 +5825,8 @@ function StatsView({
       : completionRate >= 45
         ? "Needs follow-up"
         : "At risk";
+  const teamHealthLabel =
+    teamHealth === "Stable" ? "مستقر" : teamHealth === "Needs follow-up" ? "محتاج متابعة" : "في خطر";
   const healthTone =
     teamHealth === "Stable"
       ? "border-emerald-200 bg-emerald-50 text-emerald-900"
@@ -5845,6 +5847,24 @@ function StatsView({
     if (state === "Needs follow-up") return "border-yellow-200 bg-yellow-50";
     if (state === "On track") return "border-emerald-200 bg-emerald-50";
     return "border-ink/10 bg-paper";
+  }
+
+  function memberStateLabel(state: string) {
+    if (state === "No active assignments") return "مفيش تاسكات";
+    if (state === "At risk") return "في خطر";
+    if (state === "On track") return "ماشي كويس";
+    return "محتاج متابعة";
+  }
+
+  function memberInsightLabel(text: string) {
+    if (text.startsWith("Earned ")) return text.replace("Earned ", "بونص ").replace(" bonus pts", " نقطة");
+    if (text === "Finished everything") return "خلص كل حاجة";
+    if (text === "Missing recent meetings") return "غايب عن ميتينج";
+    if (text === "Late to meetings") return "بيتأخر في الميتينج";
+    if (text === "Submits late") return "تسليماته متأخرة";
+    if (text === "Submits quickly") return "بيسلم بسرعة";
+    if (text === "No active assignments") return "مفيش تكليفات شغالة";
+    return "محتاج متابعة خفيفة";
   }
 
   function activeTaskMembers(task: StudioTask) {
@@ -5914,12 +5934,12 @@ function StatsView({
   function SegmentedStatusBar({ segments, total }: { segments: ReturnType<typeof statusSegments>; total: number }) {
     const safeTotal = Math.max(1, total);
     return (
-      <div className="flex h-3 overflow-hidden rounded-full border border-ink/10 bg-white">
+      <div className="stats-segmented-bar">
         {segments.map((segment) => (
           <div
             key={segment.key}
             title={`${segment.label}: ${segment.count}`}
-            className={`h-full ${segment.className}`}
+            className={`stats-segment ${segment.className}`}
             style={{ width: `${total > 0 ? (segment.count / safeTotal) * 100 : 100}%` }}
           />
         ))}
@@ -5980,190 +6000,345 @@ function StatsView({
     return { text: "Needs light follow-up", tone: "bg-white text-foreground/65 border-ink/10" };
   }
 
+  const missingTotal = Math.max(0, expectedTotal - receivedTotal);
+  const nextDeadlineTask = [...activeTasks]
+    .filter((task) => task.deadlineAt)
+    .sort((a, b) => new Date(a.deadlineAt || "").getTime() - new Date(b.deadlineAt || "").getTime())[0];
+  const lowestProgressMember =
+    [...visibleStats]
+      .filter((item) => item.assignedTasks > 0)
+      .sort((a, b) => {
+        if (a.responseRate !== b.responseRate) return a.responseRate - b.responseRate;
+        if (a.approvalRate !== b.approvalRate) return a.approvalRate - b.approvalRate;
+        return a.points - b.points;
+      })[0] ?? lowestMember;
+  const topMember = highestMember;
+  const meetingExpectedTotal = stats.meetingMetrics.reduce((sum, item) => sum + item.expected, 0);
+  const meetingAttendedTotal = stats.meetingMetrics.reduce((sum, item) => sum + item.attended, 0);
+  const meetingPulseRate =
+    meetingExpectedTotal > 0 ? Math.round((meetingAttendedTotal / meetingExpectedTotal) * 100) : 0;
+  const visibleMemberRows = visibleStats.slice(0, 8);
+
+  function AnimatedProgressRing({
+    value,
+    label,
+    caption,
+  }: {
+    value: number;
+    label: string;
+    caption: string;
+  }) {
+    const safeValue = Math.max(0, Math.min(100, Math.round(value)));
+    const radius = 48;
+    const circumference = Math.round(2 * Math.PI * radius * 100) / 100;
+    const offset = Math.round((circumference - (safeValue / 100) * circumference) * 100) / 100;
+
+    return (
+      <div className="stats-ring" aria-label={`${label} ${safeValue}%`}>
+        <svg className="stats-ring-svg" viewBox="0 0 120 120" role="img">
+          <circle className="stats-ring-track" cx="60" cy="60" r={radius} />
+          <circle
+            className="stats-ring-value"
+            cx="60"
+            cy="60"
+            r={radius}
+            style={{
+              strokeDasharray: circumference,
+              strokeDashoffset: offset,
+            }}
+          />
+        </svg>
+        <div className="stats-ring-copy">
+          <strong>{safeValue}%</strong>
+          <span>{caption}</span>
+        </div>
+      </div>
+    );
+  }
+
+  function VisualMetric({ label, value }: { label: string; value: string | number }) {
+    return (
+      <div className="stats-visual-metric">
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#f7f6f0] text-foreground" dir="ltr">
+    <div className="stats-page min-h-screen text-foreground" dir="rtl">
       <main className="mx-auto grid max-w-6xl gap-5 px-4 py-5 md:py-8">
-        <header className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-bold text-foreground/50">Hivo Studio</div>
-              <h1 className="mt-1 text-3xl font-bold">Team status</h1>
-              <p className="mt-2 text-sm leading-6 text-foreground/60">
-                Read-only monitoring for active work. It is built for quick checks without needing admin context.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded-full border px-3 py-2 text-sm font-bold ${healthTone}`}>
-                {teamHealth}
-              </span>
+        <header className="stats-hero stats-appear">
+          <div className="stats-hero-copy">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <img
+                  src={`${import.meta.env.BASE_URL}hivo.png`}
+                  alt="Hivo Studio logo"
+                  className="size-16 shrink-0 rounded-full border-[2.5px] border-ink object-cover doodle-shadow-sm"
+                />
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-foreground/55">Hivo Studio</div>
+                  <h1 className="mt-1 text-4xl font-bold leading-tight md:text-5xl">
+                    <span className="highlight-yellow">لوحة التيم</span>
+                  </h1>
+                </div>
+              </div>
               <Button
                 type="button"
                 variant="outline"
+                size="icon"
                 onClick={onLogout}
-                className="shrink-0 border border-ink/20 bg-paper"
+                className="size-11 shrink-0 rounded-full border-[2px] border-ink bg-card doodle-shadow-sm"
+                aria-label="تسجيل خروج"
               >
-                <LogOut className="size-4" />
+                <LogOut className="size-5" />
               </Button>
+            </div>
+            <p className="mt-4 max-w-2xl text-lg leading-8 text-foreground/70">
+              متابعة سريعة وواضحة للتسليمات، القبول، والنقط من غير دخول الأدمن.
+            </p>
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              <span className={`stats-health-pill ${healthTone}`}>{teamHealthLabel}</span>
+              <span className="stats-soft-pill">
+                <Users className="size-4" />
+                {visibleStats.length} أعضاء
+              </span>
+              <span className="stats-soft-pill">
+                <ListChecks className="size-4" />
+                {activeTasks.length} تاسكات شغالة
+              </span>
+            </div>
+          </div>
+
+          <div className="stats-hero-panel">
+            <AnimatedProgressRing value={completionRate} label="Team completion" caption="تسليمات التيم" />
+            <div className="stats-hero-metrics">
+              <VisualMetric label="تم تسليمها" value={`${receivedTotal}/${expectedTotal}`} />
+              <VisualMetric label="نسبة القبول" value={`${teamApprovalRate}%`} />
+              <VisualMetric label="نقط التيم" value={totalPoints} />
             </div>
           </div>
         </header>
 
-        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4">
+        <section className="stats-attention-strip stats-appear" aria-label="What needs attention">
+          <div className="stats-attention-heading">
+            <Bell className="size-5" />
             <div>
-              <div className="text-sm font-bold text-foreground/50">Team task completion</div>
-              <div className="mt-1 text-4xl font-bold">
-                {receivedTotal} / {expectedTotal}
-              </div>
-              <p className="mt-2 text-sm leading-6 text-foreground/60">
-                Completed means final submissions received for active tasks. Archived tasks are not counted here.
-              </p>
-            </div>
-            <div className="rounded-full border border-ink/10 bg-paper px-4 py-3 text-2xl font-bold">
-              {completionRate}%
+              <h2>محتاجين نبص على إيه؟</h2>
+              <p>أهم الحاجات اللي العميلة تفهمها في ثانية.</p>
             </div>
           </div>
-          <div className="mt-5">
-            <SegmentedStatusBar segments={teamSegments()} total={expectedTotal} />
-          </div>
-          <div className="mt-5 grid grid-cols-2 gap-2 lg:grid-cols-6">
-            <CompactMetric label="Active tasks" value={activeTasks.length} />
-            <CompactMetric label="Expected submissions" value={expectedTotal} />
-            <CompactMetric label="Submitted" value={receivedTotal} />
-            <CompactMetric label="Pending review" value={stats.pendingTotal} />
-            <CompactMetric label="Approved" value={approved} />
-            <CompactMetric label="Team points" value={totalPoints} />
+          <div className="stats-attention-grid">
+            <div className={cn("stats-attention-card", stats.pendingTotal > 0 ? "is-hot" : "is-calm")}>
+              <span>مراجعات مستنية</span>
+              <strong>{stats.pendingTotal}</strong>
+            </div>
+            <div className={cn("stats-attention-card", missingTotal > 0 ? "is-warn" : "is-calm")}>
+              <span>تسليمات ناقصة</span>
+              <strong>{missingTotal}</strong>
+            </div>
+            <div className="stats-attention-card is-soft">
+              <span>أقل تقدم</span>
+              <strong>{lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "تمام"}</strong>
+              <small>{lowestProgressMember ? formatPercent(lowestProgressMember.responseRate) : "0%"}</small>
+            </div>
+            <div className="stats-attention-card is-soft">
+              <span>أقرب Deadline</span>
+              <strong dir={nextDeadlineTask ? textDirection(nextDeadlineTask.title) : "rtl"}>
+                {nextDeadlineTask?.title ?? "مفيش"}
+              </strong>
+              {nextDeadlineTask?.deadlineAt && <small>{formatDateTime(nextDeadlineTask.deadlineAt)}</small>}
+            </div>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <section className="stats-panel stats-appear">
+          <div className="stats-section-head">
             <div>
-              <h2 className="text-xl font-bold">Current tasks</h2>
-              <p className="mt-1 text-sm text-foreground/55">
-                Open assignments and review progress. Each bar shows submitted out of expected submissions.
-              </p>
+              <h2>
+                <span className="highlight-yellow">تقدم التاسكات</span>
+              </h2>
+              <p>كل صف بيوري التسليم، القبول، الناقص، والمراجعة من غير ما نفتح تفاصيل.</p>
             </div>
-            <span className="rounded-full border border-ink/10 bg-paper px-3 py-1 text-sm font-bold">
-              {activeTasks.length} active
+            <span className="stats-count-pill">
+              <ListChecks className="size-4" />
+              {activeTasks.length} تاسكات شغالة
             </span>
           </div>
-          <div className="mt-4 grid gap-3">
+
+          <div className="stats-task-board">
             {stats.taskMetrics.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-ink/15 bg-paper p-5 text-sm text-foreground/55">
-                No active tasks right now.
-              </p>
+              <p className="stats-empty-state">مفيش تاسكات شغالة دلوقتي.</p>
             ) : (
-              stats.taskMetrics.map((metric) => {
+              stats.taskMetrics.map((metric, index) => {
                 const segments = taskSegments(metric.task);
+                const taskRate = metric.expected > 0 ? Math.round((metric.received / metric.expected) * 100) : 0;
                 return (
-                  <div key={metric.task.id} className="rounded-xl border border-ink/10 bg-paper p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-lg font-bold">{metric.task.title}</h3>
-                        <p className="mt-1 text-xs font-bold text-foreground/50">
-                          Deadline {formatDateTime(metric.task.deadlineAt)} | {metric.task.points || 1} points
+                  <article
+                    key={metric.task.id}
+                    className="stats-task-card"
+                    style={{ animationDelay: `${index * 80}ms` }}
+                  >
+                    <div className="stats-task-main">
+                      <div className="min-w-0">
+                        <h3 dir={textDirection(metric.task.title)} className={textAlignClass(metric.task.title)}>
+                          {metric.task.title}
+                        </h3>
+                        <p>
+                          الموعد النهائي: {formatDateTime(metric.task.deadlineAt)} • {formatTaskPointsLabel(metric.task.points || 1)}
                         </p>
                       </div>
-                      <span className="rounded-full border border-ink/10 bg-white px-3 py-1 text-sm font-bold">
-                        {metric.received}/{metric.expected}
-                      </span>
+                      <div className="stats-task-score">
+                        <strong>{metric.received}/{metric.expected}</strong>
+                        <span>تسليم</span>
+                      </div>
                     </div>
-                    <div className="mt-3">
+                    <div className="stats-task-progress-line">
                       <SegmentedStatusBar segments={segments} total={metric.expected} />
+                      <span>{taskRate}%</span>
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
-                      <span>Submitted {metric.received}</span>
-                      <span>Approved {metric.approved}</span>
-                      <span>Pending {metric.submitted}</span>
-                      <span>Rejected {metric.rejected}</span>
-                      <span>Progress notes {metric.progressUpdates}</span>
+                    <div className="stats-task-meta">
+                      <span className="is-approved">مقبول {metric.approved}</span>
+                      <span className="is-pending">مراجعة {metric.submitted}</span>
+                      <span className="is-rejected">مرفوض {metric.rejected}</span>
+                      <span>متابعات {metric.progressUpdates}</span>
                     </div>
-                  </div>
+                  </article>
                 );
               })
             )}
           </div>
-          <div className="mt-3 flex flex-wrap gap-3 text-xs font-bold text-foreground/55">
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-emerald-500" /> Approved</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-yellow-400" /> Pending</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-red-500" /> Rejected</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-zinc-200" /> Missing</span>
+
+          <div className="stats-legend">
+            <span><i className="bg-emerald-500" /> مقبول</span>
+            <span><i className="bg-yellow-400" /> مراجعة</span>
+            <span><i className="bg-red-500" /> مرفوض</span>
+            <span><i className="bg-zinc-200" /> ناقص</span>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-ink/10 bg-white p-5 shadow-sm">
-          <div className="mb-4 grid gap-2 sm:grid-cols-2">
-            {[
-              { label: "Highest", item: highestMember, tone: "border-emerald-200 bg-emerald-50 text-emerald-900" },
-              { label: "Lowest", item: lowestMember, tone: "border-red-200 bg-red-50 text-red-700" },
-            ].map(({ label, item, tone }) => (
-              <div key={label} className={`rounded-xl border p-3 ${tone}`}>
-                <div className="text-xs font-bold uppercase text-foreground/45">{label}</div>
-                <div className="mt-1 flex items-end justify-between gap-3">
-                  <strong className="min-w-0 truncate text-lg">{item?.member.name ?? "N/A"}</strong>
-                  <span className="shrink-0 text-sm font-bold">{item ? `${item.points} pts` : "0 pts"}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-bold">Members</h2>
-              <p className="mt-1 text-sm text-foreground/55">
-                Progress is visible without opening a row. Red glow means low progress or rejection history.
-              </p>
+        <section className="stats-performance-grid stats-appear">
+          <div className="stats-spotlight-card is-best">
+            <div className="stats-spotlight-icon">
+              <Crown className="size-6" />
             </div>
-            <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-sm font-bold text-red-700">
-              {teamApprovalRate}% approval
-            </span>
+            <span>الأعلى دلوقتي</span>
+            <strong>{topMember ? memberArabicName(topMember.member) : "N/A"}</strong>
+            <p>{topMember ? `${topMember.points} نقطة • قبول ${formatPercent(topMember.approvalRate)}` : "لسه مفيش بيانات"}</p>
           </div>
-          <div className="mt-3 grid gap-2">
-            {visibleStats.map((item) => {
-              const state = memberState(item);
-              const insight = memberInsight(item);
-              const segments = memberSegments(item.member.id);
-              return (
-                <details key={item.member.id} className={`rounded-xl border p-4 ${memberTone(item)}`}>
-                  <summary className="cursor-pointer list-none">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <strong className="text-lg">{item.member.name}</strong>
-                          <span className="rounded-full border border-ink/10 bg-white px-2 py-1 text-xs font-bold">
-                            {state}
-                          </span>
-                          <span className={`rounded-full border px-2 py-1 text-xs font-bold ${insight.tone}`}>
-                            {insight.text}
-                          </span>
+          <div className="stats-spotlight-card is-follow">
+            <div className="stats-spotlight-icon">
+              <Bell className="size-6" />
+            </div>
+            <span>محتاج متابعة</span>
+            <strong>{lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "N/A"}</strong>
+            <p>
+              {lowestProgressMember
+                ? `${formatPercent(lowestProgressMember.responseRate)} تسليم • ${lowestProgressMember.pending} مراجعة`
+                : "مفيش حد متأخر"}
+            </p>
+          </div>
+
+          <div className="stats-panel stats-members-panel">
+            <div className="stats-section-head">
+              <div>
+                <h2>
+                  <span className="highlight-yellow">أداء الأعضاء</span>
+                </h2>
+                <p>الصف الواحد يوري النقاط، التسليم، القبول، والحالة بسرعة.</p>
+              </div>
+              <span className="stats-count-pill">
+                <BarChart3 className="size-4" />
+                {teamApprovalRate}% قبول
+              </span>
+            </div>
+            <div className="stats-member-list">
+              {visibleMemberRows.map((item, index) => {
+                const state = memberState(item);
+                const insight = memberInsight(item);
+                const segments = memberSegments(item.member.id);
+                return (
+                  <details
+                    key={item.member.id}
+                    className={cn("stats-member-row", memberTone(item))}
+                    style={{ animationDelay: `${index * 55}ms` }}
+                  >
+                    <summary className="cursor-pointer list-none">
+                      <div className="stats-member-summary">
+                        <div className="stats-member-rank">{index + 1}</div>
+                        <div className="min-w-0">
+                          <div className="stats-member-name-line">
+                            <strong>{memberArabicName(item.member)}</strong>
+                            <span>{memberStateLabel(state)}</span>
+                          </div>
+                          <div className="stats-member-insight">{memberInsightLabel(insight.text)}</div>
                         </div>
-                        <div className="mt-1 text-xs font-bold text-foreground/45">
-                          Click to see details
+                        <div className="stats-member-numbers">
+                          <strong>{item.points}</strong>
+                          <span>نقطة</span>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-lg font-bold">{item.points} pts</div>
-                        <div className="text-xs text-foreground/50">
-                          {item.submitted}/{item.assignedTasks} submitted
-                        </div>
+                      <div className="mt-3">
+                        <SegmentedStatusBar segments={segments} total={item.assignedTasks} />
                       </div>
-                    </div>
-                    <div className="mt-3">
-                      <SegmentedStatusBar segments={segments} total={item.assignedTasks} />
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
-                      <span>Progress {formatPercent(item.responseRate)}</span>
-                      <span>Pending {item.pending}</span>
-                      <span>Rejected {item.rejected}</span>
-                      <span>Approved {item.approved}</span>
-                    </div>
-                  </summary>
-                  <StatsMemberDetails item={item} />
-                </details>
-              );
-            })}
+                      <div className="stats-member-meta">
+                        <span>{formatPercent(item.responseRate)} تسليم</span>
+                        <span>{formatPercent(item.approvalRate)} قبول</span>
+                        <span>{item.pending} مراجعة</span>
+                        <span>{item.approved} مقبول</span>
+                      </div>
+                    </summary>
+                    <StatsMemberDetails item={item} />
+                  </details>
+                );
+              })}
+            </div>
+            {visibleStats.length > visibleMemberRows.length && (
+              <p className="mt-3 text-center text-sm font-bold text-foreground/45">
+                +{visibleStats.length - visibleMemberRows.length} أعضاء موجودين في الداتا.
+              </p>
+            )}
           </div>
         </section>
+
+        {stats.meetingMetrics.length > 0 && (
+          <section className="stats-panel stats-meetings-panel stats-appear">
+            <div className="stats-section-head">
+              <div>
+                <h2>
+                  <span className="highlight-yellow">نبض الاجتماعات</span>
+                </h2>
+                <p>حضور الميتينجز والنقط اللي دخلت منها للتيم.</p>
+              </div>
+              <span className="stats-count-pill">
+                <CalendarClock className="size-4" />
+                {meetingPulseRate}% حضور
+              </span>
+            </div>
+            <div className="stats-meeting-summary">
+              <AnimatedProgressRing value={meetingPulseRate} label="Meeting attendance" caption="حضور" />
+              <div className="stats-meeting-lines">
+                {stats.meetingMetrics.map((item) => {
+                  const attendanceRate = item.expected > 0 ? Math.round((item.attended / item.expected) * 100) : 0;
+                  return (
+                    <div key={item.meeting.id} className="stats-meeting-row">
+                      <div>
+                        <strong dir={textDirection(item.meeting.title)}>{item.meeting.title}</strong>
+                        <span>
+                          {item.attended}/{item.expected} حضور • {item.totalScore} نقطة
+                        </span>
+                      </div>
+                      <div className="stats-mini-meter" aria-label={`${attendanceRate}% attendance`}>
+                        <span style={{ width: `${attendanceRate}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        )}
       </main>
     </div>
   );
