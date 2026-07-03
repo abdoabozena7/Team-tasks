@@ -1375,8 +1375,8 @@ function MemberView({
   const expandedTask = expandedTaskId ? memberTasks.find((task) => task.id === expandedTaskId) : undefined;
   const expandedTaskUpdates = expandedTask ? data.taskUpdates?.[expandedTask.id] ?? [] : [];
   const activeMemberScore = useMemo(
-    () => stats.memberStats.find((item) => item.member.id === activeMember.member.id),
-    [activeMember.member.id, stats.memberStats],
+    () => stats.allMemberStats.find((item) => item.member.id === activeMember.member.id),
+    [activeMember.member.id, stats.allMemberStats],
   );
   const hasProfileChange =
     repoDraft.trim() !== (activeMember.member.repoUrl ?? "") ||
