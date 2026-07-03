@@ -871,7 +871,7 @@
       "source": "manual",
       "excerpt": "GitHub attention requested for Task 2 harness engineering",
       "createdAt": "2026-07-02T21:20:52.293Z",
-      "seen": false
+      "seen": true
     },
     {
       "id": "repo-submission-fatema-task-1782933583973-1783022534558",
@@ -1075,6 +1075,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-03T14:37:00.785Z"
+    "updatedAt": "2026-07-03T14:37:04.742Z"
   }
 }
