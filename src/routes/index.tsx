@@ -1054,9 +1054,11 @@ function LeaderboardStatPill({
       )}
     >
       <span className="block text-base font-bold leading-none">{value}</span>
-      <span className="mt-1 block text-[10px] font-semibold leading-none text-foreground/55">
-        {label}
-      </span>
+      {label && (
+        <span className="mt-1 block text-[10px] font-semibold leading-none text-foreground/55">
+          {label}
+        </span>
+      )}
     </span>
   );
 }
@@ -1187,7 +1189,6 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
             <span className="leaderboard-podium-review">
               <span>
                 <strong>{formatPercent(item.approvalRate)}</strong>
-                <small>Acceptance</small>
               </span>
             </span>
           </div>
@@ -1245,8 +1246,8 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
             <span className="text-sm font-bold text-foreground/70">
               {item.points} نقطة
             </span>
-            <span className="text-xs font-bold text-foreground/55">
-              القبول {formatPercent(item.approvalRate)}
+            <span className="leaderboard-acceptance-rate">
+              {formatPercent(item.approvalRate)}
             </span>
           </div>
 
@@ -1254,7 +1255,11 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
             <LeaderboardStatPill label="درجات" value={item.points} />
             <LeaderboardStatPill label="مقبول" value={item.approved} className="bg-emerald-100/70" />
             <LeaderboardStatPill label="Assigned" value={item.assignedTasks} className="bg-sky-100/70" />
-            <LeaderboardStatPill label="القبول" value={formatPercent(item.approvalRate)} className="bg-emerald-50" />
+            <LeaderboardStatPill
+              label=""
+              value={formatPercent(item.approvalRate)}
+              className="leaderboard-percent-pill bg-emerald-50"
+            />
           </span>
 
           <span className="block h-2 overflow-hidden rounded-full border border-ink/80 bg-white/75" dir="ltr">
@@ -1493,7 +1498,7 @@ function MemberView({
           <CompactMetric label="Assigned" value={logAssigned} />
           <CompactMetric label="Done" value={logSubmitted} />
           <CompactMetric label="Accepted" value={logApproved} />
-          <CompactMetric label="Acceptance" value={formatPercent(logApprovalRate)} />
+          <CompactMetric label="قبول" value={formatPercent(logApprovalRate)} />
         </div>
         {memberLogTasks.length === 0 ? (
           <div
@@ -6267,7 +6272,7 @@ function LegacyStatsView({
             ["التاسكات", data.tasks.length],
             ["إجمالي التسليم", totalSubmitted],
             ["Pending", stats.pendingTotal],
-            ["Acceptance", totalApprovalRate],
+            ["قبول", totalApprovalRate],
           ].map(([label, value]) => (
             <div
               key={label}
