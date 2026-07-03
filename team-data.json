@@ -862,7 +862,7 @@
       "source": "submission",
       "excerpt": "github",
       "createdAt": "2026-07-02T21:22:38.129Z",
-      "seen": false
+      "seen": true
     },
     {
       "id": "repo-manual-abozena-task-1783008997895-1783027252293",
@@ -1075,6 +1075,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-03T14:36:53.598Z"
+    "updatedAt": "2026-07-03T14:37:00.785Z"
   }
 }
