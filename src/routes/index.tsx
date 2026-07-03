@@ -1557,15 +1557,16 @@ function MemberView({
                   </p>
                 )}
                 {response?.answer && (
-                  <p className="mt-3 whitespace-pre-wrap border-t-[2px] border-ink/15 pt-3 leading-7">
-                    {response.answer}
-                  </p>
+                  <StructuredTextBlock
+                    text={response.answer}
+                    className="mt-3 border-t-[2px] border-ink/15 pt-3"
+                  />
                 )}
                 {progress.length > 0 && (
                   <div className="mt-3 grid gap-2">
                     {progress.map((update) => (
                       <div key={update.id} className="border-[2px] border-ink bg-yellow-50 p-3 text-sm">
-                        <p className="whitespace-pre-wrap leading-6">{update.note}</p>
+                        <StructuredTextBlock text={update.note} compact />
                         <p className="mt-1 text-xs text-foreground/55">{formatDateTime(update.createdAt)}</p>
                       </div>
                     ))}
@@ -1632,7 +1633,7 @@ function MemberView({
               )}
               dir={textDirection(expandedTask.question)}
             >
-              <TaskMessageBody text={expandedTask.question} />
+              <StructuredTextBlock text={expandedTask.question} memberFacing />
             </div>
             {expandedTaskUpdates.length > 0 && (
               <div className="mt-4 grid gap-2">
@@ -1646,7 +1647,7 @@ function MemberView({
                     )}
                     dir={textDirection(update.message)}
                   >
-                    <TaskMessageBody text={update.message} compact />
+                    <StructuredTextBlock text={update.message} compact memberFacing />
                     <p className="mt-1 text-xs font-bold text-sky-900/55">
                       {formatDateTime(update.createdAt)}
                     </p>
@@ -1797,12 +1798,12 @@ function MemberView({
                     >
                       {task.title}
                     </h2>
-                    <p
-                      className={cn("mt-1 text-sm font-bold leading-6 text-yellow-900/80", textAlignClass(latestUpdate.message))}
-                      dir={textDirection(latestUpdate.message)}
-                    >
-                      {latestUpdate.message}
-                    </p>
+                    <StructuredTextBlock
+                      text={latestUpdate.message}
+                      compact
+                      memberFacing
+                      className="mt-2 text-yellow-950"
+                    />
                     {updates.length > 1 && (
                       <p className="mt-1 text-xs font-bold text-yellow-900/60">
                         +{updates.length - 1} تحديث كمان
@@ -1896,6 +1897,7 @@ function MemberView({
                 task.question.trim().length <= 90 && task.question.trim().split(/\s+/).length <= 12;
               const taskQuestionIsLong =
                 task.question.trim().length > 180 || task.question.trim().split(/\n/).length > 3;
+              const taskQuestionHasSections = splitMemberTextSections(task.question).length > 1;
               const taskUpdates = data.taskUpdates?.[task.id] ?? [];
               const unseenTaskUpdates = taskUpdates.filter((update) => !seenTaskUpdateIds.includes(update.id));
               const taskPoints = sanitizePositiveNumber(task.points, 1);
@@ -1950,16 +1952,11 @@ function MemberView({
                       </span>
                     )}
                   </div>
-                  <button
-                    type="button"
+                  <div
                     data-testid={`task-text-preview-${task.id}`}
-                    onClick={() => {
-                      setExpandedTaskId(task.id);
-                      setCopyFeedback("");
-                    }}
                     className={cn(
                       "mb-4 w-full rounded-xl text-start leading-7 transition",
-                      taskQuestionIsLong
+                      taskQuestionIsLong || taskQuestionHasSections
                         ? "border-[2px] border-ink/20 bg-paper/70 p-3 hover:border-ink/45 hover:bg-white"
                         : "border-0 bg-transparent p-0",
                       taskQuestionLooksLight ? "text-lg font-semibold leading-8" : "text-base",
@@ -1967,32 +1964,25 @@ function MemberView({
                     )}
                     dir={taskQuestionDir}
                   >
-                    <span
-                      className="block whitespace-pre-wrap"
-                      style={
-                        taskQuestionIsLong
-                          ? {
-                              display: "-webkit-box",
-                              WebkitLineClamp: 4,
-                              WebkitBoxOrient: "vertical",
-                              overflow: "hidden",
-                            }
-                          : undefined
-                      }
-                    >
-                      {task.question}
-                    </span>
-                    {taskQuestionIsLong && (
-                      <span className="mt-2 inline-flex rounded-full border border-ink/20 bg-white px-3 py-1 text-xs font-bold text-foreground/60">
+                    <StructuredTextBlock text={task.question} compact memberFacing />
+                    {(taskQuestionIsLong || taskQuestionHasSections) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExpandedTaskId(task.id);
+                          setCopyFeedback("");
+                        }}
+                        className="mt-2 inline-flex rounded-full border border-ink/20 bg-white px-3 py-1 text-xs font-bold text-foreground/60"
+                      >
                         افتح الكلام كله
-                      </span>
+                      </button>
                     )}
                     {taskUpdates.length > 0 && (
                       <span className="mt-2 block text-xs font-bold text-sky-700">
                         فيه {taskUpdates.length} تحديث إضافي
                       </span>
                     )}
-                  </button>
+                  </div>
                   {taskUpdates.length > 0 && (
                     <div className="mb-4 rounded-xl border-[2px] border-sky-200 bg-sky-50 p-3 text-sky-950">
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -2024,7 +2014,7 @@ function MemberView({
                             className={cn("rounded-lg bg-white/75 p-2", textAlignClass(update.message))}
                             dir={textDirection(update.message)}
                           >
-                            <TaskMessageBody text={update.message} compact />
+                            <StructuredTextBlock text={update.message} compact memberFacing />
                             <p className="mt-1 text-xs font-bold text-sky-900/55">
                               {formatDateTime(update.createdAt)}
                             </p>
@@ -2162,7 +2152,7 @@ function MemberView({
                       <div className="mb-2 grid gap-2">
                         {officialProgress.map((update) => (
                           <div key={update.id} className="border-[2px] border-ink bg-yellow-50 p-3">
-                            <p className="whitespace-pre-wrap leading-7">{update.note}</p>
+                            <StructuredTextBlock text={update.note} compact />
                             <p className="mt-1 text-xs text-foreground/55">
                               محفوظ رسميًا: {new Date(update.createdAt).toLocaleString()}
                             </p>
@@ -2391,20 +2381,56 @@ function formatDateTime(value?: string) {
   return date.toLocaleString();
 }
 
+const TEXT_SPLIT_DELIMITER = /\*{5,}/g;
+const STRUCTURED_TEXT_CHAR_LIMIT = 260;
+const STRUCTURED_TEXT_LINE_LIMIT = 5;
+
+function splitMemberTextSections(text: string) {
+  const sections = text
+    .replace(/\r\n/g, "\n")
+    .split(TEXT_SPLIT_DELIMITER)
+    .map((section) => section.trim())
+    .filter(Boolean);
+
+  return sections.length > 0 ? sections : [text.trim()].filter(Boolean);
+}
+
+function cleanTextForMember(text: string) {
+  return splitMemberTextSections(text).join("\n\n").trim();
+}
+
+function textNeedsCollapse(text: string) {
+  const normalized = text.trim().replace(/\r\n/g, "\n");
+  return (
+    normalized.length > STRUCTURED_TEXT_CHAR_LIMIT ||
+    normalized.split("\n").length > STRUCTURED_TEXT_LINE_LIMIT
+  );
+}
+
+function structuredTextTitle(text: string, index: number) {
+  const firstLine = text
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return `جزء ${index + 1}`;
+  return firstLine.length > 58 ? `${firstLine.slice(0, 55)}...` : firstLine;
+}
+
 function buildTaskCopyText(task: StudioTask, updates: TaskAnnouncement[]) {
   const parts = [
     `Task: ${task.title}`,
     `Deadline: ${formatDateTime(task.deadlineAt)}`,
     `Points: ${sanitizePositiveNumber(task.points, 1)}`,
     "",
-    task.question,
+    cleanTextForMember(task.question),
   ];
 
   if (updates.length > 0) {
     parts.push(
       "",
       "Task updates:",
-      ...updates.map((update) => `${formatDateTime(update.createdAt)}\n${update.message}`),
+      ...updates.map((update) => `${formatDateTime(update.createdAt)}\n${cleanTextForMember(update.message)}`),
     );
   }
 
@@ -2469,6 +2495,70 @@ function TaskMessageBody({ text, compact = false }: { text: string; compact?: bo
           >
             {trimmed}
           </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function StructuredTextBlock({
+  text,
+  compact = false,
+  memberFacing = false,
+  forceCollapse = false,
+  className,
+}: {
+  text: string;
+  compact?: boolean;
+  memberFacing?: boolean;
+  forceCollapse?: boolean;
+  className?: string;
+}) {
+  const rawText = text.trim();
+  if (!rawText) return null;
+
+  const sections = memberFacing ? splitMemberTextSections(rawText) : [rawText];
+  const shouldRenderSections = memberFacing && sections.length > 1;
+
+  if (!shouldRenderSections && !forceCollapse && !textNeedsCollapse(sections[0] ?? "")) {
+    const content = sections[0] ?? rawText;
+    return (
+      <div className={cn("structured-text-inline", className)} dir={textDirection(content)}>
+        <TaskMessageBody text={content} compact={compact} />
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn("structured-text-stack", className)}>
+      {sections.map((section, index) => {
+        const title = shouldRenderSections ? structuredTextTitle(section, index) : "عرض النص";
+        const previewSource = section.replace(/\s+/g, " ").trim();
+        const preview = previewSource.slice(0, 150);
+        const previewIsTrimmed = previewSource.length > preview.length;
+
+        return (
+          <details
+            key={`${index}-${section.slice(0, 24)}`}
+            className="structured-text-details"
+            dir={textDirection(section)}
+          >
+            <summary className="structured-text-summary">
+              <span className="min-w-0 flex-1">
+                <span className={cn("block truncate", textAlignClass(title))}>{title}</span>
+                {preview && preview !== title && (
+                  <span className={cn("structured-text-summary-preview", textAlignClass(section))}>
+                    {preview}
+                    {previewIsTrimmed ? "..." : ""}
+                  </span>
+                )}
+              </span>
+              <ChevronDown className="structured-text-chevron size-4" />
+            </summary>
+            <div className="structured-text-body">
+              <TaskMessageBody text={section} compact={compact} />
+            </div>
+          </details>
         );
       })}
     </div>
@@ -3158,9 +3248,12 @@ function AdminView({
                 {taskStatus(task)}
               </span>
             </div>
-            <p className="mt-1 max-w-2xl whitespace-pre-wrap text-sm leading-6 text-foreground/65">
-              {task.question}
-            </p>
+            <StructuredTextBlock
+              text={task.question}
+              compact
+              forceCollapse
+              className="mt-2 max-w-2xl text-foreground/75"
+            />
             <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
               <span>Start: {formatDateTime(task.startAt)}</span>
               <span>Deadline: {formatDateTime(task.deadlineAt)}</span>
@@ -3394,7 +3487,7 @@ function AdminView({
             <div className="mt-3 grid gap-2 border-t border-sky-200 pt-3">
               {taskUpdates.map((update) => (
                 <div key={update.id} className="rounded-md border border-sky-200 bg-white p-2 text-sm">
-                  <p className="whitespace-pre-wrap leading-6">{update.message}</p>
+                  <StructuredTextBlock text={update.message} compact forceCollapse />
                   <p className="mt-1 text-xs font-bold text-foreground/45">
                     {formatDateTime(update.createdAt)}
                   </p>
@@ -3695,7 +3788,7 @@ function AdminView({
                 </div>
                 {response && (
                   <div className="mt-3 rounded-md border border-ink/10 bg-paper p-3">
-                    <p className="whitespace-pre-wrap leading-7">{response.answer}</p>
+                    <StructuredTextBlock text={response.answer} forceCollapse />
                     <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
                       <span className="rounded-full border border-ink/10 bg-white px-2 py-1">
                         Score {awarded}/{sanitizePositiveNumber(task.points, 1)}
@@ -3843,7 +3936,7 @@ function AdminView({
                   <div className="mt-3 grid gap-2">
                     {progress.map((update) => (
                       <div key={update.id} className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm">
-                        <p className="whitespace-pre-wrap leading-6">{update.note}</p>
+                        <StructuredTextBlock text={update.note} compact forceCollapse />
                         <p className="mt-1 text-xs text-foreground/50">{formatDateTime(update.createdAt)}</p>
                       </div>
                     ))}
@@ -4153,7 +4246,14 @@ function AdminView({
                 {late && <span className="text-yellow-800">Late - half score</span>}
               </div>
               {note && <p className="mt-2 rounded-md border border-ink/10 bg-paper p-2 text-sm">Note: {note}</p>}
-              {response && <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{response.answer}</p>}
+              {response && (
+                <StructuredTextBlock
+                  text={response.answer}
+                  compact
+                  forceCollapse
+                  className="mt-2 text-sm"
+                />
+              )}
               {progress.length > 0 && (
                 <p className="mt-2 text-xs font-bold text-yellow-800">{progress.length} progress updates</p>
               )}
@@ -4474,7 +4574,12 @@ function AdminView({
                                 <span>{formatDateTime(update.createdAt)}</span>
                               </div>
                               {update.excerpt && (
-                                <p className="mt-2 max-w-3xl text-sm leading-6 text-foreground/70">{update.excerpt}</p>
+                                <StructuredTextBlock
+                                  text={update.excerpt}
+                                  compact
+                                  forceCollapse
+                                  className="mt-2 max-w-3xl text-sm text-foreground/70"
+                                />
                               )}
                             </div>
                             <div className="flex flex-wrap gap-2">
@@ -4907,7 +5012,7 @@ function AdminView({
                     {queuedProgress.map((item) => (
                       <div key={item.id} className="rounded-lg border border-ink/10 bg-yellow-50 p-3">
                         <strong>{item.memberName}</strong>
-                        <p className="text-sm">{item.note}</p>
+                        <StructuredTextBlock text={item.note} compact forceCollapse className="mt-1 text-sm" />
                         <div className="mt-2 flex gap-2">
                           <Button
                             type="button"
@@ -5150,7 +5255,7 @@ function LegacyAdminView({
                         <p className="text-sm font-bold text-foreground/65">
                           {task?.title ?? item.taskId}
                         </p>
-                        <p className="mt-2 whitespace-pre-wrap leading-7">{item.answer}</p>
+                        <StructuredTextBlock text={item.answer} forceCollapse className="mt-2" />
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button
                             type="button"
@@ -5196,7 +5301,7 @@ function LegacyAdminView({
                         <p className="text-sm font-bold text-foreground/65">
                           {task?.title ?? item.taskId}
                         </p>
-                        <p className="mt-2 whitespace-pre-wrap leading-7">{item.note}</p>
+                        <StructuredTextBlock text={item.note} forceCollapse className="mt-2" />
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button
                             type="button"
@@ -5538,7 +5643,7 @@ function LegacyAdminView({
                                 {new Date(update.createdAt).toLocaleString()}
                               </span>
                             </div>
-                            <p className="whitespace-pre-wrap leading-7">{update.note}</p>
+                            <StructuredTextBlock text={update.note} forceCollapse />
                           </div>
                         ))}
                       </div>
@@ -5558,7 +5663,7 @@ function LegacyAdminView({
                             <strong>{response.memberName}</strong>
                             <span className="text-sm text-foreground/60">{response.status}</span>
                           </div>
-                          <p className="whitespace-pre-wrap leading-[1.8]">{response.answer}</p>
+                          <StructuredTextBlock text={response.answer} forceCollapse />
                           <div className="mt-3 flex flex-wrap gap-2">
                             <Button
                               type="button"
