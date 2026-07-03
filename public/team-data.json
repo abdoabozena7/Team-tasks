@@ -853,7 +853,7 @@
       "source": "submission",
       "excerpt": "github",
       "createdAt": "2026-07-02T21:23:48.609Z",
-      "seen": false
+      "seen": true
     },
     {
       "id": "repo-submission-abozena-task-1782984779472-1783027358129",
@@ -1075,6 +1075,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-03T14:36:13.997Z"
+    "updatedAt": "2026-07-03T14:36:53.598Z"
   }
 }
