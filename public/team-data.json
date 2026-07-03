@@ -731,15 +731,6 @@
   "taskUpdates": {},
   "meetings": [
     {
-      "title": "Task 1",
-      "startsAt": "2026-07-02T13:24:00.000Z",
-      "durationMinutes": 60,
-      "points": 1,
-      "status": "archived",
-      "id": "meeting-1782998675325",
-      "createdAt": "2026-07-02T13:24:35.325Z"
-    },
-    {
       "title": "meet1",
       "startsAt": "2026-07-02T13:32:00.000Z",
       "durationMinutes": 60,
@@ -750,78 +741,6 @@
     }
   ],
   "meetingAttendance": {
-    "meeting-1782998675325": {
-      "abozena": {
-        "memberId": "abozena",
-        "memberName": "Abozena",
-        "checkedAt": "2026-07-02T13:24:41.808Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "shoiab": {
-        "memberId": "shoiab",
-        "memberName": "shoiab",
-        "checkedAt": "2026-07-02T13:24:43.448Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "kareem-adel": {
-        "memberId": "kareem-adel",
-        "memberName": "kareem adel",
-        "checkedAt": "2026-07-02T13:24:47.393Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "abo-grir": {
-        "memberId": "abo-grir",
-        "memberName": "Abo grir",
-        "checkedAt": "2026-07-02T13:24:48.065Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "yossef-sharawy": {
-        "memberId": "yossef-sharawy",
-        "memberName": "yossef sharawy",
-        "checkedAt": "2026-07-02T13:24:48.753Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "renad": {
-        "memberId": "renad",
-        "memberName": "renad",
-        "checkedAt": "2026-07-02T13:24:51.075Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "tasneem": {
-        "memberId": "tasneem",
-        "memberName": "tasneem",
-        "checkedAt": "2026-07-02T13:24:52.800Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "rodina": {
-        "memberId": "rodina",
-        "memberName": "rodina",
-        "checkedAt": "2026-07-02T13:24:53.255Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "fatema": {
-        "memberId": "fatema",
-        "memberName": "fatema",
-        "checkedAt": "2026-07-02T13:24:53.685Z",
-        "lateMinutes": 1,
-        "score": 1
-      },
-      "marihan": {
-        "memberId": "marihan",
-        "memberName": "marihan",
-        "checkedAt": "2026-07-02T13:31:40.661Z",
-        "lateMinutes": 8,
-        "score": 1
-      }
-    },
     "meeting-1782999164958": {
       "abozena": {
         "memberId": "abozena",
@@ -1106,6 +1025,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-03T14:40:40.260Z"
+    "updatedAt": "2026-07-03T14:40:45.819Z"
   }
 }
