@@ -755,6 +755,15 @@
   "meetingAttendance": {},
   "repoUpdates": [
     {
+      "id": "repo-manual-marihan-task-1783008997895-1783122434504",
+      "memberId": "marihan",
+      "taskId": "task-1783008997895",
+      "source": "manual",
+      "excerpt": "GitHub attention requested for Task 2 harness engineering",
+      "createdAt": "2026-07-03T23:47:14.504Z",
+      "seen": false
+    },
+    {
       "id": "repo-manual-tasneem-task-1783008997895-1783045246194",
       "memberId": "tasneem",
       "taskId": "task-1783008997895",
@@ -992,6 +1001,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-03T22:35:08.120Z"
+    "updatedAt": "2026-07-03T23:47:14.504Z"
   }
 }
