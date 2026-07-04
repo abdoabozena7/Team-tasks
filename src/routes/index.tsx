@@ -3585,6 +3585,7 @@ function AdminView({
   onCloseTokenDialog,
   onConfirmTokenAndSave,
   onSaveToGithub,
+  onPreviewMember,
 }: {
   data: StudioData;
   stats: ReturnType<typeof createStats>;
@@ -3632,6 +3633,7 @@ function AdminView({
   onCloseTokenDialog: () => void;
   onConfirmTokenAndSave: () => ActionResult;
   onSaveToGithub: () => ActionResult;
+  onPreviewMember: (member: Member) => void;
 }) {
   const [section, setSection] = useState<AdminSection>("repo-updates");
   const [navOpen, setNavOpen] = useState(false);
@@ -4400,76 +4402,80 @@ function AdminView({
                     className="mt-3 rounded-md border border-ink/10 bg-white p-2"
                   />
 
-                  <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_120px_auto_auto]">
-                    <Input
-                      value={reviewNote}
-                      onChange={(event) =>
-                        setReviewNotes((current) => ({
-                          ...current,
-                          [reviewNoteKey]: event.target.value,
-                        }))
-                      }
-                      placeholder="Review note"
-                      className="border border-ink/20 bg-white"
-                    />
-                    <Input
-                      type="number"
-                      min={0}
-                      step={0.1}
-                      value={scoreValue}
-                      onChange={(event) =>
-                        setReviewScores((current) => ({
-                          ...current,
-                          [reviewNoteKey]: event.target.value,
-                        }))
-                      }
-                      placeholder="Score"
-                      className="border border-ink/20 bg-white text-center"
-                    />
-                    <Button
-                      type="button"
-                      onClick={() =>
-                        void runAdminAction(
-                          approveKey,
-                          () =>
-                            onReviewAnswer(
-                              task.id,
-                              response.memberId,
-                              "approved",
-                              reviewNote,
-                              sanitizeScore(scoreValue, sanitizePositiveNumber(task.points, 1)),
-                              true,
-                            ),
-                          "Solution approved.",
-                          "Approve failed. Try again.",
-                        )
-                      }
-                      className={actionButtonClass("", actionFeedback[approveKey])}
-                    >
-                      <Check data-icon="inline-start" />
-                      Approve
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() =>
-                        void runAdminAction(
-                          rejectKey,
-                          () => onReviewAnswer(task.id, response.memberId, "rejected", reviewNote),
-                          "Solution rejected.",
-                          "Reject failed. Try again.",
-                        )
-                      }
-                      className={actionButtonClass(
-                        "border border-red-200 bg-white text-red-700",
-                        actionFeedback[rejectKey],
-                      )}
-                    >
-                      <X data-icon="inline-start" />
-                      Reject
-                    </Button>
-                  </div>
-                  <ActionFeedbackLine feedback={actionFeedback[approveKey] ?? actionFeedback[rejectKey]} />
+                  {response.status === "submitted" && (
+                    <>
+                      <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_120px_auto_auto]">
+                        <Input
+                          value={reviewNote}
+                          onChange={(event) =>
+                            setReviewNotes((current) => ({
+                              ...current,
+                              [reviewNoteKey]: event.target.value,
+                            }))
+                          }
+                          placeholder="Review note"
+                          className="border border-ink/20 bg-white"
+                        />
+                        <Input
+                          type="number"
+                          min={0}
+                          step={0.1}
+                          value={scoreValue}
+                          onChange={(event) =>
+                            setReviewScores((current) => ({
+                              ...current,
+                              [reviewNoteKey]: event.target.value,
+                            }))
+                          }
+                          placeholder="Score"
+                          className="border border-ink/20 bg-white text-center"
+                        />
+                        <Button
+                          type="button"
+                          onClick={() =>
+                            void runAdminAction(
+                              approveKey,
+                              () =>
+                                onReviewAnswer(
+                                  task.id,
+                                  response.memberId,
+                                  "approved",
+                                  reviewNote,
+                                  sanitizeScore(scoreValue, sanitizePositiveNumber(task.points, 1)),
+                                  true,
+                                ),
+                              "Solution approved.",
+                              "Approve failed. Try again.",
+                            )
+                          }
+                          className={actionButtonClass("", actionFeedback[approveKey])}
+                        >
+                          <Check data-icon="inline-start" />
+                          Approve
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() =>
+                            void runAdminAction(
+                              rejectKey,
+                              () => onReviewAnswer(task.id, response.memberId, "rejected", reviewNote),
+                              "Solution rejected.",
+                              "Reject failed. Try again.",
+                            )
+                          }
+                          className={actionButtonClass(
+                            "border border-red-200 bg-white text-red-700",
+                            actionFeedback[rejectKey],
+                          )}
+                        >
+                          <X data-icon="inline-start" />
+                          Reject
+                        </Button>
+                      </div>
+                      <ActionFeedbackLine feedback={actionFeedback[approveKey] ?? actionFeedback[rejectKey]} />
+                    </>
+                  )}
                 </article>
               );
             })
@@ -6527,18 +6533,32 @@ function AdminView({
                           <span>Bonus {memberScore?.bonusPoints ?? 0}</span>
                         </div>
                       </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          onUpdateMember(member.id, { hidden: !member.hidden });
-                        }}
-                        className="border border-ink/20 bg-paper"
-                      >
-                        {member.hidden ? <Eye data-icon="inline-start" /> : <EyeOff data-icon="inline-start" />}
-                        {member.hidden ? "Show" : "Hide"}
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            onPreviewMember(member);
+                          }}
+                          className="border border-sky-200 bg-sky-50 text-sky-900"
+                        >
+                          <Eye data-icon="inline-start" />
+                          View profile
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            onUpdateMember(member.id, { hidden: !member.hidden });
+                          }}
+                          className="border border-ink/20 bg-paper"
+                        >
+                          {member.hidden ? <Eye data-icon="inline-start" /> : <EyeOff data-icon="inline-start" />}
+                          {member.hidden ? "Show" : "Hide"}
+                        </Button>
+                      </div>
                     </summary>
                     <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_1fr]">
                       <div className="grid gap-3">
@@ -9202,6 +9222,12 @@ function Index() {
     setActiveMember({ member, displayName });
   }
 
+  function previewMemberAsAdmin(member: Member) {
+    setActiveStats(false);
+    setActiveAdmin(true);
+    setActiveMember({ member, displayName: memberArabicName(member) });
+  }
+
   function loginAdmin(password: string) {
     setActiveMember(null);
     setActiveStats(false);
@@ -9989,6 +10015,51 @@ function Index() {
     void saveToGithub(nextToken);
   }
 
+  if (activeAdmin && activeMember) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="sticky top-0 z-[90] border-b-[2px] border-ink bg-yellow-100 px-4 py-3 text-center font-bold text-yellow-950 shadow-sm">
+          <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-3">
+            <span>Admin preview: أنت بتشوف حساب {memberArabicName(activeMember.member)} كأدمن.</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setActiveMember(null)}
+              className="border-[2px] border-ink bg-white"
+            >
+              Back to admin
+            </Button>
+          </div>
+        </div>
+        <MemberView
+          data={data}
+          activeMember={activeMember}
+          stats={stats}
+          draftAnswers={draftAnswers}
+          sentState={sentState}
+          refreshStatus={refreshStatus}
+          isSubmitting={isSubmitting}
+          onDraftChange={(key, value) => {
+            setDraftAnswers((current) => {
+              const next = { ...current, [key]: value };
+              writeMemberDrafts(next);
+              return next;
+            });
+          }}
+          onSubmitFinal={submitFinalSubmission}
+          onSubmitProgress={submitProgressUpdate}
+          onRepoAttention={sendRepoAttention}
+          onDriveAttention={sendDriveAttention}
+          onProfileChangeRequest={submitProfileChangeRequest}
+          onMarkInteraction={markInteraction}
+          onLogout={() => setActiveMember(null)}
+          onRefreshData={refreshData}
+        />
+      </div>
+    );
+  }
+
   if (activeAdmin) {
     return (
       <AdminView
@@ -10031,6 +10102,7 @@ function Index() {
         onCloseTokenDialog={() => setTokenDialogOpen(false)}
         onConfirmTokenAndSave={confirmTokenAndSave}
         onSaveToGithub={() => void saveCurrentData()}
+        onPreviewMember={previewMemberAsAdmin}
       />
     );
   }
