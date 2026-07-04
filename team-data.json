@@ -275,6 +275,29 @@
       "deadlineAt": "",
       "status": "active",
       "taskType": "technical"
+    },
+    {
+      "id": "task-1783176442116",
+      "title": "telephone game",
+      "question": "description on whatsapp (in a voice note)",
+      "points": 1,
+      "taskType": "problem",
+      "scope": "member",
+      "memberId": "shoiab",
+      "memberIds": [
+        "shoiab",
+        "abo-grir",
+        "yossef-sharawy",
+        "renad",
+        "tasneem",
+        "rodina",
+        "fatema",
+        "marihan"
+      ],
+      "createdAt": "2026-07-04T14:47:22.116Z",
+      "startAt": "2026-07-04T14:46:00.000Z",
+      "deadlineAt": "2026-07-05T14:46:00.000Z",
+      "status": "active"
     }
   ],
   "responses": {
@@ -1154,6 +1177,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T14:13:01.311Z"
+    "updatedAt": "2026-07-04T14:47:22.116Z"
   }
 }
