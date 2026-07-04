@@ -885,6 +885,14 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "abo-grir:taskUpdate:task-update-task-1783008997895-1783090253482",
+      "memberId": "abo-grir",
+      "targetType": "taskUpdate",
+      "targetId": "task-update-task-1783008997895-1783090253482",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-04T15:01:14.757Z"
+    },
+    {
       "id": "abo-grir:task:task-1783176442116",
       "memberId": "abo-grir",
       "targetType": "task",
@@ -1316,6 +1324,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T15:01:13.632Z"
+    "updatedAt": "2026-07-04T15:01:14.757Z"
   }
 }
