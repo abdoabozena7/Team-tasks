@@ -85,8 +85,8 @@
       "baseApproved": 0,
       "baseRejected": 0,
       "publicFlag": "",
-      "repoUrl": "",
-      "driveUrl": ""
+      "repoUrl": "https://github.com/ahmedgrir59-cmyk/test_repo",
+      "driveUrl": "https://drive.google.com/drive/folders/1EG4Fu8YTiVUZgqWzT8VyQb7BlClCLFdh?usp=drive_link"
     },
     {
       "id": "yossef-sharawy",
@@ -1140,7 +1140,7 @@
       "memberId": "abo-grir",
       "memberName": "Abo grir",
       "createdAt": "2026-07-04T14:59:56.499Z",
-      "status": "pending",
+      "status": "approved",
       "repoUrl": "https://github.com/ahmedgrir59-cmyk/test_repo",
       "driveUrl": "https://drive.google.com/drive/folders/1EG4Fu8YTiVUZgqWzT8VyQb7BlClCLFdh?usp=drive_link",
       "previousAliases": [
@@ -1152,7 +1152,8 @@
         "احمد"
       ],
       "previousRepoUrl": "",
-      "previousDriveUrl": ""
+      "previousDriveUrl": "",
+      "reviewedAt": "2026-07-04T15:13:04.240Z"
     },
     {
       "id": "profile-fatema-1783159123947",
@@ -1364,6 +1365,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T15:12:32.332Z"
+    "updatedAt": "2026-07-04T15:13:04.240Z"
   }
 }
