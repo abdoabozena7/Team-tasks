@@ -25,7 +25,7 @@ type StudioTask = {
   createdAt: string;
   startAt?: string;
   deadlineAt?: string;
-  status?: "active" | "archived";
+  status?: "active" | "hidden" | "archived";
 };
 
 type TaskResponse = {
@@ -89,6 +89,7 @@ type MeetingAttendance = {
   checkedAt: string;
   lateMinutes: number;
   score: number;
+  manual?: boolean;
 };
 
 type InteractionTargetType = "task" | "taskUpdate" | "meeting";
@@ -311,7 +312,7 @@ function normalizeData(data: StudioData): StudioData {
         : [],
     startAt: task.startAt ?? task.createdAt,
     deadlineAt: task.deadlineAt ?? "",
-    status: task.status === "archived" ? "archived" : "active",
+    status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
   }));
   const taskIds = new Set(tasks.map((task) => task.id));
   const meetings: Meeting[] = (data.meetings ?? []).map((meeting) => ({
@@ -586,7 +587,7 @@ function getTask(data: StudioData, taskId: string) {
 }
 
 function taskStatus(task: StudioTask) {
-  return task.status === "archived" ? "archived" : "active";
+  return task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active";
 }
 
 function getMeeting(data: StudioData, meetingId: string) {
@@ -830,6 +831,9 @@ export default {
         const next = await commitData(env, `Submit ${item.taskId} by ${item.memberId}`, (data) => {
           const task = getTask(data, String(item.taskId ?? ""));
           const member = getMember(data, String(item.memberId ?? ""));
+          if (taskStatus(task) !== "active") {
+            throw new Error("This task is not active.");
+          }
           if (!taskIsAssignedToMember(data, task, member.id)) {
             throw new Error("This task is not assigned to this member.");
           }
@@ -879,6 +883,9 @@ export default {
         const next = await commitData(env, `Progress ${item.taskId} by ${item.memberId}`, (data) => {
           const task = getTask(data, item.taskId);
           const member = getMember(data, item.memberId);
+          if (taskStatus(task) !== "active") {
+            throw new Error("This task is not active.");
+          }
           if (!taskIsAssignedToMember(data, task, member.id)) {
             throw new Error("This task is not assigned to this member.");
           }
@@ -924,6 +931,9 @@ export default {
           const member = getMember(data, item.memberId);
           if (item.taskId) {
             const task = getTask(data, item.taskId);
+            if (taskStatus(task) !== "active") {
+              throw new Error("This task is not active.");
+            }
             if (!taskIsAssignedToMember(data, task, member.id)) {
               throw new Error("This task is not assigned to this member.");
             }
@@ -965,6 +975,9 @@ export default {
           const taskId = item.taskId ? String(item.taskId) : undefined;
           if (targetType === "task") {
             const task = getTask(data, targetId);
+            if (taskStatus(task) !== "active") {
+              throw new Error("This task is not active.");
+            }
             if (!taskIsAssignedToMember(data, task, memberId)) {
               throw new Error("This task is not assigned to this member.");
             }
@@ -972,6 +985,9 @@ export default {
           if (targetType === "taskUpdate") {
             if (!taskId) throw new Error("Task update seen needs task id.");
             const task = getTask(data, taskId);
+            if (taskStatus(task) !== "active") {
+              throw new Error("This task is not active.");
+            }
             if (!taskIsAssignedToMember(data, task, memberId)) {
               throw new Error("This task is not assigned to this member.");
             }
@@ -1067,7 +1083,7 @@ export default {
               createdAt: new Date().toISOString(),
               startAt: task.startAt || new Date().toISOString(),
               deadlineAt: task.deadlineAt || "",
-              status: task.status === "archived" ? "archived" : "active",
+              status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
             };
             return { ...data, tasks: [...data.tasks, nextTask] };
           }
@@ -1109,7 +1125,14 @@ export default {
                             : task.taskType === "problem"
                               ? "problem"
                               : "task",
-                      status: updates.status === "archived" ? "archived" : updates.status === "active" ? "active" : taskStatus(task),
+                      status:
+                        updates.status === "archived"
+                          ? "archived"
+                          : updates.status === "hidden"
+                            ? "hidden"
+                            : updates.status === "active"
+                              ? "active"
+                              : taskStatus(task),
                     }
                   : task,
               ),
@@ -1225,6 +1248,58 @@ export default {
                     score: calculated.score,
                   },
                 },
+              },
+            };
+          }
+
+          if (action === "setMeetingAttendanceScore") {
+            const meetingId = String(payload.meetingId ?? "");
+            const memberId = String(payload.memberId ?? "");
+            const meeting = getMeeting(data, meetingId);
+            const member = getMember(data, memberId);
+            const score = roundScore(anyNumber(payload.score, 0));
+            const existing = data.meetingAttendance?.[meeting.id]?.[member.id];
+            return {
+              ...data,
+              meetingAttendance: {
+                ...(data.meetingAttendance ?? {}),
+                [meeting.id]: {
+                  ...((data.meetingAttendance ?? {})[meeting.id] ?? {}),
+                  [member.id]: {
+                    memberId: member.id,
+                    memberName: member.name,
+                    checkedAt: existing?.checkedAt ?? new Date().toISOString(),
+                    lateMinutes: existing?.lateMinutes ?? 0,
+                    score,
+                    manual: true,
+                  },
+                },
+              },
+            };
+          }
+
+          if (action === "recalculateMeetingAttendanceScores") {
+            const meetingId = String(payload.meetingId ?? "");
+            const meeting = getMeeting(data, meetingId);
+            const current = data.meetingAttendance?.[meeting.id] ?? {};
+            return {
+              ...data,
+              meetingAttendance: {
+                ...(data.meetingAttendance ?? {}),
+                [meeting.id]: Object.fromEntries(
+                  Object.entries(current).map(([memberId, attendance]) => {
+                    const recalculated = calculateMeetingAttendance(meeting, attendance.checkedAt);
+                    return [
+                      memberId,
+                      {
+                        ...attendance,
+                        lateMinutes: recalculated.lateMinutes,
+                        score: recalculated.score,
+                        manual: false,
+                      },
+                    ];
+                  }),
+                ),
               },
             };
           }

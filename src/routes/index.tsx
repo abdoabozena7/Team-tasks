@@ -85,7 +85,7 @@ type StudioTask = {
   createdAt: string;
   startAt?: string;
   deadlineAt?: string;
-  status?: "active" | "archived";
+  status?: "active" | "hidden" | "archived";
 };
 
 type TaskResponse = {
@@ -149,6 +149,7 @@ type MeetingAttendance = {
   checkedAt: string;
   lateMinutes: number;
   score: number;
+  manual?: boolean;
 };
 
 type InteractionTargetType = "task" | "taskUpdate" | "meeting";
@@ -528,7 +529,7 @@ function sanitizeData(data: StudioData): StudioData {
         : [],
     startAt: task.startAt ?? task.createdAt,
     deadlineAt: task.deadlineAt ?? "",
-    status: task.status === "archived" ? "archived" : "active",
+    status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
   }));
   const taskIds = new Set(tasks.map((task) => task.id));
   const meetings: Meeting[] = (data.meetings ?? []).map((meeting) => ({
@@ -651,11 +652,15 @@ function taskIsForMember(task: StudioTask, memberId: string) {
 }
 
 function taskStatus(task: StudioTask) {
-  return task.status === "archived" ? "archived" : "active";
+  return task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active";
 }
 
 function isActiveTask(task: StudioTask) {
   return taskStatus(task) === "active";
+}
+
+function isHiddenTask(task: StudioTask) {
+  return taskStatus(task) === "hidden";
 }
 
 function responseKey(taskId: string, memberId: string) {
@@ -2966,11 +2971,11 @@ function MemberView({
 
 type AdminSection =
   | "repo-updates"
-  | "reviews"
   | "tasks"
   | "problems"
   | "meetings"
   | "members"
+  | "hidden"
   | "logs"
   | "archive"
   | "settings";
@@ -3457,6 +3462,8 @@ function AdminView({
   onAddMeeting,
   onUpdateMeeting,
   onRecordMeetingAttendance,
+  onSetMeetingAttendanceScore,
+  onRecalculateMeetingAttendanceScores,
   onRemoveMeeting,
   onRemoveTask,
   onManualApprove,
@@ -3495,6 +3502,8 @@ function AdminView({
   onAddMeeting: (meeting: Omit<Meeting, "id" | "createdAt">) => ActionResult;
   onUpdateMeeting: (meetingId: string, updates: Partial<Meeting>) => ActionResult;
   onRecordMeetingAttendance: (meeting: Meeting, member: Member) => ActionResult;
+  onSetMeetingAttendanceScore: (meeting: Meeting, member: Member, score: number) => ActionResult;
+  onRecalculateMeetingAttendanceScores: (meeting: Meeting) => ActionResult;
   onRemoveMeeting: (meetingId: string) => ActionResult;
   onRemoveTask: (taskId: string) => ActionResult;
   onManualApprove: (task: StudioTask, memberId: string, awardedPoints?: number) => ActionResult;
@@ -3532,6 +3541,7 @@ function AdminView({
   const [taskScope, setTaskScope] = useState<"all" | "member">("all");
   const [taskMemberIds, setTaskMemberIds] = useState<string[]>([]);
   const [taskType, setTaskType] = useState<"task" | "problem">("task");
+  const [taskStatusDraft, setTaskStatusDraft] = useState<"active" | "hidden">("active");
   const [taskStartAt, setTaskStartAt] = useState("");
   const [taskDeadlineAt, setTaskDeadlineAt] = useState("");
   const [meetingTitle, setMeetingTitle] = useState("");
@@ -3549,9 +3559,10 @@ function AdminView({
   const [bonusNoteDrafts, setBonusNoteDrafts] = useState<Record<string, string>>({});
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [reviewScores, setReviewScores] = useState<Record<string, string>>({});
+  const [meetingScoreDrafts, setMeetingScoreDrafts] = useState<Record<string, string>>({});
   const [skipNotes, setSkipNotes] = useState<Record<string, string>>({});
   const [taskEditDrafts, setTaskEditDrafts] = useState<
-    Record<string, { title: string; question: string; points: string; taskType: "task" | "problem"; scope: "all" | "member"; memberIds: string[] }>
+    Record<string, { title: string; question: string; points: string; taskType: "task" | "problem"; status: "active" | "hidden" | "archived"; scope: "all" | "member"; memberIds: string[] }>
   >({});
   const [taskUpdateDrafts, setTaskUpdateDrafts] = useState<Record<string, string>>({});
   const [logMode, setLogMode] = useState<"task" | "member">("task");
@@ -3562,8 +3573,9 @@ function AdminView({
   const saveGithubKey = "admin:save-github";
 
   const activeTasks = data.tasks.filter(isActiveTask);
+  const hiddenTasks = data.tasks.filter(isHiddenTask);
   const archivedTasks = data.tasks.filter((task) => taskStatus(task) === "archived");
-  const problemTasks = data.tasks.filter(isProblemTask);
+  const problemTasks = data.tasks.filter((task) => isProblemTask(task) && !isHiddenTask(task));
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const archivedMeetings = (data.meetings ?? []).filter((meeting) => meetingStatus(meeting) === "archived");
   const visibleArchive = archivedTasks.filter((task) =>
@@ -3572,7 +3584,8 @@ function AdminView({
   const selectedTask =
     data.tasks.find((task) => task.id === selectedTaskId) ?? activeTasks[0] ?? archivedTasks[0];
   const selectedProblemTask =
-    (selectedTask && isProblemTask(selectedTask) ? selectedTask : undefined) ?? problemTasks[0];
+    (selectedTask && isProblemTask(selectedTask) && !isHiddenTask(selectedTask) ? selectedTask : undefined) ??
+    problemTasks[0];
   const selectedMeeting =
     (data.meetings ?? []).find((meeting) => meeting.id === selectedMeetingId) ??
     activeMeetings[0] ??
@@ -3581,7 +3594,9 @@ function AdminView({
     data.members.find((member) => member.id === selectedMemberId) ?? data.members[0];
   const adminNowDate = useMemo(() => new Date(adminNowTime), [adminNowTime]);
   const pendingSubmissions = data.tasks.flatMap((task) =>
-    Object.values(data.responses[task.id] ?? {})
+    isHiddenTask(task)
+      ? []
+      : Object.values(data.responses[task.id] ?? {})
       .filter((response) => response.status === "submitted")
       .map((response) => ({
         id: `${task.id}:${response.memberId}`,
@@ -3593,16 +3608,19 @@ function AdminView({
       })),
   );
   const queuedProgress = adminQueue.progressUpdates;
-  const unseenUpdates = data.repoUpdates?.filter((update) => !update.seen) ?? [];
+  const unseenUpdates =
+    data.repoUpdates?.filter((update) => {
+      if (update.seen) return false;
+      if (!update.taskId) return true;
+      const task = data.tasks.find((item) => item.id === update.taskId);
+      return !task || !isHiddenTask(task);
+    }) ?? [];
   const pendingProfileRequests = (data.profileRequests ?? []).filter(
     (request) => request.status === "pending",
   );
 
   useEffect(() => {
     setSection((current) => {
-      if (current === "reviews" && pendingSubmissions.length === 0) {
-        return unseenUpdates.length > 0 || pendingProfileRequests.length > 0 ? "repo-updates" : "reviews";
-      }
       return current;
     });
   }, [pendingProfileRequests.length, pendingSubmissions.length, unseenUpdates.length]);
@@ -3614,6 +3632,31 @@ function AdminView({
 
   function go(nextSection: AdminSection) {
     setSection(nextSection);
+    setNavOpen(false);
+  }
+
+  function openAdminEntity(type: "task" | "problem" | "meeting", id: string) {
+    if (type === "meeting") {
+      const meeting = (data.meetings ?? []).find((item) => item.id === id);
+      if (!meeting) return;
+      setSelectedMeetingId(id);
+      setSection(meetingStatus(meeting) === "archived" ? "archive" : "meetings");
+      setNavOpen(false);
+      return;
+    }
+
+    const task = data.tasks.find((item) => item.id === id);
+    if (!task) return;
+    setSelectedTaskId(id);
+    if (isHiddenTask(task)) {
+      setSection("hidden");
+    } else if (taskStatus(task) === "archived") {
+      setSection("archive");
+    } else if (isProblemTask(task) || type === "problem") {
+      setSection("problems");
+    } else {
+      setSection("tasks");
+    }
     setNavOpen(false);
   }
 
@@ -3671,9 +3714,9 @@ function AdminView({
             memberIds: effectiveScope === "member" ? cleanMemberIds : [],
             startAt: fromDateTimeInputValue(taskStartAt) || new Date().toISOString(),
             deadlineAt: fromDateTimeInputValue(taskDeadlineAt),
-            status: "active",
+            status: taskStatusDraft,
           }),
-      "Task added.",
+      taskStatusDraft === "hidden" ? "Hidden item prepared." : "Task added.",
       "Task was not added. Try again.",
     );
     if (!ok) return;
@@ -3683,6 +3726,7 @@ function AdminView({
     setTaskScope("all");
     setTaskMemberIds([]);
     setTaskType("task");
+    setTaskStatusDraft("active");
     setTaskStartAt("");
     setTaskDeadlineAt("");
   }
@@ -3800,6 +3844,7 @@ function AdminView({
         question: task.question,
         points: String(sanitizePositiveNumber(task.points, 1)),
         taskType: isProblemTask(task) ? "problem" : "task",
+        status: taskStatus(task),
         scope: task.scope,
         memberIds: task.scope === "member" ? selectedMemberIdsForTask(task) : [],
       }
@@ -3808,7 +3853,7 @@ function AdminView({
 
   function updateTaskEditDraft(
     task: StudioTask,
-    updates: Partial<{ title: string; question: string; points: string; taskType: "task" | "problem"; scope: "all" | "member"; memberIds: string[] }>,
+    updates: Partial<{ title: string; question: string; points: string; taskType: "task" | "problem"; status: "active" | "hidden" | "archived"; scope: "all" | "member"; memberIds: string[] }>,
   ) {
     setTaskEditDrafts((current) => ({
       ...current,
@@ -3910,6 +3955,85 @@ function AdminView({
   function problemSolutionsForTask(task: StudioTask) {
     return Object.values(data.responses[task.id] ?? {}).sort(
       (a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime(),
+    );
+  }
+
+  function renderHiddenRows(tasks: StudioTask[]) {
+    if (tasks.length === 0) {
+      return <p className="rounded-lg border border-dashed border-ink/20 bg-white p-6 text-sm text-foreground/55">No hidden items prepared.</p>;
+    }
+
+    return (
+      <div className="grid gap-2">
+        {tasks.map((task) => {
+          const metric = taskMetric(task);
+          const isSelected = selectedTask?.id === task.id;
+          const publishKey = `admin:publish-hidden:${task.id}`;
+          const deleteKey = `admin:delete-hidden:${task.id}`;
+          return (
+            <div
+              key={task.id}
+              className={`min-w-0 rounded-lg border p-3 transition ${
+                isSelected ? "border-ink bg-white shadow-sm" : "border-ink/10 bg-white/70"
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setSelectedTaskId(task.id)}
+                className="w-full text-start"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="break-words text-lg font-bold">{task.title}</div>
+                    <div className="mt-1 text-xs text-foreground/55">
+                      {isProblemTask(task) ? "Problem" : "Task"} | {taskAudienceLabel(task)} | {task.points || 1} pts
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-600">
+                    Hidden
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/60">
+                  <span>Pending {metric.pending}</span>
+                  <span>Approved {metric.approved}</span>
+                  <span>Rejected {metric.rejected}</span>
+                </div>
+              </button>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() =>
+                    void runAdminAction(
+                      publishKey,
+                      () => onUpdateTask(task.id, { status: "active" }),
+                      "Published.",
+                      "Publish failed.",
+                    )
+                  }
+                  className={actionButtonClass("bg-emerald-600 text-white hover:bg-emerald-700", actionFeedback[publishKey])}
+                >
+                  <Eye data-icon="inline-start" />
+                  Publish
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    if (!window.confirm("Delete this hidden item and all linked data?")) return;
+                    void runAdminAction(deleteKey, () => onRemoveTask(task.id), "Deleted.", "Delete failed.");
+                  }}
+                  className={actionButtonClass("border border-red-200 bg-red-50 text-red-700", actionFeedback[deleteKey])}
+                >
+                  <Trash2 data-icon="inline-start" />
+                  Delete
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     );
   }
 
@@ -4027,14 +4151,14 @@ function AdminView({
                   void runAdminAction(
                     restoreTaskKey,
                     () => onUpdateTask(task.id, { status: "active" }),
-                    "Problem restored.",
-                    "Restore failed. Try again.",
+                    isHiddenTask(task) ? "Problem published." : "Problem restored.",
+                    isHiddenTask(task) ? "Publish failed. Try again." : "Restore failed. Try again.",
                   )
                 }
                 className={actionButtonClass("border border-ink/20", actionFeedback[restoreTaskKey])}
               >
-                <RotateCcw data-icon="inline-start" />
-                Restore
+                {isHiddenTask(task) ? <Eye data-icon="inline-start" /> : <RotateCcw data-icon="inline-start" />}
+                {isHiddenTask(task) ? "Publish" : "Restore"}
               </Button>
             )}
             <Button
@@ -4271,14 +4395,14 @@ function AdminView({
                   void runAdminAction(
                     restoreTaskKey,
                     () => onUpdateTask(task.id, { status: "active" }),
-                    "Task restored.",
-                    "Restore failed. Try again.",
+                    isHiddenTask(task) ? "Task published." : "Task restored.",
+                    isHiddenTask(task) ? "Publish failed. Try again." : "Restore failed. Try again.",
                   )
                 }
                 className={actionButtonClass("border border-ink/20", actionFeedback[restoreTaskKey])}
               >
-                <RotateCcw data-icon="inline-start" />
-                Restore
+                {isHiddenTask(task) ? <Eye data-icon="inline-start" /> : <RotateCcw data-icon="inline-start" />}
+                {isHiddenTask(task) ? "Publish" : "Restore"}
               </Button>
             )}
             <Button
@@ -4353,6 +4477,21 @@ function AdminView({
                 </button>
               ))}
             </div>
+            <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
+              {(["active", "hidden", "archived"] as const).map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => updateTaskEditDraft(task, { status })}
+                  className={cn(
+                    "flex-1 rounded-md px-3 py-2 capitalize transition",
+                    editDraft.status === status ? "bg-ink text-white" : "text-foreground/65 hover:bg-paper",
+                  )}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
             <div className="grid gap-3 lg:grid-cols-[140px_1fr]">
               <Input
                 type="number"
@@ -4411,6 +4550,7 @@ function AdminView({
                         question: editDraft.question.trim(),
                         points: sanitizePositiveNumber(editDraft.points, sanitizePositiveNumber(task.points, 1)),
                         taskType: editDraft.taskType,
+                        status: editDraft.status,
                         scope: effectiveScope,
                         memberId: effectiveScope === "member" ? cleanMemberIds[0] : undefined,
                         memberIds: effectiveScope === "member" ? cleanMemberIds : [],
@@ -5002,6 +5142,7 @@ function AdminView({
     const archiveMeetingKey = `admin:archive-meeting:${meeting.id}`;
     const restoreMeetingKey = `admin:restore-meeting:${meeting.id}`;
     const deleteMeetingKey = `admin:delete-meeting:${meeting.id}`;
+    const recalcMeetingKey = `admin:recalculate-meeting:${meeting.id}`;
     const phase = meetingPhase(meeting, adminNowDate);
     const attendanceOpen = canRecordMeetingAttendance(meeting, adminNowDate);
     const timeWindow = meetingWindow(meeting);
@@ -5126,10 +5267,35 @@ function AdminView({
           </p>
         )}
 
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ink/10 bg-paper p-3">
+          <div className="text-sm font-bold text-foreground/65">
+            Edit individual scores below. Changing meeting points will not rewrite old scores automatically.
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              void runAdminAction(
+                recalcMeetingKey,
+                () => onRecalculateMeetingAttendanceScores(meeting),
+                "Scores recalculated.",
+                "Recalculate failed.",
+              )
+            }
+            className={actionButtonClass("border border-ink/20 bg-white", actionFeedback[recalcMeetingKey])}
+          >
+            <RefreshCw data-icon="inline-start" />
+            Recalculate all
+          </Button>
+        </div>
+
         <div className="mt-5 grid gap-2">
           {data.members.map((member) => {
             const attendance = attendanceMap[member.id];
             const attendanceKey = `admin:meeting-attendance:${meeting.id}:${member.id}`;
+            const scoreKey = `admin:meeting-score:${meeting.id}:${member.id}`;
+            const draftKey = `${meeting.id}:${member.id}`;
             return (
               <div
                 key={member.id}
@@ -5150,29 +5316,62 @@ function AdminView({
                     <p className="text-xs text-foreground/50">Not checked yet</p>
                   )}
                 </div>
-                <Button
-                  type="button"
-                  disabled={!attendanceOpen}
-                  onClick={() =>
-                    void runAdminAction(
-                      attendanceKey,
-                      () => onRecordMeetingAttendance(meeting, member),
-                      "Attendance saved.",
-                      "Attendance failed. Try again.",
-                    )
-                  }
-                  className={actionButtonClass(
-                    attendance
-                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                      : !attendanceOpen
-                        ? "bg-zinc-100 text-zinc-500"
-                        : "",
-                    actionFeedback[attendanceKey],
-                  )}
-                >
-                  <Check data-icon="inline-start" />
-                  {attendance ? "Checked" : attendanceOpen ? "Check" : "Not open"}
-                </Button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Input
+                    type="number"
+                    step={0.1}
+                    value={meetingScoreDrafts[draftKey] ?? String(attendance?.score ?? 0)}
+                    onChange={(event) =>
+                      setMeetingScoreDrafts((current) => ({ ...current, [draftKey]: event.target.value }))
+                    }
+                    className="h-10 w-24 border border-ink/20 bg-white text-center"
+                    aria-label={`Score for ${member.name}`}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      void runAdminAction(
+                        scoreKey,
+                        () =>
+                          onSetMeetingAttendanceScore(
+                            meeting,
+                            member,
+                            sanitizeNumber(meetingScoreDrafts[draftKey] ?? attendance?.score ?? 0),
+                          ),
+                        "Score saved.",
+                        "Score failed.",
+                      )
+                    }
+                    className={actionButtonClass("border border-ink/20 bg-white", actionFeedback[scoreKey])}
+                  >
+                    Save score
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!attendanceOpen}
+                    onClick={() =>
+                      void runAdminAction(
+                        attendanceKey,
+                        () => onRecordMeetingAttendance(meeting, member),
+                        "Attendance saved.",
+                        "Attendance failed. Try again.",
+                      )
+                    }
+                    className={actionButtonClass(
+                      attendance
+                        ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                        : !attendanceOpen
+                          ? "bg-zinc-100 text-zinc-500"
+                          : "",
+                      actionFeedback[attendanceKey],
+                    )}
+                  >
+                    <Check data-icon="inline-start" />
+                    {attendance ? "Checked" : attendanceOpen ? "Check" : "Not open"}
+                  </Button>
+                </div>
               </div>
             );
           })}
@@ -5200,15 +5399,26 @@ function AdminView({
                 <div key={meeting.id} className="rounded-lg border border-ink/10 bg-white p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <strong>{meeting.title}</strong>
-                    <span
-                      className={`rounded-full border px-2 py-1 text-xs font-bold ${
-                        attendance
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                          : "border-zinc-200 bg-zinc-50 text-zinc-500"
-                      }`}
-                    >
-                      {attendance ? `${attendance.score} pts` : "absent"}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-full border px-2 py-1 text-xs font-bold ${
+                          attendance
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            : "border-zinc-200 bg-zinc-50 text-zinc-500"
+                        }`}
+                      >
+                        {attendance ? `${attendance.score} pts` : "absent"}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openAdminEntity("meeting", meeting.id)}
+                        className="border border-ink/20 bg-white"
+                      >
+                        Open
+                      </Button>
+                    </div>
                   </div>
                   <p className="mt-1 text-xs text-foreground/55">
                     {meetingStatus(meeting)} | {formatDateTime(meeting.startsAt)}
@@ -5237,9 +5447,20 @@ function AdminView({
                     {taskStatus(task)} | deadline {formatDateTime(task.deadlineAt)}
                   </div>
                 </div>
-                <span className={`rounded-full border px-2 py-1 text-xs font-bold ${skipped ? "border-zinc-300 bg-zinc-100 text-zinc-600" : statusTone(response?.status)}`}>
-                  {skipped ? "skipped" : response?.status ?? "missing"}
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-2 py-1 text-xs font-bold ${skipped ? "border-zinc-300 bg-zinc-100 text-zinc-600" : statusTone(response?.status)}`}>
+                    {skipped ? "skipped" : response?.status ?? "missing"}
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openAdminEntity(isProblemTask(task) ? "problem" : "task", task.id)}
+                    className="border border-ink/20 bg-white"
+                  >
+                    Open
+                  </Button>
+                </div>
               </div>
               <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
                 <span>Score {awarded}/{sanitizePositiveNumber(task.points, 1)}</span>
@@ -5268,11 +5489,11 @@ function AdminView({
 
   const navItems: Array<{ id: AdminSection; label: string; icon: typeof BarChart3 }> = [
     { id: "repo-updates", label: "Attention", icon: Bell },
-    { id: "reviews", label: "Reviews", icon: ListChecks },
     { id: "tasks", label: "Tasks", icon: ClipboardList },
     { id: "problems", label: "Problems", icon: Search },
     { id: "meetings", label: "Meetings", icon: CalendarClock },
     { id: "members", label: "Members", icon: Users },
+    { id: "hidden", label: "Hidden", icon: EyeOff },
     { id: "logs", label: "Logs", icon: ListChecks },
     { id: "archive", label: "Archive", icon: Archive },
     { id: "settings", label: "Settings", icon: Settings },
@@ -5555,7 +5776,7 @@ function AdminView({
                           type="button"
                           onClick={() => {
                             setSelectedTaskId(item.taskId);
-                            setSection("reviews");
+                            setSection("repo-updates");
                           }}
                           className="rounded-lg border border-amber-200 bg-white p-3 text-start transition hover:border-amber-400 hover:bg-amber-50"
                         >
@@ -5595,7 +5816,7 @@ function AdminView({
                 <div className="mt-4 grid gap-3">
                   {unseenUpdates.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-yellow-300 bg-white p-4 text-sm text-foreground/60">
-                      No updates are waiting. The admin flow will open reviews or tasks next.
+                      No updates are waiting. The admin flow will stay on submissions or tasks next.
                     </p>
                   ) : (
                     unseenUpdates.map((update) => {
@@ -5613,7 +5834,7 @@ function AdminView({
                                   type="button"
                                   onClick={() => {
                                     setSelectedTaskId(update.taskId ?? "");
-                                    setSection("reviews");
+                                    setSection("repo-updates");
                                   }}
                                   className="text-left text-lg font-bold underline decoration-yellow-400 decoration-4 underline-offset-4"
                                 >
@@ -5710,47 +5931,19 @@ function AdminView({
                   ))}
                 </div>
               </div>
-            </section>
-          )}
 
-          {section === "reviews" && (
-            <section className="grid min-w-0 gap-5 2xl:grid-cols-[360px_minmax(0,1fr)]">
-              <div className="rounded-xl border border-yellow-200 bg-white p-4 shadow-sm">
-                <h2 className="text-xl font-bold">Pending reviews</h2>
-                <p className="mt-1 text-sm text-foreground/55">
-                  Final submissions waiting for approve, override, or reject.
-                </p>
-                <div className="mt-4 grid gap-2">
-                  {pendingSubmissions.length === 0 ? (
-                    <p className="rounded-lg border border-dashed border-ink/20 bg-paper p-4 text-sm text-foreground/55">
-                      No pending submissions.
-                    </p>
-                  ) : (
-                    pendingSubmissions.map((item) => {
-                      const task = data.tasks.find((candidate) => candidate.id === item.taskId);
-                      return (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setSelectedTaskId(item.taskId)}
-                          className={`rounded-lg border p-3 text-start transition hover:border-yellow-300 ${
-                            selectedTask?.id === item.taskId ? "border-yellow-400 bg-yellow-50" : "border-ink/10 bg-paper"
-                          }`}
-                        >
-                          <strong>{item.memberName}</strong>
-                          <p className="mt-1 text-sm font-bold text-foreground/65">{task?.title ?? item.taskId}</p>
-                          <p className="mt-1 text-xs text-foreground/50">{formatDateTime(item.submittedAt)}</p>
-                        </button>
+              {(selectedTask || pendingSubmissions.length > 0) && (
+                <div className="rounded-xl border border-ink/10 bg-white p-3 shadow-sm">
+                  {(() => {
+                    const task =
+                      selectedTask ??
+                      data.tasks.find((candidate) =>
+                        pendingSubmissions.some((item) => item.taskId === candidate.id),
                       );
-                    })
-                  )}
+                    if (!task) return null;
+                    return isProblemTask(task) ? renderProblemDetail(task) : renderTaskDetail(task);
+                  })()}
                 </div>
-              </div>
-              {renderTaskDetail(
-                selectedTask ??
-                  data.tasks.find((task) =>
-                    pendingSubmissions.some((item) => item.taskId === task.id),
-                  ),
               )}
             </section>
           )}
@@ -5785,6 +5978,21 @@ function AdminView({
                           )}
                         >
                           {type === "problem" ? "Problem" : "Task"}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
+                      {(["active", "hidden"] as const).map((status) => (
+                        <button
+                          key={status}
+                          type="button"
+                          onClick={() => setTaskStatusDraft(status)}
+                          className={cn(
+                            "flex-1 rounded-md px-3 py-2 capitalize transition",
+                            taskStatusDraft === status ? "bg-ink text-white" : "text-foreground/65 hover:bg-paper",
+                          )}
+                        >
+                          {status}
                         </button>
                       ))}
                     </div>
@@ -6145,16 +6353,66 @@ function AdminView({
             </section>
           )}
 
+          {section === "hidden" && (
+            <section className="grid min-w-0 gap-5 2xl:grid-cols-[420px_minmax(0,1fr)]">
+              <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-bold">Hidden drafts</h2>
+                    <p className="mt-1 text-sm text-foreground/55">
+                      Prepared tasks and problems stay invisible until you publish them.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-sm font-bold text-zinc-700">
+                    {hiddenTasks.length} hidden
+                  </span>
+                </div>
+                <div className="mt-4">{renderHiddenRows(hiddenTasks)}</div>
+              </div>
+              {(() => {
+                const hiddenTask = selectedTask && isHiddenTask(selectedTask) ? selectedTask : hiddenTasks[0];
+                if (!hiddenTask) return null;
+                return isProblemTask(hiddenTask) ? renderProblemDetail(hiddenTask) : renderTaskDetail(hiddenTask);
+              })()}
+            </section>
+          )}
+
           {section === "archive" && (
-            <section className="grid gap-5 xl:grid-cols-[360px_1fr]">
+            <section className="grid gap-5 xl:grid-cols-[420px_1fr]">
               <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
                 <label className="mb-3 flex items-center gap-2 rounded-lg border border-ink/10 bg-paper px-3 py-2">
                   <Search className="size-4 text-foreground/40" />
                   <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search archive" className="w-full bg-transparent text-sm outline-none" />
                 </label>
-                {renderTaskRows(visibleArchive)}
+                <div className="grid gap-3">
+                  <details open className="rounded-lg border border-ink/10 bg-paper p-3">
+                    <summary className="cursor-pointer text-sm font-bold">
+                      Archived tasks ({visibleArchive.filter((task) => !isProblemTask(task)).length})
+                    </summary>
+                    <div className="mt-3">{renderTaskRows(visibleArchive.filter((task) => !isProblemTask(task)))}</div>
+                  </details>
+                  <details className="rounded-lg border border-ink/10 bg-paper p-3">
+                    <summary className="cursor-pointer text-sm font-bold">
+                      Archived problems ({visibleArchive.filter(isProblemTask).length})
+                    </summary>
+                    <div className="mt-3">{renderProblemRows(visibleArchive.filter(isProblemTask))}</div>
+                  </details>
+                  <details className="rounded-lg border border-ink/10 bg-paper p-3">
+                    <summary className="cursor-pointer text-sm font-bold">
+                      Archived meetings ({archivedMeetings.length})
+                    </summary>
+                    <div className="mt-3">{renderMeetingRows(archivedMeetings)}</div>
+                  </details>
+                </div>
               </div>
-              {renderTaskDetail(selectedTask && taskStatus(selectedTask) === "archived" ? selectedTask : visibleArchive[0])}
+              {(() => {
+                if (selectedMeetingId && archivedMeetings.some((meeting) => meeting.id === selectedMeetingId)) {
+                  return renderMeetingDetail(selectedMeeting);
+                }
+                const task = selectedTask && taskStatus(selectedTask) === "archived" ? selectedTask : visibleArchive[0];
+                if (!task) return archivedMeetings[0] ? renderMeetingDetail(archivedMeetings[0]) : null;
+                return isProblemTask(task) ? renderProblemDetail(task) : renderTaskDetail(task);
+              })()}
             </section>
           )}
 
@@ -8813,6 +9071,56 @@ function Index() {
     }
   }
 
+  async function setMeetingAttendanceScore(meeting: Meeting, member: Member, score: number) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Saving meeting score...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "setMeetingAttendanceScore", {
+        meetingId: meeting.id,
+        memberId: member.id,
+        score,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Meeting score saved.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function recalculateMeetingAttendanceScores(meeting: Meeting) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Recalculating meeting scores...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "recalculateMeetingAttendanceScores", {
+        meetingId: meeting.id,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Meeting scores recalculated.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function removeMeeting(meetingId: string) {
     if (!adminPassword) {
       setSaveStatus("Log in as admin again before saving.");
@@ -9375,6 +9683,8 @@ function Index() {
         onAddMeeting={addMeeting}
         onUpdateMeeting={updateMeeting}
         onRecordMeetingAttendance={recordMeetingAttendance}
+        onSetMeetingAttendanceScore={setMeetingAttendanceScore}
+        onRecalculateMeetingAttendanceScores={recalculateMeetingAttendanceScores}
         onRemoveMeeting={removeMeeting}
         onRemoveTask={removeTask}
         onManualApprove={manualApprove}
