@@ -820,9 +820,9 @@
       "renad": {
         "memberId": "renad",
         "memberName": "renad",
-        "answer": "The system maintains a living goal objects that tracks progress without allowing agents to modify the original objective",
-        "status": "rejected",
-        "submittedAt": "2026-07-04T14:50:36.138Z",
+        "answer": "ممكن بدل ما كل Agent يعتمد على اللي قبله بس هنخلى ال Agents يشوفوا نفس ال original propmt",
+        "status": "submitted",
+        "submittedAt": "2026-07-04T18:44:08.608Z",
         "awardedPoints": 0,
         "lateSubmission": false,
         "reviewEvents": [
@@ -832,9 +832,7 @@
             "reviewedAt": "2026-07-04T15:02:08.244Z",
             "note": "دا كدا كدا بيحصل (فين الحل برضو ؟😂)"
           }
-        ],
-        "reviewedAt": "2026-07-04T15:02:08.244Z",
-        "scoreOverride": false
+        ]
       },
       "tasneem": {
         "memberId": "tasneem",
@@ -1400,6 +1398,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T18:44:06.170Z"
+    "updatedAt": "2026-07-04T18:44:08.608Z"
   }
 }
