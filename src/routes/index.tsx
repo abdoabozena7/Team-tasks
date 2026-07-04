@@ -351,6 +351,8 @@ const PENDING_RESPONSE_KEYS = "hivo-studio-pending-responses";
 const GITHUB_OWNER = "abdoabozena7";
 const GITHUB_REPO = "Team-tasks";
 const GITHUB_BRANCH = "main";
+const submittedResponseKeysThisSession = new Set<string>();
+const responseStatusSnapshotThisSession = new Map<string, TaskResponse["status"]>();
 const GITHUB_DATA_PATHS = ["team-data.json", "public/team-data.json"];
 const DEFAULT_HIVO_API_URL = "https://hivo-studio-api.boodyabozena.workers.dev";
 const HIVO_API_URL = (import.meta.env.VITE_HIVO_API_URL || DEFAULT_HIVO_API_URL).replace(/\/+$/, "");
@@ -1880,6 +1882,7 @@ function MemberView({
     const pendingKeys = readPendingResponseKeys(activeMember.member.id);
     const pendingSet = new Set(pendingKeys);
     const nextPendingKeys = [...pendingKeys];
+    const nextStatusMap = new Map<string, TaskResponse["status"]>();
     let acceptedTask: StudioTask | undefined;
     let acceptedCelebrationKey = "";
 
@@ -1887,6 +1890,7 @@ function MemberView({
       const response = getResponse(data, task.id, activeMember.member.id);
       if (!response?.submittedAt) continue;
       const pendingKey = responsePendingKey(activeMember.member.id, task.id, response.submittedAt);
+      nextStatusMap.set(pendingKey, response.status);
 
       if (response.status === "submitted") {
         nextPendingKeys.push(pendingKey);
@@ -1894,6 +1898,10 @@ function MemberView({
       }
 
       if (response.status === "approved" && pendingSet.has(pendingKey)) {
+        const previousStatus = responseStatusSnapshotThisSession.get(pendingKey);
+        const sawPendingBefore =
+          previousStatus === "submitted" || !submittedResponseKeysThisSession.has(pendingKey);
+        if (!sawPendingBefore) continue;
         const celebrationKey = responseCelebrationKey(activeMember.member.id, task.id, response.submittedAt);
         if (!acceptedTask && window.localStorage.getItem(celebrationKey) !== "seen") {
           acceptedTask = task;
@@ -1903,6 +1911,9 @@ function MemberView({
     }
 
     writePendingResponseKeys(activeMember.member.id, nextPendingKeys);
+    nextStatusMap.forEach((status, key) => {
+      responseStatusSnapshotThisSession.set(key, status);
+    });
     if (!acceptedTask) return;
     window.localStorage.setItem(acceptedCelebrationKey, "seen");
     setCelebrationTaskId(acceptedTask.id);
@@ -9743,6 +9754,7 @@ function Index() {
 
     setIsSubmitting(true);
     try {
+      submittedResponseKeysThisSession.add(responsePendingKey(item.memberId, item.taskId, item.submittedAt));
       const nextData = await postSubmission(item);
       const repoUpdate = createRepoUpdateFromText({
         memberId: item.memberId,
