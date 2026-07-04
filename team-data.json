@@ -735,11 +735,21 @@
         "memberId": "abozena",
         "memberName": "abozena",
         "answer": "github",
-        "status": "submitted",
+        "status": "approved",
         "submittedAt": "2026-07-02T21:23:47.314Z",
         "awardedPoints": 0,
         "lateSubmission": false,
-        "reviewEvents": []
+        "reviewEvents": [
+          {
+            "id": "review-1783154217771",
+            "status": "approved",
+            "reviewedAt": "2026-07-04T08:36:57.771Z",
+            "awardedPoints": 0,
+            "scoreOverride": true
+          }
+        ],
+        "reviewedAt": "2026-07-04T08:36:57.771Z",
+        "scoreOverride": true
       },
       "tasneem": {
         "memberId": "tasneem",
@@ -1055,6 +1065,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T08:36:29.654Z"
+    "updatedAt": "2026-07-04T08:36:57.771Z"
   }
 }
