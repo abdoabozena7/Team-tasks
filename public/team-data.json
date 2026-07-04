@@ -834,7 +834,7 @@
       "source": "manual",
       "excerpt": "GitHub attention requested for Task 2 harness engineering",
       "createdAt": "2026-07-04T10:57:51.138Z",
-      "seen": false
+      "seen": true
     },
     {
       "id": "repo-submission-rodina-task-1783008997895-1783162667437",
@@ -1138,6 +1138,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T13:22:29.753Z"
+    "updatedAt": "2026-07-04T13:22:47.043Z"
   }
 }
