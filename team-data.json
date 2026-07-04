@@ -814,6 +814,16 @@
         "awardedPoints": 0,
         "lateSubmission": false,
         "reviewEvents": []
+      },
+      "renad": {
+        "memberId": "renad",
+        "memberName": "renad",
+        "answer": "رفعته ع ال github",
+        "status": "submitted",
+        "submittedAt": "2026-07-04T22:32:30.287Z",
+        "awardedPoints": 0,
+        "lateSubmission": false,
+        "reviewEvents": []
       }
     },
     "task-1783176442116": {
@@ -1072,6 +1082,15 @@
     }
   ],
   "repoUpdates": [
+    {
+      "id": "repo-submission-renad-task-1783008997895-1783204350287",
+      "memberId": "renad",
+      "taskId": "task-1783008997895",
+      "source": "submission",
+      "excerpt": "رفعته ع ال github",
+      "createdAt": "2026-07-04T22:32:30.287Z",
+      "seen": false
+    },
     {
       "id": "repo-progress-rodina-task-1783176442116-1783177159790",
       "memberId": "rodina",
@@ -1431,6 +1450,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T22:32:28.270Z"
+    "updatedAt": "2026-07-04T22:32:30.287Z"
   }
 }
