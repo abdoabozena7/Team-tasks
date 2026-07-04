@@ -806,7 +806,7 @@
       "source": "manual",
       "excerpt": "GitHub attention requested for Task 2 harness engineering",
       "createdAt": "2026-07-03T23:47:14.504Z",
-      "seen": false
+      "seen": true
     },
     {
       "id": "repo-manual-tasneem-task-1783008997895-1783045246194",
@@ -1065,6 +1065,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T08:37:31.584Z"
+    "updatedAt": "2026-07-04T08:37:34.173Z"
   }
 }
