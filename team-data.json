@@ -275,6 +275,23 @@
       "deadlineAt": "2026-07-06T21:01:00.000Z",
       "status": "active",
       "taskType": "task"
+    },
+    {
+      "id": "task-1783150403314",
+      "title": "QA TEMP Problem secure check",
+      "question": "Write a unique solution for this temporary security check. ***** Second section.",
+      "points": 1,
+      "taskType": "problem",
+      "scope": "member",
+      "memberId": "tasneem",
+      "memberIds": [
+        "tasneem",
+        "shoiab"
+      ],
+      "createdAt": "2026-07-04T07:33:23.314Z",
+      "startAt": "2026-07-04T07:33:23.314Z",
+      "deadlineAt": "2026-07-05T07:33:22.2551413Z",
+      "status": "active"
     }
   ],
   "responses": {
@@ -1045,6 +1062,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T07:16:05.835Z"
+    "updatedAt": "2026-07-04T07:33:23.314Z"
   }
 }
