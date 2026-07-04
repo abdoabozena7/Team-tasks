@@ -799,6 +799,14 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "fatema:taskUpdate:task-update-task-1783008997895-1783090253482",
+      "memberId": "fatema",
+      "targetType": "taskUpdate",
+      "targetId": "task-update-task-1783008997895-1783090253482",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-04T09:58:59.972Z"
+    },
+    {
       "id": "fatema:task:task-1783008997895",
       "memberId": "fatema",
       "targetType": "task",
@@ -1101,6 +1109,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T09:58:43.947Z"
+    "updatedAt": "2026-07-04T09:58:59.972Z"
   }
 }
