@@ -222,7 +222,8 @@
       "createdAt": "2026-07-01T19:19:43.973Z",
       "startAt": "2026-06-29T19:18:00.000Z",
       "deadlineAt": "2026-07-02T13:00:00.000Z",
-      "status": "active"
+      "status": "active",
+      "taskType": "task"
     },
     {
       "id": "task-1782934576642",
@@ -243,7 +244,8 @@
       "createdAt": "2026-07-01T19:36:16.642Z",
       "startAt": "2026-07-01T19:35:00.000Z",
       "deadlineAt": "2026-07-02T19:35:00.000Z",
-      "status": "active"
+      "status": "active",
+      "taskType": "task"
     },
     {
       "id": "task-1782984779472",
@@ -258,7 +260,8 @@
       "createdAt": "2026-07-02T09:32:59.472Z",
       "startAt": "2026-07-02T09:32:00.000Z",
       "deadlineAt": "2026-07-03T09:32:00.000Z",
-      "status": "archived"
+      "status": "archived",
+      "taskType": "task"
     },
     {
       "id": "task-1783008997895",
@@ -270,6 +273,24 @@
       "createdAt": "2026-07-02T16:16:37.895Z",
       "startAt": "2026-07-02T16:15:00.000Z",
       "deadlineAt": "2026-07-06T21:01:00.000Z",
+      "status": "active",
+      "taskType": "task"
+    },
+    {
+      "id": "task-1783148925869",
+      "title": "QA TEMP Problem - duplicate prevention test",
+      "question": "???? ?? ????? ??????? ??. ????? ???? ?? ?? ????. ***** ????? ?????? ???????",
+      "points": 1,
+      "taskType": "problem",
+      "scope": "member",
+      "memberId": "tasneem",
+      "memberIds": [
+        "tasneem",
+        "shoiab"
+      ],
+      "createdAt": "2026-07-04T07:08:45.869Z",
+      "startAt": "2026-07-04T07:08:45.869Z",
+      "deadlineAt": "2026-07-06T07:08:44.8731327Z",
       "status": "active"
     }
   ],
@@ -763,6 +784,8 @@
   },
   "meetings": [],
   "meetingAttendance": {},
+  "interactions": [],
+  "bonusGrades": [],
   "repoUpdates": [
     {
       "id": "repo-submission-marihan-task-1783008997895-1783123763063",
@@ -1039,6 +1062,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T00:45:39.162Z"
+    "updatedAt": "2026-07-04T07:08:45.869Z"
   }
 }
