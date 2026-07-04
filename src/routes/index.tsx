@@ -1464,6 +1464,7 @@ function LeaderboardStatPill({
 }
 
 function memberArabicName(member: Member) {
+  if (member.id === "marihan") return "ماريهان";
   const aliases = Array.isArray(member.aliases) ? member.aliases : [];
   const arabicAlias = aliases.find((alias) => /[\u0600-\u06FF]/.test(alias));
   return arabicAlias?.trim() || member.name;
@@ -2528,6 +2529,7 @@ function MemberView({
               const taskAudienceLabel = task.scope === "all" ? "تاسك عام لكل التيم" : "تاسك مخصص ليك";
               const taskPointsLabel = formatTaskPointsLabel(taskPoints);
               const problemTask = isProblemTask(task);
+              const priorProblemSolutions = problemTask ? problemSolutionEntries(task) : [];
               const taskSeen = hasSeenTarget("task", task.id);
 
               return (
@@ -2636,7 +2638,7 @@ function MemberView({
                       </>
                     )}
                   </div>
-                  {problemTask && (
+                  {problemTask && priorProblemSolutions.length > 0 && (
                     <div className="mb-4 rounded-xl border-[2px] border-red-200 bg-red-50 p-3 text-red-950">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
@@ -2711,19 +2713,21 @@ function MemberView({
                     </div>
                   )}
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <strong className="text-base">اكتب الرد أو التحديث</strong>
+                    <strong className="text-base">
+                      {problemTask ? "اكتب الحل" : "اكتب الرد أو التحديث"}
+                    </strong>
                   </div>
                   <Textarea
                     value={sharedDraft}
                     onChange={(event) => {
                       onDraftChange(key, event.target.value);
-                      onDraftChange(taskProgressKey, event.target.value);
+                      if (!problemTask) onDraftChange(taskProgressKey, event.target.value);
                     }}
                     onPaste={problemTask ? (event) => blockProblemPaste(event, task.id) : undefined}
                     onDrop={problemTask ? (event) => blockProblemDrop(event, task.id) : undefined}
                     onBeforeInput={problemTask ? (event) => blockProblemBeforeInput(event, task.id) : undefined}
                     onContextMenu={problemTask ? (event) => event.preventDefault() : undefined}
-                    placeholder="اكتب هنا الرد النهائي أو تحديث المتابعة..."
+                    placeholder={problemTask ? "اكتب حل مختلف وواضح هنا..." : "اكتب هنا الرد النهائي أو تحديث المتابعة..."}
                     className={cn(
                       "min-h-20 border-[2px] border-ink bg-paper px-3 py-2 text-sm leading-6 sm:min-h-[88px]",
                       problemTask && "problem-answer-input",
@@ -2762,37 +2766,39 @@ function MemberView({
                       <Save data-icon="inline-start" />
                       تسليم للمراجعة
                     </Button>
-                    <Button
-                      type="button"
-                      data-testid={`submit-progress-${task.id}`}
-                      onClick={() => {
-                        if (!sharedDraft.trim()) {
-                          blockMemberAction(taskProgressKey, ["progress note"]);
-                          return;
-                        }
-                        markTaskSeen(task.id);
-                        void runMemberAction(
-                          taskProgressKey,
-                          () => onSubmitProgress(task),
-                          "Progress update sent.",
-                          "Progress update failed. Try again.",
-                        );
-                      }}
-                      disabled={isSubmitting}
-                      variant="outline"
-                      className={actionButtonClass(
-                        "border-[2px] border-ink bg-yellow-200 text-yellow-950 hover:bg-yellow-300 doodle-shadow-sm",
-                        progressFeedback,
-                      )}
-                    >
-                      <Save data-icon="inline-start" />
-                      إرسال متابعة
-                    </Button>
+                    {!problemTask && (
+                      <Button
+                        type="button"
+                        data-testid={`submit-progress-${task.id}`}
+                        onClick={() => {
+                          if (!sharedDraft.trim()) {
+                            blockMemberAction(taskProgressKey, ["progress note"]);
+                            return;
+                          }
+                          markTaskSeen(task.id);
+                          void runMemberAction(
+                            taskProgressKey,
+                            () => onSubmitProgress(task),
+                            "Progress update sent.",
+                            "Progress update failed. Try again.",
+                          );
+                        }}
+                        disabled={isSubmitting}
+                        variant="outline"
+                        className={actionButtonClass(
+                          "border-[2px] border-ink bg-yellow-200 text-yellow-950 hover:bg-yellow-300 doodle-shadow-sm",
+                          progressFeedback,
+                        )}
+                      >
+                        <Save data-icon="inline-start" />
+                        إرسال متابعة
+                      </Button>
+                    )}
                   </div>
                   <ActionFeedbackLine feedback={finalFeedback} />
-                  <ActionFeedbackLine feedback={progressFeedback} />
+                  {!problemTask && <ActionFeedbackLine feedback={progressFeedback} />}
 
-                  {officialProgress.length > 0 && (
+                  {!problemTask && officialProgress.length > 0 && (
                     <div className="mt-4 border-t-[2px] border-ink/20 pt-3">
                       <div className="mb-2 grid gap-2">
                         {officialProgress.map((update) => (
