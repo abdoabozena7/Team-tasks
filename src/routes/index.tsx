@@ -78,7 +78,7 @@ type StudioTask = {
   title: string;
   question: string;
   points: number;
-  taskType?: "task" | "problem";
+  taskType?: TaskType | "task";
   scope: "all" | "member";
   memberId?: string;
   memberIds?: string[];
@@ -87,6 +87,8 @@ type StudioTask = {
   deadlineAt?: string;
   status?: "active" | "hidden" | "archived";
 };
+
+type TaskType = "technical" | "nonTechnical" | "problem";
 
 type TaskResponse = {
   memberId: string;
@@ -293,6 +295,8 @@ type MemberScore = {
   points: number;
   privateTasks: number;
   avgHours: number | null;
+  avgFastHours: number | null;
+  technicalTimingScore: number | null;
   responseRate: number;
   approvalRate: number;
   attendedMeetings: number;
@@ -305,7 +309,7 @@ type MemberScore = {
   submissionScore: number;
   completionScore: number;
   qualityScore: number;
-  speedScore: number;
+  timingScore: number;
   interactionScore: number;
   meetingScore: number;
   effortScore: number;
@@ -513,24 +517,46 @@ function memberVisibleMeetings(meetings: Meeting[], now = new Date()) {
     .sort((a, b) => (meetingWindow(a)?.startMs ?? 0) - (meetingWindow(b)?.startMs ?? 0));
 }
 
+function normalizedTaskType(task: Pick<StudioTask, "taskType" | "points">): TaskType {
+  if (task.taskType === "problem") return "problem";
+  if (task.taskType === "technical") return "technical";
+  if (task.taskType === "nonTechnical") return "nonTechnical";
+  return Number(task.points) === 5 ? "technical" : "nonTechnical";
+}
+
+function taskTypeLabel(task: Pick<StudioTask, "taskType" | "points">) {
+  const type = normalizedTaskType(task);
+  return taskTypeOptionLabel(type);
+}
+
+function taskTypeOptionLabel(type: TaskType) {
+  if (type === "problem") return "Problem";
+  if (type === "technical") return "Technical";
+  return "Non-technical";
+}
+
 function sanitizeData(data: StudioData): StudioData {
-  const tasks: StudioTask[] = (data.tasks ?? []).map((task) => ({
-    ...task,
-    points: sanitizeNumber(task.points) || 1,
-    taskType: task.taskType === "problem" ? "problem" : "task",
-    scope: task.scope === "member" ? "member" : "all",
-    memberId:
-      task.scope === "member"
-        ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
-        : undefined,
-    memberIds:
-      task.scope === "member"
-        ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
-        : [],
-    startAt: task.startAt ?? task.createdAt,
-    deadlineAt: task.deadlineAt ?? "",
-    status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
-  }));
+  const tasks: StudioTask[] = (data.tasks ?? []).map((task) => {
+    const points = sanitizeNumber(task.points) || 1;
+    const taskType = normalizedTaskType({ ...task, points });
+    return {
+      ...task,
+      points,
+      taskType,
+      scope: task.scope === "member" ? "member" : "all",
+      memberId:
+        task.scope === "member"
+          ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
+          : undefined,
+      memberIds:
+        task.scope === "member"
+          ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
+          : [],
+      startAt: task.startAt ?? task.createdAt,
+      deadlineAt: taskType === "technical" ? "" : task.deadlineAt ?? "",
+      status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
+    };
+  });
   const taskIds = new Set(tasks.map((task) => task.id));
   const meetings: Meeting[] = (data.meetings ?? []).map((meeting) => ({
     ...meeting,
@@ -636,7 +662,15 @@ function interactionKey(memberId: string, targetType: InteractionTargetType, tar
 }
 
 function isProblemTask(task: StudioTask) {
-  return task.taskType === "problem";
+  return normalizedTaskType(task) === "problem";
+}
+
+function isTechnicalTask(task: StudioTask) {
+  return normalizedTaskType(task) === "technical";
+}
+
+function taskDeadlineLabel(task: StudioTask) {
+  return isTechnicalTask(task) ? "No deadline" : formatDateTime(task.deadlineAt);
 }
 
 function privateTaskMemberId(task: StudioTask) {
@@ -782,6 +816,7 @@ function sanitizeScore(value: unknown, fallback = 0) {
 }
 
 function taskWindowDuration(task: StudioTask) {
+  if (isTechnicalTask(task)) return null;
   if (!task.deadlineAt) return null;
   const startTime = new Date(task.startAt || task.createdAt).getTime();
   const deadlineTime = new Date(task.deadlineAt).getTime();
@@ -792,6 +827,7 @@ function taskWindowDuration(task: StudioTask) {
 }
 
 function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submittedAt">) {
+  if (isTechnicalTask(task)) return false;
   if (!task.deadlineAt) return false;
   const deadlineTime = new Date(task.deadlineAt).getTime();
   const submittedTime = new Date(response.submittedAt).getTime();
@@ -803,6 +839,7 @@ function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submit
 }
 
 function isHardLocked(task: StudioTask, response: Pick<TaskResponse, "submittedAt">) {
+  if (isTechnicalTask(task)) return false;
   const duration = taskWindowDuration(task);
   if (duration === null || !task.deadlineAt) return false;
   const deadlineTime = new Date(task.deadlineAt).getTime();
@@ -872,6 +909,27 @@ function normalizedInverseScore(value: number | null, min: number | null, max: n
   return clampScore(100 - ((value - min) / (max - min)) * 100);
 }
 
+function technicalTimingScore(task: StudioTask, response: TaskResponse) {
+  if (isTechnicalTask(task)) return 75;
+  const startTime = new Date(task.startAt || task.createdAt).getTime();
+  const deadlineTime = task.deadlineAt ? new Date(task.deadlineAt).getTime() : NaN;
+  const submittedTime = new Date(response.submittedAt).getTime();
+  if (
+    !Number.isFinite(startTime) ||
+    !Number.isFinite(deadlineTime) ||
+    !Number.isFinite(submittedTime) ||
+    deadlineTime <= startTime
+  ) {
+    return 75;
+  }
+  if (submittedTime > deadlineTime) return 0;
+  const progress = clampScore(((submittedTime - startTime) / (deadlineTime - startTime)) * 100);
+  if (progress < 50) return 25 + progress * 0.5;
+  if (progress < 70) return 50 + ((progress - 50) / 20) * 35;
+  if (progress <= 90) return 100;
+  return 90 - ((progress - 90) / 10) * 15;
+}
+
 function createStats(data: StudioData) {
   const activeTasks = data.tasks.filter(isActiveTask);
   const scoreTasks = data.tasks.filter((task) => !isHiddenTask(task));
@@ -898,11 +956,26 @@ function createStats(data: StudioData) {
       0,
     );
     const speedSamples = responses
-      .map((item) => hoursBetween(item.task.createdAt, item.response.submittedAt))
+      .map((item) => hoursBetween(item.task.startAt || item.task.createdAt, item.response.submittedAt))
       .filter((value): value is number => value !== null);
     const avgHours =
       speedSamples.length > 0
         ? speedSamples.reduce((sum, value) => sum + value, 0) / speedSamples.length
+        : null;
+    const fastSpeedSamples = responses
+      .filter((item) => !isTechnicalTask(item.task))
+      .map((item) => hoursBetween(item.task.startAt || item.task.createdAt, item.response.submittedAt))
+      .filter((value): value is number => value !== null);
+    const avgFastHours =
+      fastSpeedSamples.length > 0
+        ? fastSpeedSamples.reduce((sum, value) => sum + value, 0) / fastSpeedSamples.length
+        : null;
+    const technicalTimingSamples = responses
+      .filter((item) => isTechnicalTask(item.task))
+      .map((item) => technicalTimingScore(item.task, item.response));
+    const technicalTimingScoreValue =
+      technicalTimingSamples.length > 0
+        ? technicalTimingSamples.reduce((sum, value) => sum + value, 0) / technicalTimingSamples.length
         : null;
     const baseCompleted = 0;
     const baseApproved = 0;
@@ -998,6 +1071,8 @@ function createStats(data: StudioData) {
       points: Math.round((basePoints + bonusPoints + taskPoints + meetingPoints) * 100) / 100,
       privateTasks,
       avgHours,
+      avgFastHours,
+      technicalTimingScore: technicalTimingScoreValue,
       responseRate,
       approvalRate,
       attendedMeetings,
@@ -1010,7 +1085,7 @@ function createStats(data: StudioData) {
       submissionScore: 0,
       completionScore: 0,
       qualityScore: 0,
-      speedScore: 0,
+      timingScore: 0,
       interactionScore: 0,
       meetingScore: 0,
       effortScore: 0,
@@ -1018,11 +1093,11 @@ function createStats(data: StudioData) {
   });
   const visibleRawStats = rawMemberStats.filter((item) => !item.member.hidden);
   const maxSubmitted = Math.max(0, ...visibleRawStats.map((item) => item.submitted));
-  const avgHourValues = visibleRawStats
-    .map((item) => item.avgHours)
+  const avgFastHourValues = visibleRawStats
+    .map((item) => item.avgFastHours)
     .filter((value): value is number => value !== null);
-  const minAvgHours = avgHourValues.length > 0 ? Math.min(...avgHourValues) : null;
-  const maxAvgHours = avgHourValues.length > 0 ? Math.max(...avgHourValues) : null;
+  const minAvgFastHours = avgFastHourValues.length > 0 ? Math.min(...avgFastHourValues) : null;
+  const maxAvgFastHours = avgFastHourValues.length > 0 ? Math.max(...avgFastHourValues) : null;
   const seenHourValues = visibleRawStats
     .map((item) => item.avgSeenHours)
     .filter((value): value is number => value !== null);
@@ -1032,7 +1107,15 @@ function createStats(data: StudioData) {
     const submissionScore = maxSubmitted > 0 ? (item.submitted / maxSubmitted) * 100 : 0;
     const completionScore = item.responseRate;
     const qualityScore = clampScore(item.approvalRate - item.rejectionRate * 0.7);
-    const speedScore = normalizedInverseScore(item.avgHours, minAvgHours, maxAvgHours);
+    const fastTimingScore = normalizedInverseScore(item.avgFastHours, minAvgFastHours, maxAvgFastHours);
+    const timingParts = [
+      item.technicalTimingScore,
+      item.avgFastHours === null ? null : fastTimingScore,
+    ].filter((value): value is number => value !== null);
+    const timingScore =
+      timingParts.length > 0
+        ? timingParts.reduce((sum, value) => sum + value, 0) / timingParts.length
+        : 75;
     const seenRate =
       item.expectedSeenTargets > 0 ? (item.seenTargets / item.expectedSeenTargets) * 100 : 100;
     const seenSpeedScore = normalizedInverseScore(item.avgSeenHours, minSeenHours, maxSeenHours);
@@ -1046,7 +1129,7 @@ function createStats(data: StudioData) {
       submissionScore * 0.35 +
         completionScore * 0.2 +
         qualityScore * 0.2 +
-        speedScore * 0.1 +
+        timingScore * 0.1 +
         interactionScore * 0.1 +
         meetingScore * 0.05,
     );
@@ -1056,7 +1139,7 @@ function createStats(data: StudioData) {
       submissionScore,
       completionScore,
       qualityScore,
-      speedScore,
+      timingScore,
       interactionScore,
       meetingScore,
       effortScore,
@@ -1069,10 +1152,8 @@ function createStats(data: StudioData) {
     if (b.responseRate !== a.responseRate) return b.responseRate - a.responseRate;
     if (a.rejectionRate !== b.rejectionRate) return a.rejectionRate - b.rejectionRate;
     if (b.approvalRate !== a.approvalRate) return b.approvalRate - a.approvalRate;
-    if (a.avgHours !== b.avgHours) {
-      if (a.avgHours === null) return 1;
-      if (b.avgHours === null) return -1;
-      return a.avgHours - b.avgHours;
+    if (b.timingScore !== a.timingScore) {
+      return b.timingScore - a.timingScore;
     }
     if (b.meetingAttendanceRate !== a.meetingAttendanceRate) {
       return b.meetingAttendanceRate - a.meetingAttendanceRate;
@@ -1284,7 +1365,8 @@ function MemberDetails({ item }: { item: MemberScore }) {
       <span>تاسكات محسوبة: {item.completed}</span>
       <span>نسبة التسليم: {formatPercent(item.responseRate)}</span>
       <span>نسبة القبول: {formatPercent(item.approvalRate)}</span>
-      <span>متوسط السرعة: {formatHours(item.avgHours)}</span>
+      <span>التوقيت: {formatPercent(item.timingScore)}</span>
+      <span>سرعة التسليم السريع: {formatHours(item.avgFastHours)}</span>
       <span>تسكات خاصة: {item.privateTasks}</span>
       <span>درجات يدوية: {item.basePoints}</span>
       <span>بونص: {item.bonusPoints} ({item.bonusCount})</span>
@@ -1306,7 +1388,8 @@ function StatsMemberDetails({ item }: { item: MemberScore }) {
       <span>Counted tasks: {item.completed}</span>
       <span>Submission rate: {formatPercent(item.responseRate)}</span>
       <span>Approval rate: {formatPercent(item.approvalRate)}</span>
-      <span>Average speed: {formatHours(item.avgHours)}</span>
+      <span>Timing: {formatPercent(item.timingScore)}</span>
+      <span>Fast-task speed: {formatHours(item.avgFastHours)}</span>
       <span>Private tasks: {item.privateTasks}</span>
       <span>Manual grades: {item.basePoints}</span>
       <span>Bonus: {item.bonusPoints} ({item.bonusCount})</span>
@@ -1333,8 +1416,11 @@ function leadershipReason(leader: MemberScore, runner?: MemberScore) {
   if (leader.approvalRate > runner.approvalRate) {
     return `قبوله أعلى (${formatPercent(leader.approvalRate)})`;
   }
-  if (leader.avgHours !== null && (runner.avgHours === null || leader.avgHours < runner.avgHours)) {
-    return `بيسلم أسرع (${formatHours(leader.avgHours)})`;
+  if (leader.timingScore > runner.timingScore) {
+    if (leader.avgFastHours !== null && (runner.avgFastHours === null || leader.avgFastHours < runner.avgFastHours)) {
+      return `بيسلم أسرع في المشاكل والتاسكات السريعة (${formatHours(leader.avgFastHours)})`;
+    }
+    return `تقييم التوقيت عنده أقوى (${formatPercent(leader.timingScore)})`;
   }
   if (leader.interactionScore > runner.interactionScore) {
     return `تفاعله أسرع (${formatPercent(leader.interactionScore)})`;
@@ -1989,7 +2075,7 @@ function MemberView({
                   <div>
                     <h2 className="text-2xl font-bold">{task.title}</h2>
                     <p className="mt-1 text-sm text-foreground/60">
-                      {taskStatus(task)} | deadline {formatDateTime(task.deadlineAt)}
+                      {taskStatus(task)} | deadline {taskDeadlineLabel(task)}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -2475,7 +2561,7 @@ function MemberView({
                       </p>
                       <div className="mb-2 flex w-full flex-wrap items-center justify-center gap-2 text-xs font-bold" dir="ltr">
                         <span className="rounded-full border-[2px] border-ink bg-white px-2.5 py-1">
-                          deadline: {formatDateTime(task.deadlineAt)}
+                          deadline: {taskDeadlineLabel(task)}
                         </span>
                       </div>
                       <h2
@@ -2978,7 +3064,7 @@ function structuredTextTitle(text: string, index: number) {
 function buildTaskCopyText(task: StudioTask, updates: TaskAnnouncement[]) {
   const parts = [
     `Task: ${task.title}`,
-    `Deadline: ${formatDateTime(task.deadlineAt)}`,
+    `Deadline: ${taskDeadlineLabel(task)}`,
     `Points: ${sanitizePositiveNumber(task.points, 1)}`,
     "",
     cleanTextForMember(task.question),
@@ -3492,7 +3578,7 @@ function AdminView({
   const [taskPoints, setTaskPoints] = useState(1);
   const [taskScope, setTaskScope] = useState<"all" | "member">("all");
   const [taskMemberIds, setTaskMemberIds] = useState<string[]>([]);
-  const [taskType, setTaskType] = useState<"task" | "problem">("task");
+  const [taskType, setTaskType] = useState<TaskType>("technical");
   const [taskStatusDraft, setTaskStatusDraft] = useState<"active" | "hidden">("active");
   const [taskStartAt, setTaskStartAt] = useState("");
   const [taskDeadlineAt, setTaskDeadlineAt] = useState("");
@@ -3514,7 +3600,7 @@ function AdminView({
   const [meetingScoreDrafts, setMeetingScoreDrafts] = useState<Record<string, string>>({});
   const [skipNotes, setSkipNotes] = useState<Record<string, string>>({});
   const [taskEditDrafts, setTaskEditDrafts] = useState<
-    Record<string, { title: string; question: string; points: string; taskType: "task" | "problem"; status: "active" | "hidden" | "archived"; scope: "all" | "member"; memberIds: string[] }>
+    Record<string, { title: string; question: string; points: string; taskType: TaskType; status: "active" | "hidden" | "archived"; scope: "all" | "member"; memberIds: string[] }>
   >({});
   const [taskUpdateDrafts, setTaskUpdateDrafts] = useState<Record<string, string>>({});
   const [logMode, setLogMode] = useState<"task" | "member">("task");
@@ -3701,7 +3787,7 @@ function AdminView({
             memberId: effectiveScope === "member" ? cleanMemberIds[0] : undefined,
             memberIds: effectiveScope === "member" ? cleanMemberIds : [],
             startAt: fromDateTimeInputValue(taskStartAt) || new Date().toISOString(),
-            deadlineAt: fromDateTimeInputValue(taskDeadlineAt),
+            deadlineAt: taskType === "technical" ? "" : fromDateTimeInputValue(taskDeadlineAt),
             status: taskStatusDraft,
           }),
       taskStatusDraft === "hidden" ? "Hidden item prepared." : "Task added.",
@@ -3713,7 +3799,7 @@ function AdminView({
     setTaskPoints(1);
     setTaskScope("all");
     setTaskMemberIds([]);
-    setTaskType("task");
+    setTaskType("technical");
     setTaskStatusDraft("active");
     setTaskStartAt("");
     setTaskDeadlineAt("");
@@ -3831,7 +3917,7 @@ function AdminView({
         title: task.title,
         question: task.question,
         points: String(sanitizePositiveNumber(task.points, 1)),
-        taskType: isProblemTask(task) ? "problem" : "task",
+        taskType: normalizedTaskType(task),
         status: taskStatus(task),
         scope: task.scope,
         memberIds: task.scope === "member" ? selectedMemberIdsForTask(task) : [],
@@ -3841,7 +3927,7 @@ function AdminView({
 
   function updateTaskEditDraft(
     task: StudioTask,
-    updates: Partial<{ title: string; question: string; points: string; taskType: "task" | "problem"; status: "active" | "hidden" | "archived"; scope: "all" | "member"; memberIds: string[] }>,
+    updates: Partial<{ title: string; question: string; points: string; taskType: TaskType; status: "active" | "hidden" | "archived"; scope: "all" | "member"; memberIds: string[] }>,
   ) {
     setTaskEditDrafts((current) => ({
       ...current,
@@ -3914,7 +4000,7 @@ function AdminView({
                   <div className="break-words text-lg font-bold">{task.title}</div>
                   <div className="mt-1 text-xs text-foreground/55">
                     {taskAudienceLabel(task)}{" "}
-                    | {task.points || 1} pts | deadline {formatDateTime(task.deadlineAt)}
+                    | {task.points || 1} pts | deadline {taskDeadlineLabel(task)}
                   </div>
                 </div>
                 <span className="shrink-0 rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
@@ -3974,7 +4060,7 @@ function AdminView({
                   <div className="min-w-0">
                     <div className="break-words text-lg font-bold">{task.title}</div>
                     <div className="mt-1 text-xs text-foreground/55">
-                      {isProblemTask(task) ? "Problem" : "Task"} | {taskAudienceLabel(task)} | {task.points || 1} pts
+                      {taskTypeLabel(task)} | {taskAudienceLabel(task)} | {task.points || 1} pts
                     </div>
                   </div>
                   <span className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs font-bold text-zinc-600">
@@ -4058,7 +4144,7 @@ function AdminView({
                   <div className="break-words text-lg font-bold">{task.title}</div>
                   <div className="mt-1 text-xs text-foreground/55">
                     {taskStatus(task)} | {assignedMembers(task).length} members | deadline{" "}
-                    {formatDateTime(task.deadlineAt)}
+                    {taskDeadlineLabel(task)}
                   </div>
                 </div>
                 <span className="shrink-0 rounded-full border border-red-200 bg-white px-2 py-1 text-xs font-bold text-red-700">
@@ -4109,7 +4195,7 @@ function AdminView({
             </div>
             <h2 className="mt-2 break-words text-2xl font-bold">{task.title}</h2>
             <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
-              <span>Deadline {formatDateTime(task.deadlineAt)}</span>
+              <span>Deadline {taskDeadlineLabel(task)}</span>
               <span>{sanitizePositiveNumber(task.points, 1)} points</span>
               <span>{responses.length} submitted solutions</span>
             </div>
@@ -4354,7 +4440,7 @@ function AdminView({
             />
             <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
               <span>Start: {formatDateTime(task.startAt)}</span>
-              <span>Deadline: {formatDateTime(task.deadlineAt)}</span>
+              <span>Deadline: {taskDeadlineLabel(task)}</span>
               <span>{task.points || 1} points</span>
             </div>
           </div>
@@ -4423,13 +4509,19 @@ function AdminView({
             onChange={(value) => onUpdateTask(task.id, { startAt: fromDateTimeInputValue(value) })}
             help="Start controls when this assignment opens."
           />
-          <DateTimeField
-            label="Deadline"
-            value={toDateTimeInputValue(task.deadlineAt)}
-            onChange={(value) => onUpdateTask(task.id, { deadlineAt: fromDateTimeInputValue(value) })}
-            help="After deadline: default half score. After double time: locked unless overridden."
-            tone="deadline"
-          />
+          {isTechnicalTask(task) ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
+              Technical task: no deadline, no late penalty, no hard lock.
+            </div>
+          ) : (
+            <DateTimeField
+              label="Deadline"
+              value={toDateTimeInputValue(task.deadlineAt)}
+              onChange={(value) => onUpdateTask(task.id, { deadlineAt: fromDateTimeInputValue(value) })}
+              help="After deadline: default half score. After double time: locked unless overridden."
+              tone="deadline"
+            />
+          )}
         </div>
 
         <div className="mt-4 rounded-lg border border-ink/10 bg-paper p-3">
@@ -4451,7 +4543,7 @@ function AdminView({
               className="min-h-24 border border-ink/20 bg-white"
             />
             <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
-              {(["task", "problem"] as const).map((type) => (
+              {(["technical", "nonTechnical", "problem"] as const).map((type) => (
                 <button
                   key={type}
                   type="button"
@@ -4461,7 +4553,7 @@ function AdminView({
                     editDraft.taskType === type ? "bg-ink text-white" : "text-foreground/65 hover:bg-paper",
                   )}
                 >
-                  {type === "problem" ? "Problem" : "Task"}
+                  {taskTypeOptionLabel(type)}
                 </button>
               ))}
             </div>
@@ -4538,6 +4630,7 @@ function AdminView({
                         question: editDraft.question.trim(),
                         points: sanitizePositiveNumber(editDraft.points, sanitizePositiveNumber(task.points, 1)),
                         taskType: editDraft.taskType,
+                        deadlineAt: editDraft.taskType === "technical" ? "" : task.deadlineAt,
                         status: editDraft.status,
                         scope: effectiveScope,
                         memberId: effectiveScope === "member" ? cleanMemberIds[0] : undefined,
@@ -5432,7 +5525,7 @@ function AdminView({
                 <div>
                   <strong>{task.title}</strong>
                   <div className="text-xs text-foreground/55">
-                    {taskStatus(task)} | deadline {formatDateTime(task.deadlineAt)}
+                    {taskStatus(task)} | deadline {taskDeadlineLabel(task)}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -5488,7 +5581,7 @@ function AdminView({
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="break-words text-2xl font-bold">{task.title}</h2>
               <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
-                {isProblemTask(task) ? "Problem" : "Task"}
+                {taskTypeLabel(task)}
               </span>
               <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-900">
                 {pendingResponses.length} pending
@@ -6089,7 +6182,7 @@ function AdminView({
                     <div>
                       <h2 className="text-xl font-bold">Create task</h2>
                       <p className="mt-1 text-sm text-foreground/55">
-                        Choose who gets the task, then set scoring and deadline rules.
+                        Choose who gets the task, then set scoring and timing rules.
                       </p>
                     </div>
                     <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700">
@@ -6100,7 +6193,7 @@ function AdminView({
                     <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Task title" className="h-11 border border-ink/20 bg-white" />
                     <Textarea value={taskQuestion} onChange={(event) => setTaskQuestion(event.target.value)} placeholder="Question or instructions" className="min-h-24 border border-ink/20 bg-white" />
                     <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
-                      {(["task", "problem"] as const).map((type) => (
+                      {(["technical", "nonTechnical", "problem"] as const).map((type) => (
                         <button
                           key={type}
                           type="button"
@@ -6110,7 +6203,7 @@ function AdminView({
                             taskType === type ? "bg-ink text-white" : "text-foreground/65 hover:bg-paper",
                           )}
                         >
-                          {type === "problem" ? "Problem" : "Task"}
+                          {taskTypeOptionLabel(type)}
                         </button>
                       ))}
                     </div>
@@ -6165,17 +6258,29 @@ function AdminView({
                         onChange={setTaskStartAt}
                         help="Start controls when the task opens."
                       />
-                      <DateTimeField
-                        label="Deadline"
-                        value={taskDeadlineAt}
-                        onChange={setTaskDeadlineAt}
-                        help="After deadline: default half score. After double time: locked unless overridden."
-                        tone="deadline"
-                      />
+                      {taskType === "technical" ? (
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
+                          Technical tasks have no deadline. They stay open until you review or archive them.
+                        </div>
+                      ) : (
+                        <DateTimeField
+                          label="Deadline"
+                          value={taskDeadlineAt}
+                          onChange={setTaskDeadlineAt}
+                          help="After deadline: default half score. After double time: locked unless overridden."
+                          tone="deadline"
+                        />
+                      )}
                     </div>
-                    <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs leading-5 text-yellow-900">
-                      Deadline rule: late submissions default to half score. Submissions after double the task window require override approval.
-                    </div>
+                    {taskType === "technical" ? (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold leading-5 text-emerald-900">
+                        Technical tasks do not use deadlines, late penalties, or hard locks.
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs leading-5 text-yellow-900">
+                        Deadline rule: late submissions default to half score. Submissions after double the task window require override approval.
+                      </div>
+                    )}
                     <Button
                       type="button"
                       data-testid="admin-add-task"
@@ -7837,7 +7942,7 @@ function StatsView({
                           {metric.task.title}
                         </h3>
                         <p>
-                          الموعد النهائي: {formatDateTime(metric.task.deadlineAt)} • {formatTaskPointsLabel(metric.task.points || 1)}
+                          الموعد النهائي: {taskDeadlineLabel(metric.task)} • {formatTaskPointsLabel(metric.task.points || 1)}
                         </p>
                       </div>
                       <div className="stats-task-score">
@@ -8392,7 +8497,7 @@ function DeanStatsView({
                           {metric.task.title}
                         </h3>
                         <p>
-                          deadline: {formatDateTime(metric.task.deadlineAt)} • {formatTaskPointsLabel(metric.task.points || 1)}
+                          deadline: {taskDeadlineLabel(metric.task)} • {formatTaskPointsLabel(metric.task.points || 1)}
                         </p>
                       </div>
                       <div className="stats-task-score">

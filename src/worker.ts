@@ -18,7 +18,7 @@ type StudioTask = {
   title: string;
   question: string;
   points: number;
-  taskType?: "task" | "problem";
+  taskType?: TaskType | "task";
   scope: "all" | "member";
   memberId?: string;
   memberIds?: string[];
@@ -27,6 +27,8 @@ type StudioTask = {
   deadlineAt?: string;
   status?: "active" | "hidden" | "archived";
 };
+
+type TaskType = "technical" | "nonTechnical" | "problem";
 
 type TaskResponse = {
   memberId: string;
@@ -215,11 +217,23 @@ function uniqueText(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
+function normalizedTaskType(task: Pick<StudioTask, "taskType" | "points">): TaskType {
+  if (task.taskType === "problem") return "problem";
+  if (task.taskType === "technical") return "technical";
+  if (task.taskType === "nonTechnical") return "nonTechnical";
+  return Number(task.points) === 5 ? "technical" : "nonTechnical";
+}
+
+function isTechnicalTask(task: StudioTask) {
+  return normalizedTaskType(task) === "technical";
+}
+
 function interactionKey(memberId: string, targetType: InteractionTargetType, targetId: string) {
   return `${memberId}:${targetType}:${targetId}`;
 }
 
 function taskWindowDuration(task: StudioTask) {
+  if (isTechnicalTask(task)) return null;
   if (!task.deadlineAt) return null;
   const startTime = new Date(task.startAt || task.createdAt).getTime();
   const deadlineTime = new Date(task.deadlineAt).getTime();
@@ -230,6 +244,7 @@ function taskWindowDuration(task: StudioTask) {
 }
 
 function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submittedAt">) {
+  if (isTechnicalTask(task)) return false;
   if (!task.deadlineAt) return false;
   const deadlineTime = new Date(task.deadlineAt).getTime();
   const submittedTime = new Date(response.submittedAt).getTime();
@@ -241,6 +256,7 @@ function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submit
 }
 
 function isHardLocked(task: StudioTask, response: Pick<TaskResponse, "submittedAt">) {
+  if (isTechnicalTask(task)) return false;
   const duration = taskWindowDuration(task);
   if (duration === null || !task.deadlineAt) return false;
   const deadlineTime = new Date(task.deadlineAt).getTime();
@@ -298,22 +314,28 @@ function withReviewEvent(
 }
 
 function normalizeData(data: StudioData): StudioData {
-  const tasks: StudioTask[] = (data.tasks ?? []).map((task) => ({
-    ...task,
-    taskType: task.taskType === "problem" ? "problem" : "task",
-    scope: task.scope === "member" ? "member" : "all",
-    memberId:
-      task.scope === "member"
-        ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
-        : undefined,
-    memberIds:
-      task.scope === "member"
-        ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
-        : [],
-    startAt: task.startAt ?? task.createdAt,
-    deadlineAt: task.deadlineAt ?? "",
-    status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
-  }));
+  const tasks: StudioTask[] = (data.tasks ?? []).map((task) => {
+    const points = positiveNumber(task.points, 1);
+    const taskType = normalizedTaskType({ ...task, points });
+    const scope = task.scope === "member" ? "member" : "all";
+    return {
+      ...task,
+      points,
+      taskType,
+      scope,
+      memberId:
+        scope === "member"
+          ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
+          : undefined,
+      memberIds:
+        scope === "member"
+          ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
+          : [],
+      startAt: task.startAt ?? task.createdAt,
+      deadlineAt: taskType === "technical" ? "" : task.deadlineAt ?? "",
+      status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
+    };
+  });
   const taskIds = new Set(tasks.map((task) => task.id));
   const meetings: Meeting[] = (data.meetings ?? []).map((meeting) => ({
     ...meeting,
@@ -653,7 +675,7 @@ function findDuplicateProblemAnswer(
   memberId: string,
   answer: string,
 ) {
-  if (task.taskType !== "problem") return undefined;
+  if (normalizedTaskType(task) !== "problem") return undefined;
   const normalizedAnswer = normalizeProblemAnswer(answer);
   if (!normalizedAnswer) return undefined;
 
@@ -844,7 +866,7 @@ export default {
             throw new Error("This member already submitted this task.");
           }
           if (
-            task.taskType === "problem" &&
+            normalizedTaskType(task) === "problem" &&
             previous?.status === "rejected" &&
             normalizeProblemAnswer(previous.answer) === normalizeProblemAnswer(answer)
           ) {
@@ -1078,18 +1100,20 @@ export default {
             const scope = task.scope === "member" ? "member" : "all";
             const memberIds = scope === "member" ? checkedMemberIds(data, assignedMemberIds(task)) : [];
             if (scope === "member" && memberIds.length === 0) throw new Error("Member task needs at least one member.");
+            const points = positiveNumber(task.points, 1);
+            const taskType = normalizedTaskType({ ...task, points });
             const nextTask: StudioTask = {
               id: `task-${Date.now()}`,
               title: String(task.title),
               question: String(task.question),
-              points: positiveNumber(task.points, 1),
-              taskType: task.taskType === "problem" ? "problem" : "task",
+              points,
+              taskType,
               scope,
               memberId: scope === "member" ? memberIds[0] : undefined,
               memberIds,
               createdAt: new Date().toISOString(),
               startAt: task.startAt || new Date().toISOString(),
-              deadlineAt: task.deadlineAt || "",
+              deadlineAt: taskType === "technical" ? "" : task.deadlineAt || "",
               status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
             };
             return { ...data, tasks: [...data.tasks, nextTask] };
@@ -1110,6 +1134,14 @@ export default {
             if (nextScope === "member" && nextMemberIds.length === 0) {
               throw new Error("Member task needs at least one member.");
             }
+            const nextPoints =
+              updates.points === undefined
+                ? existingTask.points
+                : positiveNumber(updates.points, existingTask.points || 1);
+            const nextTaskType =
+              updates.taskType === undefined
+                ? normalizedTaskType({ taskType: existingTask.taskType, points: nextPoints })
+                : normalizedTaskType({ taskType: updates.taskType, points: nextPoints });
             return {
               ...data,
               tasks: data.tasks.map((task) =>
@@ -1120,18 +1152,14 @@ export default {
                       scope: nextScope,
                       memberId: nextScope === "member" ? nextMemberIds[0] : undefined,
                       memberIds: nextMemberIds,
-                      points:
-                        updates.points === undefined
-                          ? task.points
-                          : positiveNumber(updates.points, task.points || 1),
-                      taskType:
-                        updates.taskType === "problem"
-                          ? "problem"
-                          : updates.taskType === "task"
-                            ? "task"
-                            : task.taskType === "problem"
-                              ? "problem"
-                              : "task",
+                      points: nextPoints,
+                      taskType: nextTaskType,
+                      deadlineAt:
+                        nextTaskType === "technical"
+                          ? ""
+                          : updates.deadlineAt === undefined
+                            ? task.deadlineAt || ""
+                            : updates.deadlineAt || "",
                       status:
                         updates.status === "archived"
                           ? "archived"
