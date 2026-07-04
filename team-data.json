@@ -840,18 +840,27 @@
         "memberId": "tasneem",
         "memberName": "tasneem",
         "answer": "الـ Dynamic Routing الشجرة الطويلة (30 ليفيل) هي السبب في الأزمة. ليه نعمل شجرة طويلة من الأول؟\n\n​ إحنا مش هنعمل شجرة مستويات عميقة (Deep Tree). الـ Master Agent هيقسم الشغل لـ 4 أو 5 تاسكات رئيسية بس (Flat Architecture). وكل ما تاسك تخلص والـ Agent يرجع الناتج، الماستر بيبص عليه: لو لقى الناتج صح، يروح موجه الخطوة اللي بعدها لـ Agent تاني (Dynamic Routing). يعني بدل ما نخطط لـ 30 خطوة تحت بعض ونمشي فيهم عمياني ونبوظ، إحنا بنخطط خطوة بخطوة؛ الـ Agent يخلص، الماستر يشوف النتيجة، ويوجه الـ Agent اللي بعده بناءً على اللي اتنفذ فعلياً. بكده الشجرة بقت \"مفرودة\" ومفيش ليفيلز عميقة أصلاً يحصل فيها Drift",
-        "status": "submitted",
+        "status": "approved",
         "submittedAt": "2026-07-04T17:03:35.988Z",
-        "awardedPoints": 0,
+        "awardedPoints": 1,
         "lateSubmission": false,
         "reviewEvents": [
+          {
+            "id": "review-1783184651408",
+            "status": "approved",
+            "reviewedAt": "2026-07-04T17:04:11.408Z",
+            "awardedPoints": 1,
+            "scoreOverride": true
+          },
           {
             "id": "review-1783177275862",
             "status": "rejected",
             "reviewedAt": "2026-07-04T15:01:15.862Z",
             "note": "وقت ومجهود اوفر"
           }
-        ]
+        ],
+        "reviewedAt": "2026-07-04T17:04:11.408Z",
+        "scoreOverride": true
       },
       "rodina": {
         "memberId": "rodina",
@@ -1391,6 +1400,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T17:03:38.016Z"
+    "updatedAt": "2026-07-04T17:04:11.408Z"
   }
 }
