@@ -221,9 +221,9 @@
       ],
       "createdAt": "2026-07-01T19:19:43.973Z",
       "startAt": "2026-06-29T19:18:00.000Z",
-      "deadlineAt": "2026-07-02T13:00:00.000Z",
+      "deadlineAt": "",
       "status": "archived",
-      "taskType": "task"
+      "taskType": "technical"
     },
     {
       "id": "task-1782934576642",
@@ -245,7 +245,7 @@
       "startAt": "2026-07-01T19:35:00.000Z",
       "deadlineAt": "2026-07-02T19:35:00.000Z",
       "status": "archived",
-      "taskType": "task"
+      "taskType": "nonTechnical"
     },
     {
       "id": "task-1782984779472",
@@ -261,7 +261,7 @@
       "startAt": "2026-07-02T09:32:00.000Z",
       "deadlineAt": "2026-07-03T09:32:00.000Z",
       "status": "archived",
-      "taskType": "task"
+      "taskType": "nonTechnical"
     },
     {
       "id": "task-1783008997895",
@@ -272,9 +272,9 @@
       "memberIds": [],
       "createdAt": "2026-07-02T16:16:37.895Z",
       "startAt": "2026-07-02T16:15:00.000Z",
-      "deadlineAt": "2026-07-06T21:01:00.000Z",
+      "deadlineAt": "",
       "status": "active",
-      "taskType": "task"
+      "taskType": "technical"
     }
   ],
   "responses": {
@@ -809,6 +809,14 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "marihan:taskUpdate:task-update-task-1783008997895-1783090253482",
+      "memberId": "marihan",
+      "targetType": "taskUpdate",
+      "targetId": "task-update-task-1783008997895-1783090253482",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-04T14:12:59.398Z"
+    },
+    {
       "id": "fatema:taskUpdate:task-update-task-1783008997895-1783090253482",
       "memberId": "fatema",
       "targetType": "taskUpdate",
@@ -1138,6 +1146,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T13:23:03.878Z"
+    "updatedAt": "2026-07-04T14:12:59.398Z"
   }
 }
