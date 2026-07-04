@@ -3839,6 +3839,20 @@ function AdminView({
     setNavOpen(false);
   }
 
+  function prepareNewProblem() {
+    setTaskTitle("");
+    setTaskQuestion("");
+    setTaskPoints(1);
+    setTaskScope("all");
+    setTaskMemberIds([]);
+    setTaskType("problem");
+    setTaskStatusDraft("active");
+    setTaskStartAt("");
+    setTaskDeadlineAt("");
+    setSection("tasks");
+    setNavOpen(false);
+  }
+
   function assignedMembers(task: StudioTask) {
     return data.members.filter((member) => taskIsForMember(task, member.id));
   }
@@ -6316,9 +6330,20 @@ function AdminView({
                         Inspect project problems and every proposed solution in one simple place.
                       </p>
                     </div>
-                    <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
-                      {problemTasks.length} problems
-                    </span>
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
+                        {problemTasks.length} problems
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={prepareNewProblem}
+                        className="bg-red-500 text-white hover:bg-red-600"
+                      >
+                        <Plus data-icon="inline-start" />
+                        Add new problem
+                      </Button>
+                    </div>
                   </div>
                   <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs font-bold">
                     <div className="rounded-lg border border-ink/10 bg-paper p-2">
