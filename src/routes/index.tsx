@@ -1378,7 +1378,8 @@ function LeaderboardStatPill({
 }
 
 function memberArabicName(member: Member) {
-  const arabicAlias = member.aliases.find((alias) => /[\u0600-\u06FF]/.test(alias));
+  const aliases = Array.isArray(member.aliases) ? member.aliases : [];
+  const arabicAlias = aliases.find((alias) => /[\u0600-\u06FF]/.test(alias));
   return arabicAlias?.trim() || member.name;
 }
 
