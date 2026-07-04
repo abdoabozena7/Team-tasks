@@ -825,6 +825,16 @@
         "awardedPoints": 0,
         "lateSubmission": false,
         "reviewEvents": []
+      },
+      "tasneem": {
+        "memberId": "tasneem",
+        "memberName": "tasneem",
+        "answer": "الحل اسمه Bidirectional Dry -Planning              بنعمل الاول تشغيل تجربي لي ال Tree كلها من غير تنفيذ وكل agent بيعرف هيعمل ايه كا plan بس وبعدها بنجمع الخطط دي من تحت لفوق ونوصلها لي الماستر علشان يشوف الصوره الكامله ويقارنها بالهدف الاصلي ولو في اي انحراف بنصلحه في مرحله التخطيط قبل ما التنفيذ يبدا",
+        "status": "submitted",
+        "submittedAt": "2026-07-04T14:54:48.600Z",
+        "awardedPoints": 0,
+        "lateSubmission": false,
+        "reviewEvents": []
       }
     }
   },
@@ -1205,6 +1215,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T14:54:46.362Z"
+    "updatedAt": "2026-07-04T14:54:48.600Z"
   }
 }
