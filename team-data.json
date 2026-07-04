@@ -1052,6 +1052,24 @@
   ],
   "profileRequests": [
     {
+      "id": "profile-abo-grir-1783177220625",
+      "memberId": "abo-grir",
+      "memberName": "Abo grir",
+      "createdAt": "2026-07-04T15:00:20.625Z",
+      "status": "pending",
+      "nickname": "فرحات",
+      "previousAliases": [
+        "abo grir",
+        "abo grer",
+        "abo greer",
+        "ابو جرير",
+        "أبو جرير",
+        "احمد"
+      ],
+      "previousRepoUrl": "",
+      "previousDriveUrl": ""
+    },
+    {
       "id": "profile-abo-grir-1783177196499",
       "memberId": "abo-grir",
       "memberName": "Abo grir",
@@ -1280,6 +1298,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T14:59:56.499Z"
+    "updatedAt": "2026-07-04T15:00:20.625Z"
   }
 }
