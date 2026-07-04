@@ -870,7 +870,7 @@
       "source": "manual",
       "excerpt": "GitHub attention requested for Task 2 harness engineering",
       "createdAt": "2026-07-03T02:20:46.194Z",
-      "seen": false
+      "seen": true
     },
     {
       "id": "repo-submission-abozena-task-1783008997895-1783027428609",
@@ -1138,6 +1138,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T13:22:59.538Z"
+    "updatedAt": "2026-07-04T13:23:03.878Z"
   }
 }
