@@ -828,6 +828,15 @@
   "bonusGrades": [],
   "repoUpdates": [
     {
+      "id": "repo-manual-rodina-task-1783008997895-1783162671138",
+      "memberId": "rodina",
+      "taskId": "task-1783008997895",
+      "source": "manual",
+      "excerpt": "GitHub attention requested for Task 2 harness engineering",
+      "createdAt": "2026-07-04T10:57:51.138Z",
+      "seen": false
+    },
+    {
       "id": "repo-submission-rodina-task-1783008997895-1783162667437",
       "memberId": "rodina",
       "taskId": "task-1783008997895",
@@ -1128,6 +1137,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T10:57:47.437Z"
+    "updatedAt": "2026-07-04T10:57:51.138Z"
   }
 }
