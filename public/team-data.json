@@ -789,6 +789,16 @@
         "awardedPoints": 0,
         "lateSubmission": false,
         "reviewEvents": []
+      },
+      "fatema": {
+        "memberId": "fatema",
+        "memberName": "fatema",
+        "answer": "unassigned member submission should be rejected but maybe accepted",
+        "status": "submitted",
+        "submittedAt": "1999-01-01T00:00:00.000Z",
+        "awardedPoints": 0,
+        "lateSubmission": false,
+        "reviewEvents": []
       }
     }
   },
@@ -1093,6 +1103,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T07:15:45.564Z"
+    "updatedAt": "2026-07-04T07:15:48.037Z"
   }
 }
