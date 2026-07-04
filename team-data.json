@@ -821,18 +821,27 @@
         "memberId": "renad",
         "memberName": "renad",
         "answer": "ممكن بدل ما كل Agent يعتمد على اللي قبله بس هنخلى ال Agents يشوفوا نفس ال original propmt",
-        "status": "submitted",
+        "status": "approved",
         "submittedAt": "2026-07-04T18:44:08.608Z",
-        "awardedPoints": 0,
+        "awardedPoints": 1,
         "lateSubmission": false,
         "reviewEvents": [
+          {
+            "id": "review-1783190661787",
+            "status": "approved",
+            "reviewedAt": "2026-07-04T18:44:21.787Z",
+            "awardedPoints": 1,
+            "scoreOverride": true
+          },
           {
             "id": "review-1783177328244",
             "status": "rejected",
             "reviewedAt": "2026-07-04T15:02:08.244Z",
             "note": "دا كدا كدا بيحصل (فين الحل برضو ؟😂)"
           }
-        ]
+        ],
+        "reviewedAt": "2026-07-04T18:44:21.787Z",
+        "scoreOverride": true
       },
       "tasneem": {
         "memberId": "tasneem",
@@ -1398,6 +1407,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T18:44:08.608Z"
+    "updatedAt": "2026-07-04T18:44:21.787Z"
   }
 }
