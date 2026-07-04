@@ -835,6 +835,16 @@
         "awardedPoints": 0,
         "lateSubmission": false,
         "reviewEvents": []
+      },
+      "rodina": {
+        "memberId": "rodina",
+        "memberName": "rodina",
+        "answer": "كل Task أو Goal يبقى ليه حاجة شبه الـ DNA الخاص بيه من أول ما المستخدم يطلبه\nيعني بدل ما الـ Agents تعتمد بس على شرح اللي قبلها يبقى فيه مجموعة Constraints ومتطلبات أساسية متسجلة ومقفولة من البداية\nفكل ما Task تتقسم أو تنتقل بين Agents الـ DNA ده يفضل معاها  ولو أي Agent حاول يطلع Plan أو Output يخالف المتطلبات الأساسية دي  يتترفض أو يتعدل قبل ما يكمل.\n\nكده حتى لو الـ Tree بقت عميقة جدًا، كل Node هتفضل مربوطة بنفس الهدف الأصلي ومش هتبدأ تنحرف مع الوقت بسبب سوء الفهم أو إعادة التفسير.",
+        "status": "submitted",
+        "submittedAt": "2026-07-04T14:58:56.244Z",
+        "awardedPoints": 0,
+        "lateSubmission": false,
+        "reviewEvents": []
       }
     }
   },
@@ -1231,6 +1241,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T14:58:54.213Z"
+    "updatedAt": "2026-07-04T14:58:56.244Z"
   }
 }
