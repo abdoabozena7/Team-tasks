@@ -5508,6 +5508,9 @@ function AdminView({
           ) : (
             pendingResponses.map((response) => {
               const member = data.members.find((item) => item.id === response.memberId);
+              const memberDisplayName = member
+                ? memberArabicName(member)
+                : response.memberName || response.memberId;
               const reviewNoteKey = `${task.id}:${response.memberId}`;
               const reviewNote = reviewNotes[reviewNoteKey] ?? "";
               const scoreValue =
@@ -5520,9 +5523,9 @@ function AdminView({
                 <article key={response.memberId} className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <strong className="text-lg">{memberArabicName(response.memberId, response.memberName)}</strong>
+                      <strong className="text-lg">{memberDisplayName}</strong>
                       <p className="mt-1 text-xs font-bold text-foreground/50">
-                        Submitted {formatDateTime(response.submittedAt)}
+                        Submitted by {memberDisplayName} • {formatDateTime(response.submittedAt)}
                       </p>
                     </div>
                     {renderMemberLinkButtons(member)}

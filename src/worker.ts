@@ -843,6 +843,13 @@ export default {
           if (previous && previous.status !== "rejected") {
             throw new Error("This member already submitted this task.");
           }
+          if (
+            task.taskType === "problem" &&
+            previous?.status === "rejected" &&
+            normalizeProblemAnswer(previous.answer) === normalizeProblemAnswer(answer)
+          ) {
+            throw new Error("This rejected problem solution was already tried. Write a new solution.");
+          }
           const duplicate = findDuplicateProblemAnswer(data, task, member.id, answer);
           if (duplicate) {
             throw new Error("Duplicate problem solution. Read previous submissions and write a different solution.");
