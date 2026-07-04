@@ -275,23 +275,6 @@
       "deadlineAt": "2026-07-06T21:01:00.000Z",
       "status": "active",
       "taskType": "task"
-    },
-    {
-      "id": "task-1783148925869",
-      "title": "QA TEMP Problem - duplicate prevention test",
-      "question": "???? ?? ????? ??????? ??. ????? ???? ?? ?? ????. ***** ????? ?????? ???????",
-      "points": 1,
-      "taskType": "problem",
-      "scope": "member",
-      "memberId": "tasneem",
-      "memberIds": [
-        "tasneem",
-        "shoiab"
-      ],
-      "createdAt": "2026-07-04T07:08:45.869Z",
-      "startAt": "2026-07-04T07:08:45.869Z",
-      "deadlineAt": "2026-07-06T07:08:44.8731327Z",
-      "status": "active"
     }
   ],
   "responses": {
@@ -768,38 +751,6 @@
         "lateSubmission": false,
         "reviewEvents": []
       }
-    },
-    "task-1783148925869": {
-      "tasneem": {
-        "memberId": "tasneem",
-        "memberName": "tasneem",
-        "answer": "abtasneem unique qa",
-        "status": "submitted",
-        "submittedAt": "2026-07-04T07:13:56.035Z",
-        "awardedPoints": 0,
-        "lateSubmission": false,
-        "reviewEvents": []
-      },
-      "shoiab": {
-        "memberId": "shoiab",
-        "memberName": "shoiab",
-        "answer": "abtasneem unique qa",
-        "status": "submitted",
-        "submittedAt": "2000-01-01T00:00:00.000Z",
-        "awardedPoints": 0,
-        "lateSubmission": false,
-        "reviewEvents": []
-      },
-      "fatema": {
-        "memberId": "fatema",
-        "memberName": "fatema",
-        "answer": "unassigned member submission should be rejected but maybe accepted",
-        "status": "submitted",
-        "submittedAt": "1999-01-01T00:00:00.000Z",
-        "awardedPoints": 0,
-        "lateSubmission": false,
-        "reviewEvents": []
-      }
     }
   },
   "taskSkips": {},
@@ -816,16 +767,7 @@
   },
   "meetings": [],
   "meetingAttendance": {},
-  "interactions": [
-    {
-      "id": "tasneem:task:task-1783148925869",
-      "memberId": "tasneem",
-      "targetType": "task",
-      "targetId": "task-1783148925869",
-      "taskId": "task-1783148925869",
-      "seenAt": "2026-07-04T07:13:56.766Z"
-    }
-  ],
+  "interactions": [],
   "bonusGrades": [],
   "repoUpdates": [
     {
@@ -1103,6 +1045,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T07:15:48.037Z"
+    "updatedAt": "2026-07-04T07:16:05.835Z"
   }
 }
