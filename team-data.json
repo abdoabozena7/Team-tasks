@@ -849,7 +849,18 @@
     }
   },
   "taskSkips": {},
-  "progressUpdates": {},
+  "progressUpdates": {
+    "task-1783176442116": [
+      {
+        "id": "progress-1783177158518",
+        "taskId": "task-1783176442116",
+        "memberId": "rodina",
+        "memberName": "rodina",
+        "note": "كل Task أو Goal يبقى ليه حاجة شبه الـ DNA الخاص بيه من أول ما المستخدم يطلبه\nيعني بدل ما الـ Agents تعتمد بس على شرح اللي قبلها يبقى فيه مجموعة Constraints ومتطلبات أساسية متسجلة ومقفولة من البداية\nفكل ما Task تتقسم أو تنتقل بين Agents الـ DNA ده يفضل معاها  ولو أي Agent حاول يطلع Plan أو Output يخالف المتطلبات الأساسية دي  يتترفض أو يتعدل قبل ما يكمل.\n\nكده حتى لو الـ Tree بقت عميقة جدًا، كل Node هتفضل مربوطة بنفس الهدف الأصلي ومش هتبدأ تنحرف مع الوقت بسبب سوء الفهم أو إعادة التفسير.",
+        "createdAt": "2026-07-04T14:59:19.790Z"
+      }
+    ]
+  },
   "taskUpdates": {
     "task-1783008997895": [
       {
@@ -930,6 +941,15 @@
   ],
   "bonusGrades": [],
   "repoUpdates": [
+    {
+      "id": "repo-progress-rodina-task-1783176442116-1783177159790",
+      "memberId": "rodina",
+      "taskId": "task-1783176442116",
+      "source": "progress",
+      "excerpt": "كل Task أو Goal يبقى ليه حاجة شبه الـ DNA الخاص بيه من أول ما المستخدم يطلبه\nيعني بدل ما الـ Agents تعتمد بس على شرح اللي قبلها يبقى فيه مجم",
+      "createdAt": "2026-07-04T14:59:19.790Z",
+      "seen": false
+    },
     {
       "id": "repo-manual-rodina-task-1783008997895-1783162671138",
       "memberId": "rodina",
@@ -1241,6 +1261,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T14:58:56.244Z"
+    "updatedAt": "2026-07-04T14:59:19.790Z"
   }
 }
