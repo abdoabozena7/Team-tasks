@@ -944,6 +944,14 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "rodina:task:task-1783008997895",
+      "memberId": "rodina",
+      "targetType": "task",
+      "targetId": "task-1783008997895",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-04T16:06:42.319Z"
+    },
+    {
       "id": "abo-grir:taskUpdate:task-update-task-1783008997895-1783090253482",
       "memberId": "abo-grir",
       "targetType": "taskUpdate",
@@ -1385,6 +1393,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T15:52:43.776Z"
+    "updatedAt": "2026-07-04T16:06:42.319Z"
   }
 }
