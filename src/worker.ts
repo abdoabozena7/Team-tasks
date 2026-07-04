@@ -627,10 +627,40 @@ function assignedMemberIds(task: Partial<StudioTask>) {
   return uniqueText(task.memberIds ?? (task.memberId ? [String(task.memberId)] : []));
 }
 
+function taskIsAssignedToMember(data: StudioData, task: StudioTask, memberId: string) {
+  if (task.scope === "all") return data.members.some((member) => member.id === memberId);
+  return assignedMemberIds(task).includes(memberId);
+}
+
 function checkedMemberIds(data: StudioData, memberIds: string[]) {
   const cleanIds = uniqueText(memberIds);
   for (const memberId of cleanIds) getMember(data, memberId);
   return cleanIds;
+}
+
+function normalizeProblemAnswer(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function findDuplicateProblemAnswer(
+  data: StudioData,
+  task: StudioTask,
+  memberId: string,
+  answer: string,
+) {
+  if (task.taskType !== "problem") return undefined;
+  const normalizedAnswer = normalizeProblemAnswer(answer);
+  if (!normalizedAnswer) return undefined;
+
+  return Object.values(data.responses[task.id] ?? {}).find(
+    (response) =>
+      response.memberId !== memberId &&
+      normalizeProblemAnswer(response.answer) === normalizedAnswer,
+  );
 }
 
 function mergeResponses(latest: StudioData, incoming: StudioData) {
@@ -798,27 +828,40 @@ export default {
       if (request.method === "POST" && url.pathname === "/api/submissions") {
         const item = (await request.json()) as TaskResponse & { taskId: string; id?: string };
         const next = await commitData(env, `Submit ${item.taskId} by ${item.memberId}`, (data) => {
-          getTask(data, item.taskId);
-          getMember(data, item.memberId);
-          const previous = data.responses[item.taskId]?.[item.memberId];
+          const task = getTask(data, String(item.taskId ?? ""));
+          const member = getMember(data, String(item.memberId ?? ""));
+          if (!taskIsAssignedToMember(data, task, member.id)) {
+            throw new Error("This task is not assigned to this member.");
+          }
+          const answer = String(item.answer ?? "").trim();
+          if (!answer) throw new Error("Submission answer is required.");
+          const previous = data.responses[task.id]?.[member.id];
+          if (previous && previous.status !== "rejected") {
+            throw new Error("This member already submitted this task.");
+          }
+          const duplicate = findDuplicateProblemAnswer(data, task, member.id, answer);
+          if (duplicate) {
+            throw new Error("Duplicate problem solution. Read previous submissions and write a different solution.");
+          }
+          const submittedAt = new Date().toISOString();
           const repoUpdate = repoUpdateFromText({
-            memberId: item.memberId,
-            taskId: item.taskId,
+            memberId: member.id,
+            taskId: task.id,
             source: "submission",
-            text: item.answer,
+            text: answer,
           });
           return {
             ...data,
             responses: {
               ...data.responses,
-              [item.taskId]: {
-                ...(data.responses[item.taskId] ?? {}),
-                [item.memberId]: {
-                  memberId: item.memberId,
-                  memberName: item.memberName,
-                  answer: item.answer,
+              [task.id]: {
+                ...(data.responses[task.id] ?? {}),
+                [member.id]: {
+                  memberId: member.id,
+                  memberName: member.name,
+                  answer,
                   status: "submitted",
-                  submittedAt: item.submittedAt || new Date().toISOString(),
+                  submittedAt,
                   awardedPoints: 0,
                   lateSubmission: false,
                   reviewEvents: previous?.reviewEvents ?? [],
@@ -834,28 +877,33 @@ export default {
       if (request.method === "POST" && url.pathname === "/api/progress-updates") {
         const item = (await request.json()) as TaskProgressUpdate;
         const next = await commitData(env, `Progress ${item.taskId} by ${item.memberId}`, (data) => {
-          getTask(data, item.taskId);
-          getMember(data, item.memberId);
+          const task = getTask(data, item.taskId);
+          const member = getMember(data, item.memberId);
+          if (!taskIsAssignedToMember(data, task, member.id)) {
+            throw new Error("This task is not assigned to this member.");
+          }
+          const note = String(item.note ?? "").trim();
+          if (!note) throw new Error("Progress note is required.");
           const repoUpdate = attentionUpdate({
-            memberId: item.memberId,
-            taskId: item.taskId,
+            memberId: member.id,
+            taskId: task.id,
             source: "progress",
-            text: item.note,
+            text: note,
           });
           return {
             ...data,
             progressUpdates: {
               ...(data.progressUpdates ?? {}),
-              [item.taskId]: [
+              [task.id]: [
                 {
                   id: item.id || `progress-${Date.now()}`,
-                  taskId: item.taskId,
-                  memberId: item.memberId,
-                  memberName: item.memberName,
-                  note: item.note,
-                  createdAt: item.createdAt || new Date().toISOString(),
+                  taskId: task.id,
+                  memberId: member.id,
+                  memberName: member.name,
+                  note,
+                  createdAt: new Date().toISOString(),
                 },
-                ...((data.progressUpdates ?? {})[item.taskId] ?? []),
+                ...((data.progressUpdates ?? {})[task.id] ?? []),
               ],
             },
             repoUpdates: appendRepoUpdate(data, repoUpdate),
@@ -873,12 +921,17 @@ export default {
           source?: RepoUpdate["source"];
         };
         const next = await commitData(env, `Repo attention by ${item.memberId}`, (data) => {
-          getMember(data, item.memberId);
-          if (item.taskId) getTask(data, item.taskId);
+          const member = getMember(data, item.memberId);
+          if (item.taskId) {
+            const task = getTask(data, item.taskId);
+            if (!taskIsAssignedToMember(data, task, member.id)) {
+              throw new Error("This task is not assigned to this member.");
+            }
+          }
           const source: RepoUpdate["source"] = item.source === "drive" ? "drive" : "manual";
           const update: RepoUpdate = {
             id: `repo-${source}-${item.memberId}-${item.taskId ?? "general"}-${Date.now()}`,
-            memberId: item.memberId,
+            memberId: member.id,
             taskId: item.taskId,
             source,
             excerpt: String(
@@ -910,10 +963,18 @@ export default {
           if (!memberId || !targetId || !targetType) throw new Error("Seen target is required.");
           getMember(data, memberId);
           const taskId = item.taskId ? String(item.taskId) : undefined;
-          if (targetType === "task") getTask(data, targetId);
+          if (targetType === "task") {
+            const task = getTask(data, targetId);
+            if (!taskIsAssignedToMember(data, task, memberId)) {
+              throw new Error("This task is not assigned to this member.");
+            }
+          }
           if (targetType === "taskUpdate") {
             if (!taskId) throw new Error("Task update seen needs task id.");
-            getTask(data, taskId);
+            const task = getTask(data, taskId);
+            if (!taskIsAssignedToMember(data, task, memberId)) {
+              throw new Error("This task is not assigned to this member.");
+            }
             const updateExists = (data.taskUpdates?.[taskId] ?? []).some((update) => update.id === targetId);
             if (!updateExists) throw new Error("Task update not found.");
           }

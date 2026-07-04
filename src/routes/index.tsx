@@ -2968,6 +2968,7 @@ type AdminSection =
   | "repo-updates"
   | "reviews"
   | "tasks"
+  | "problems"
   | "meetings"
   | "members"
   | "logs"
@@ -3511,7 +3512,7 @@ function AdminView({
     note?: string,
     awardedPoints?: number,
     overrideLocked?: boolean,
-  ) => void;
+  ) => ActionResult;
   onAddBonusGrade: (memberId: string, points: number, note: string) => ActionResult;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
@@ -3562,6 +3563,7 @@ function AdminView({
 
   const activeTasks = data.tasks.filter(isActiveTask);
   const archivedTasks = data.tasks.filter((task) => taskStatus(task) === "archived");
+  const problemTasks = data.tasks.filter(isProblemTask);
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const archivedMeetings = (data.meetings ?? []).filter((meeting) => meetingStatus(meeting) === "archived");
   const visibleArchive = archivedTasks.filter((task) =>
@@ -3569,6 +3571,8 @@ function AdminView({
   );
   const selectedTask =
     data.tasks.find((task) => task.id === selectedTaskId) ?? activeTasks[0] ?? archivedTasks[0];
+  const selectedProblemTask =
+    (selectedTask && isProblemTask(selectedTask) ? selectedTask : undefined) ?? problemTasks[0];
   const selectedMeeting =
     (data.meetings ?? []).find((meeting) => meeting.id === selectedMeetingId) ??
     activeMeetings[0] ??
@@ -3893,6 +3897,311 @@ function AdminView({
           );
         })}
       </div>
+    );
+  }
+
+  function responseStatusLabel(status?: TaskResponse["status"]) {
+    if (status === "approved") return "Approved";
+    if (status === "rejected") return "Rejected";
+    if (status === "submitted") return "Pending";
+    return "Missing";
+  }
+
+  function problemSolutionsForTask(task: StudioTask) {
+    return Object.values(data.responses[task.id] ?? {}).sort(
+      (a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime(),
+    );
+  }
+
+  function renderProblemRows(tasks: StudioTask[]) {
+    if (tasks.length === 0) {
+      return (
+        <p className="rounded-lg border border-dashed border-ink/20 bg-white p-6 text-sm text-foreground/55">
+          No problems here yet.
+        </p>
+      );
+    }
+
+    return (
+      <div className="grid gap-2">
+        {tasks.map((task) => {
+          const responses = problemSolutionsForTask(task);
+          const pending = responses.filter((response) => response.status === "submitted").length;
+          const approved = responses.filter((response) => response.status === "approved").length;
+          const rejected = responses.filter((response) => response.status === "rejected").length;
+          const isSelected = selectedProblemTask?.id === task.id;
+
+          return (
+            <button
+              key={task.id}
+              type="button"
+              onClick={() => setSelectedTaskId(task.id)}
+              className={cn(
+                "min-w-0 rounded-lg border p-3 text-start transition hover:border-red-300 hover:bg-white",
+                isSelected ? "border-red-400 bg-red-50 shadow-sm" : "border-ink/10 bg-white/70",
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="break-words text-lg font-bold">{task.title}</div>
+                  <div className="mt-1 text-xs text-foreground/55">
+                    {taskStatus(task)} | {assignedMembers(task).length} members | deadline{" "}
+                    {formatDateTime(task.deadlineAt)}
+                  </div>
+                </div>
+                <span className="shrink-0 rounded-full border border-red-200 bg-white px-2 py-1 text-xs font-bold text-red-700">
+                  {responses.length} solutions
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/60">
+                <span>Pending {pending}</span>
+                <span>Approved {approved}</span>
+                <span>Rejected {rejected}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderProblemDetail(task?: StudioTask) {
+    if (!task) {
+      return (
+        <section className="rounded-xl border border-dashed border-ink/20 bg-white p-5 text-sm text-foreground/55">
+          Pick a problem to inspect its submitted solutions.
+        </section>
+      );
+    }
+
+    const responses = problemSolutionsForTask(task);
+    const members = assignedMembers(task);
+    const archiveTaskKey = `admin:problem-archive:${task.id}`;
+    const restoreTaskKey = `admin:problem-restore:${task.id}`;
+    const deleteTaskKey = `admin:problem-delete:${task.id}`;
+
+    return (
+      <section className="min-w-0 rounded-xl border border-red-100 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-red-700 bg-red-50 px-2 py-1 text-xs font-bold text-red-700">
+                Problem
+              </span>
+              <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
+                {taskStatus(task)}
+              </span>
+              <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
+                {members.length} assigned
+              </span>
+            </div>
+            <h2 className="mt-2 break-words text-2xl font-bold">{task.title}</h2>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
+              <span>Deadline {formatDateTime(task.deadlineAt)}</span>
+              <span>{sanitizePositiveNumber(task.points, 1)} points</span>
+              <span>{responses.length} submitted solutions</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {isActiveTask(task) ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  void runAdminAction(
+                    archiveTaskKey,
+                    () => onUpdateTask(task.id, { status: "archived" }),
+                    "Problem archived.",
+                    "Archive failed. Try again.",
+                  )
+                }
+                className={actionButtonClass("border border-ink/20 bg-paper", actionFeedback[archiveTaskKey])}
+              >
+                <Archive data-icon="inline-start" />
+                Archive
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={() =>
+                  void runAdminAction(
+                    restoreTaskKey,
+                    () => onUpdateTask(task.id, { status: "active" }),
+                    "Problem restored.",
+                    "Restore failed. Try again.",
+                  )
+                }
+                className={actionButtonClass("border border-ink/20", actionFeedback[restoreTaskKey])}
+              >
+                <RotateCcw data-icon="inline-start" />
+                Restore
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() =>
+                void runAdminAction(
+                  deleteTaskKey,
+                  () => onRemoveTask(task.id),
+                  "Problem deleted with all linked data.",
+                  "Delete failed. Try again.",
+                )
+              }
+              className={actionButtonClass(
+                "border border-red-200 bg-red-50 text-red-700",
+                actionFeedback[deleteTaskKey],
+              )}
+              aria-label="Delete problem"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-ink/10 bg-paper p-3">
+          <div className="mb-2 text-sm font-bold text-foreground/60">Problem text</div>
+          <StructuredTextBlock text={task.question} compact forceCollapse className="text-sm" />
+        </div>
+
+        <div className="mt-4 grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-xl font-bold">Submitted solutions</h3>
+            <span className="rounded-full border border-ink/10 bg-paper px-3 py-1 text-xs font-bold">
+              oldest first
+            </span>
+          </div>
+          {responses.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-ink/20 bg-paper p-4 text-sm text-foreground/55">
+              No one submitted a solution yet.
+            </p>
+          ) : (
+            responses.map((response, index) => {
+              const member = data.members.find((item) => item.id === response.memberId);
+              const reviewNoteKey = `${task.id}:${response.memberId}`;
+              const reviewNote = reviewNotes[reviewNoteKey] ?? "";
+              const scoreValue =
+                reviewScores[reviewNoteKey] ??
+                String(calculateAwardedPoints(task, response, "approved"));
+              const approveKey = `admin:problem-approve:${task.id}:${response.memberId}`;
+              const rejectKey = `admin:problem-reject:${task.id}:${response.memberId}`;
+
+              return (
+                <article
+                  key={response.memberId}
+                  className={cn(
+                    "rounded-lg border p-3",
+                    response.status === "approved"
+                      ? "border-emerald-200 bg-emerald-50"
+                      : response.status === "rejected"
+                        ? "border-red-200 bg-red-50"
+                        : "border-yellow-200 bg-yellow-50",
+                  )}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-ink/20 bg-white px-2 py-1 text-xs font-bold">
+                          #{index + 1}
+                        </span>
+                        <strong>{member ? memberArabicName(member) : response.memberName}</strong>
+                        <span className={cn("rounded-full border px-2 py-1 text-xs font-bold", statusTone(response.status))}>
+                          {responseStatusLabel(response.status)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs font-bold text-foreground/50">
+                        {formatDateTime(response.submittedAt)}
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-ink/10 bg-white px-2 py-1 text-xs font-bold">
+                      {responseAwardedPoints(task, response)}/{sanitizePositiveNumber(task.points, 1)} pts
+                    </span>
+                  </div>
+
+                  <StructuredTextBlock
+                    text={response.answer}
+                    compact
+                    forceCollapse
+                    className="mt-3 rounded-md border border-ink/10 bg-white p-2"
+                  />
+
+                  <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_120px_auto_auto]">
+                    <Input
+                      value={reviewNote}
+                      onChange={(event) =>
+                        setReviewNotes((current) => ({
+                          ...current,
+                          [reviewNoteKey]: event.target.value,
+                        }))
+                      }
+                      placeholder="Review note"
+                      className="border border-ink/20 bg-white"
+                    />
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={scoreValue}
+                      onChange={(event) =>
+                        setReviewScores((current) => ({
+                          ...current,
+                          [reviewNoteKey]: event.target.value,
+                        }))
+                      }
+                      placeholder="Score"
+                      className="border border-ink/20 bg-white text-center"
+                    />
+                    <Button
+                      type="button"
+                      onClick={() =>
+                        void runAdminAction(
+                          approveKey,
+                          () =>
+                            onReviewAnswer(
+                              task.id,
+                              response.memberId,
+                              "approved",
+                              reviewNote,
+                              sanitizeScore(scoreValue, sanitizePositiveNumber(task.points, 1)),
+                              true,
+                            ),
+                          "Solution approved.",
+                          "Approve failed. Try again.",
+                        )
+                      }
+                      className={actionButtonClass("", actionFeedback[approveKey])}
+                    >
+                      <Check data-icon="inline-start" />
+                      Approve
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        void runAdminAction(
+                          rejectKey,
+                          () => onReviewAnswer(task.id, response.memberId, "rejected", reviewNote),
+                          "Solution rejected.",
+                          "Reject failed. Try again.",
+                        )
+                      }
+                      className={actionButtonClass(
+                        "border border-red-200 bg-white text-red-700",
+                        actionFeedback[rejectKey],
+                      )}
+                    >
+                      <X data-icon="inline-start" />
+                      Reject
+                    </Button>
+                  </div>
+                  <ActionFeedbackLine feedback={actionFeedback[approveKey] ?? actionFeedback[rejectKey]} />
+                </article>
+              );
+            })
+          )}
+        </div>
+      </section>
     );
   }
 
@@ -4961,6 +5270,7 @@ function AdminView({
     { id: "repo-updates", label: "Attention", icon: Bell },
     { id: "reviews", label: "Reviews", icon: ListChecks },
     { id: "tasks", label: "Tasks", icon: ClipboardList },
+    { id: "problems", label: "Problems", icon: Search },
     { id: "meetings", label: "Meetings", icon: CalendarClock },
     { id: "members", label: "Members", icon: Users },
     { id: "logs", label: "Logs", icon: ListChecks },
@@ -5546,6 +5856,50 @@ function AdminView({
                 </div>
               </div>
               {renderTaskDetail(selectedTask && isActiveTask(selectedTask) ? selectedTask : activeTasks[0])}
+            </section>
+          )}
+
+          {section === "problems" && (
+            <section className="grid min-w-0 gap-5 2xl:grid-cols-[420px_minmax(0,1fr)]">
+              <div className="grid gap-4">
+                <div className="rounded-xl border border-red-100 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-xl font-bold">Problems board</h2>
+                      <p className="mt-1 text-sm text-foreground/55">
+                        Inspect project problems and every proposed solution in one simple place.
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
+                      {problemTasks.length} problems
+                    </span>
+                  </div>
+                  <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs font-bold">
+                    <div className="rounded-lg border border-ink/10 bg-paper p-2">
+                      <div className="text-lg text-foreground">{problemTasks.length}</div>
+                      <div className="text-foreground/55">All</div>
+                    </div>
+                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-2">
+                      <div className="text-lg text-emerald-800">
+                        {problemTasks.filter(isActiveTask).length}
+                      </div>
+                      <div className="text-emerald-800/65">Active</div>
+                    </div>
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-2">
+                      <div className="text-lg text-zinc-700">
+                        {problemTasks.filter((task) => taskStatus(task) === "archived").length}
+                      </div>
+                      <div className="text-zinc-600">Archived</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                  <h2 className="mb-3 text-xl font-bold">All problems</h2>
+                  {renderProblemRows(problemTasks)}
+                </div>
+              </div>
+              {renderProblemDetail(selectedProblemTask)}
             </section>
           )}
 
