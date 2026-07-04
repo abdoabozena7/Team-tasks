@@ -1766,9 +1766,14 @@ function MemberView({
     if (isTaskSkipped(data, task.id, activeMember.member.id)) return false;
     return true;
   });
-  const memberLogTasks = data.tasks.filter((task) =>
-    taskIsForMember(task, activeMember.member.id),
-  );
+  function memberHasTaskHistory(task: StudioTask) {
+    return Boolean(getResponse(data, task.id, activeMember.member.id));
+  }
+  const memberLogTasks = data.tasks.filter((task) => {
+    if (isHiddenTask(task)) return false;
+    if (!taskIsForMember(task, activeMember.member.id)) return false;
+    return memberHasTaskHistory(task);
+  });
   const nowDate = useMemo(() => new Date(nowTime), [nowTime]);
   const memberInteractionKeys = useMemo(
     () =>
@@ -2059,12 +2064,14 @@ function MemberView({
   }
 
   function renderMemberTaskLog() {
-    const logAssigned = activeMemberScore?.assignedTasks ?? memberTasks.length;
-    const logSubmitted = activeMemberScore?.submitted ?? memberLogTasks.filter((task) =>
-      Boolean(getResponse(data, task.id, activeMember.member.id)),
-    ).length;
-    const logApproved = activeMemberScore?.approved ?? 0;
-    const logApprovalRate = activeMemberScore?.approvalRate ?? 0;
+    const logResponses = memberLogTasks
+      .map((task) => getResponse(data, task.id, activeMember.member.id))
+      .filter((response): response is TaskResponse => Boolean(response));
+    const logAssigned = memberLogTasks.length;
+    const logSubmitted = logResponses.length;
+    const logApproved = logResponses.filter((response) => response.status === "approved").length;
+    const logReviewed = logResponses.filter((response) => response.status === "approved" || response.status === "rejected").length;
+    const logApprovalRate = logReviewed > 0 ? (logApproved / logReviewed) * 100 : 0;
 
     return (
       <section className="mb-7 grid gap-3">
