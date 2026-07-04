@@ -809,6 +809,14 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "marihan:task:task-1783008997895",
+      "memberId": "marihan",
+      "targetType": "task",
+      "targetId": "task-1783008997895",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-04T14:13:01.311Z"
+    },
+    {
       "id": "marihan:taskUpdate:task-update-task-1783008997895-1783090253482",
       "memberId": "marihan",
       "targetType": "taskUpdate",
@@ -1146,6 +1154,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T14:12:59.398Z"
+    "updatedAt": "2026-07-04T14:13:01.311Z"
   }
 }
