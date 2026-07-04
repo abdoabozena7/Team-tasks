@@ -874,6 +874,7 @@ function normalizedInverseScore(value: number | null, min: number | null, max: n
 
 function createStats(data: StudioData) {
   const activeTasks = data.tasks.filter(isActiveTask);
+  const scoreTasks = data.tasks.filter((task) => !isHiddenTask(task));
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const scoreMeetings = data.meetings ?? [];
   const accountableMeetings = scoreMeetings.filter((meeting) => {
@@ -883,7 +884,7 @@ function createStats(data: StudioData) {
   });
   const memberOrder = new Map(data.members.map((member, index) => [member.id, index]));
   const rawMemberStats = data.members.map((member) => {
-    const assignedTasks = activeTasks.filter(
+    const assignedTasks = scoreTasks.filter(
       (task) => taskIsForMember(task, member.id) && !isTaskSkipped(data, task.id, member.id),
     );
     const responses = assignedTasks
@@ -909,7 +910,7 @@ function createStats(data: StudioData) {
     const basePoints = sanitizeNumber(member.basePoints);
     const memberBonusGrades = (data.bonusGrades ?? []).filter((bonus) => bonus.memberId === member.id);
     const bonusPoints = memberBonusGrades.reduce((sum, bonus) => sum + sanitizeNumber(bonus.points), 0);
-    const privateTasks = data.tasks.filter(
+    const privateTasks = scoreTasks.filter(
       (task) => privateTaskMemberId(task) === member.id && !isTaskSkipped(data, task.id, member.id),
     ).length;
     const meetingPoints = scoreMeetings.reduce(
@@ -2418,8 +2419,6 @@ function MemberView({
               const finalSent = sentState[key];
               const finalFeedback = actionFeedback[key];
               const progressFeedback = actionFeedback[taskProgressKey];
-              const repoFeedback = actionFeedback[`repo:${task.id}:${activeMember.member.id}`];
-              const driveFeedback = actionFeedback[`drive:${task.id}:${activeMember.member.id}`];
               const sharedDraft = draftAnswers[key] ?? draftAnswers[taskProgressKey] ?? existing?.answer ?? "";
               const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
                 (update) => update.memberId === activeMember.member.id,
@@ -2702,57 +2701,9 @@ function MemberView({
                       <Save data-icon="inline-start" />
                       إرسال متابعة
                     </Button>
-                    <Button
-                      type="button"
-                      data-testid={`repo-attention-${task.id}`}
-                      onClick={() => {
-                        const repoKey = `repo:${task.id}:${activeMember.member.id}`;
-                        markTaskSeen(task.id);
-                        void runMemberAction(
-                          repoKey,
-                          () => onRepoAttention(task),
-                          "GitHub attention sent.",
-                          "Could not notify admin. Try again.",
-                        );
-                      }}
-                      disabled={isSubmitting}
-                      variant="outline"
-                      className={actionButtonClass(
-                        "border-[2px] border-ink bg-paper doodle-shadow-sm",
-                        repoFeedback,
-                      )}
-                    >
-                      <Bell data-icon="inline-start" />
-                      GitHub attention
-                    </Button>
-                    <Button
-                      type="button"
-                      data-testid={`drive-attention-${task.id}`}
-                      onClick={() => {
-                        const driveKey = `drive:${task.id}:${activeMember.member.id}`;
-                        markTaskSeen(task.id);
-                        void runMemberAction(
-                          driveKey,
-                          () => onDriveAttention(task),
-                          "Drive attention sent.",
-                          "Could not notify admin. Try again.",
-                        );
-                      }}
-                      disabled={isSubmitting}
-                      variant="outline"
-                      className={actionButtonClass(
-                        "border-[2px] border-ink bg-paper doodle-shadow-sm",
-                        driveFeedback,
-                      )}
-                    >
-                      <FolderOpen data-icon="inline-start" />
-                      Drive attention
-                    </Button>
                   </div>
                   <ActionFeedbackLine feedback={finalFeedback} />
                   <ActionFeedbackLine feedback={progressFeedback} />
-                  <ActionFeedbackLine feedback={repoFeedback} />
-                  <ActionFeedbackLine feedback={driveFeedback} />
 
                   {officialProgress.length > 0 && (
                     <div className="mt-4 border-t-[2px] border-ink/20 pt-3">
@@ -3658,6 +3609,42 @@ function AdminView({
       setSection("tasks");
     }
     setNavOpen(false);
+  }
+
+  function renderMemberLinkButtons(member?: Member) {
+    if (!member?.repoUrl && !member?.driveUrl) return null;
+    return (
+      <div className="flex flex-wrap gap-2">
+        {member.repoUrl && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              window.open(member.repoUrl, "_blank", "noopener,noreferrer");
+            }}
+            className="bg-sky-500 text-white hover:bg-sky-600"
+          >
+            <ExternalLink data-icon="inline-start" />
+            Repo
+          </Button>
+        )}
+        {member.driveUrl && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              window.open(member.driveUrl, "_blank", "noopener,noreferrer");
+            }}
+            className="bg-sky-500 text-white hover:bg-sky-600"
+          >
+            <FolderOpen data-icon="inline-start" />
+            Drive
+          </Button>
+        )}
+      </div>
+    );
   }
 
   function setAdminFeedback(key: string, feedback: ActionFeedback) {
@@ -5487,6 +5474,134 @@ function AdminView({
     );
   }
 
+  function renderAttentionReviewDetail(task?: StudioTask) {
+    if (!task) return null;
+    const pendingResponses = Object.values(data.responses[task.id] ?? {}).filter(
+      (response) => response.status === "submitted",
+    );
+
+    return (
+      <section className="min-w-0 rounded-xl border border-amber-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="break-words text-2xl font-bold">{task.title}</h2>
+              <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
+                {isProblemTask(task) ? "Problem" : "Task"}
+              </span>
+              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-900">
+                {pendingResponses.length} pending
+              </span>
+            </div>
+            <p className="mt-1 text-sm font-bold text-foreground/55">
+              Review final submissions only. Editing stays in the Tasks or Problems tab.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3">
+          {pendingResponses.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-ink/20 bg-paper p-4 text-sm text-foreground/55">
+              No pending submissions for this item.
+            </p>
+          ) : (
+            pendingResponses.map((response) => {
+              const member = data.members.find((item) => item.id === response.memberId);
+              const reviewNoteKey = `${task.id}:${response.memberId}`;
+              const reviewNote = reviewNotes[reviewNoteKey] ?? "";
+              const scoreValue =
+                reviewScores[reviewNoteKey] ??
+                String(responseAwardedPoints(task, response) || sanitizePositiveNumber(task.points, 1));
+              const approveKey = `attention:approve:${task.id}:${response.memberId}`;
+              const rejectKey = `attention:reject:${task.id}:${response.memberId}`;
+              const locked = isHardLocked(task, response);
+              return (
+                <article key={response.memberId} className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <strong className="text-lg">{memberArabicName(response.memberId, response.memberName)}</strong>
+                      <p className="mt-1 text-xs font-bold text-foreground/50">
+                        Submitted {formatDateTime(response.submittedAt)}
+                      </p>
+                    </div>
+                    {renderMemberLinkButtons(member)}
+                  </div>
+
+                  <StructuredTextBlock text={response.answer} compact forceCollapse className="mt-3 text-sm" />
+
+                  <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_120px_auto_auto]">
+                    <Input
+                      value={reviewNote}
+                      onChange={(event) =>
+                        setReviewNotes((current) => ({ ...current, [reviewNoteKey]: event.target.value }))
+                      }
+                      placeholder="Review note"
+                      className="border border-ink/20 bg-white"
+                    />
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={scoreValue}
+                      onChange={(event) =>
+                        setReviewScores((current) => ({ ...current, [reviewNoteKey]: event.target.value }))
+                      }
+                      placeholder="Score"
+                      className="border border-ink/20 bg-white text-center"
+                    />
+                    <Button
+                      type="button"
+                      onClick={() =>
+                        void runAdminAction(
+                          approveKey,
+                          () =>
+                            onReviewAnswer(
+                              task.id,
+                              response.memberId,
+                              "approved",
+                              reviewNote,
+                              sanitizeScore(scoreValue, sanitizePositiveNumber(task.points, 1)),
+                              locked,
+                            ),
+                          "Submission approved.",
+                          "Approve failed.",
+                        )
+                      }
+                      className={actionButtonClass("", actionFeedback[approveKey])}
+                    >
+                      <Check data-icon="inline-start" />
+                      Approve
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        void runAdminAction(
+                          rejectKey,
+                          () => onReviewAnswer(task.id, response.memberId, "rejected", reviewNote),
+                          "Submission rejected.",
+                          "Reject failed.",
+                        )
+                      }
+                      className={actionButtonClass(
+                        "border border-red-200 bg-white text-red-700",
+                        actionFeedback[rejectKey],
+                      )}
+                    >
+                      <X data-icon="inline-start" />
+                      Reject
+                    </Button>
+                  </div>
+                  <ActionFeedbackLine feedback={actionFeedback[approveKey] ?? actionFeedback[rejectKey]} />
+                </article>
+              );
+            })
+          )}
+        </div>
+      </section>
+    );
+  }
+
   const navItems: Array<{ id: AdminSection; label: string; icon: typeof BarChart3 }> = [
     { id: "repo-updates", label: "Attention", icon: Bell },
     { id: "tasks", label: "Tasks", icon: ClipboardList },
@@ -5635,6 +5750,7 @@ function AdminView({
         <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 pb-24">
           {section === "repo-updates" && (
             <section className="grid gap-5">
+              {pendingProfileRequests.length > 0 && (
               <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -5648,12 +5764,7 @@ function AdminView({
                   </span>
                 </div>
                 <div className="mt-4 grid gap-3">
-                  {pendingProfileRequests.length === 0 ? (
-                    <p className="rounded-lg border border-dashed border-sky-300 bg-white p-4 text-sm text-foreground/60">
-                      No profile changes are waiting for approval.
-                    </p>
-                  ) : (
-                    pendingProfileRequests.map((request) => {
+                  {pendingProfileRequests.map((request) => {
                       const member = data.members.find((item) => item.id === request.memberId);
                       const approveProfileKey = `admin:profile-approve:${request.id}`;
                       const rejectProfileKey = `admin:profile-reject:${request.id}`;
@@ -5745,10 +5856,10 @@ function AdminView({
                           </div>
                         </div>
                       );
-                    })
-                  )}
+                    })}
                 </div>
               </div>
+              )}
 
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -5770,11 +5881,19 @@ function AdminView({
                   ) : (
                     pendingSubmissions.map((item) => {
                       const task = data.tasks.find((candidate) => candidate.id === item.taskId);
+                      const member = data.members.find((candidate) => candidate.id === item.memberId);
                       return (
-                        <button
+                        <div
                           key={`attention-${item.id}`}
-                          type="button"
+                          role="button"
+                          tabIndex={0}
                           onClick={() => {
+                            setSelectedTaskId(item.taskId);
+                            setSection("repo-updates");
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter" && event.key !== " ") return;
+                            event.preventDefault();
                             setSelectedTaskId(item.taskId);
                             setSection("repo-updates");
                           }}
@@ -5793,8 +5912,9 @@ function AdminView({
                             <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-900">
                               Needs review
                             </span>
+                            {renderMemberLinkButtons(member)}
                           </div>
-                        </button>
+                        </div>
                       );
                     })
                   )}
@@ -5898,11 +6018,20 @@ function AdminView({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
-                <h2 className="text-xl font-bold">Team links directory</h2>
-                <p className="mt-1 text-sm text-foreground/55">
-                  Open member repositories and Drive folders quickly while checking updates.
-                </p>
+              <details className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                <summary className="cursor-pointer list-none">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-xl font-bold">Team links directory</h2>
+                      <p className="mt-1 text-sm text-foreground/55">
+                        Open member repositories and Drive folders quickly while checking updates.
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-ink/10 bg-paper px-3 py-1 text-xs font-bold">
+                      Open
+                    </span>
+                  </div>
+                </summary>
                 <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {data.members.map((member) => (
                     <div key={member.id} className="flex items-center justify-between gap-3 rounded-lg border border-ink/10 bg-paper p-3">
@@ -5930,7 +6059,7 @@ function AdminView({
                     </div>
                   ))}
                 </div>
-              </div>
+              </details>
 
               {(selectedTask || pendingSubmissions.length > 0) && (
                 <div className="rounded-xl border border-ink/10 bg-white p-3 shadow-sm">
@@ -5941,7 +6070,7 @@ function AdminView({
                         pendingSubmissions.some((item) => item.taskId === candidate.id),
                       );
                     if (!task) return null;
-                    return isProblemTask(task) ? renderProblemDetail(task) : renderTaskDetail(task);
+                    return renderAttentionReviewDetail(task);
                   })()}
                 </div>
               )}
