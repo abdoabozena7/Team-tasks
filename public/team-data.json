@@ -75,7 +75,8 @@
         "abo greer",
         "ابو جرير",
         "أبو جرير",
-        "احمد"
+        "احمد",
+        "فرحات"
       ],
       "hidden": false,
       "baseCompleted": 0,
@@ -1120,7 +1121,7 @@
       "memberId": "abo-grir",
       "memberName": "Abo grir",
       "createdAt": "2026-07-04T15:00:20.625Z",
-      "status": "pending",
+      "status": "approved",
       "nickname": "فرحات",
       "previousAliases": [
         "abo grir",
@@ -1131,7 +1132,8 @@
         "احمد"
       ],
       "previousRepoUrl": "",
-      "previousDriveUrl": ""
+      "previousDriveUrl": "",
+      "reviewedAt": "2026-07-04T15:12:32.332Z"
     },
     {
       "id": "profile-abo-grir-1783177196499",
@@ -1362,6 +1364,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T15:03:13.019Z"
+    "updatedAt": "2026-07-04T15:12:32.332Z"
   }
 }
