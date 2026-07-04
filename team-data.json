@@ -797,7 +797,7 @@
       "source": "submission",
       "excerpt": "github",
       "createdAt": "2026-07-04T00:09:23.063Z",
-      "seen": false
+      "seen": true
     },
     {
       "id": "repo-manual-marihan-task-1783008997895-1783122434504",
@@ -1065,6 +1065,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T08:36:57.771Z"
+    "updatedAt": "2026-07-04T08:37:31.584Z"
   }
 }
