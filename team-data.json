@@ -198,8 +198,8 @@
       "baseApproved": 0,
       "baseRejected": 0,
       "publicFlag": "",
-      "repoUrl": "",
-      "driveUrl": ""
+      "repoUrl": "https://github.com/MarihanGamal/Multi_Coding_agents",
+      "driveUrl": "https://drive.google.com/drive/folders/1XnVJic_n84mBvjsWlArhbITmkhn44fge?usp=drive_link"
     }
   ],
   "tasks": [
@@ -852,7 +852,7 @@
       "memberId": "marihan",
       "memberName": "marihan",
       "createdAt": "2026-07-03T23:50:21.487Z",
-      "status": "pending",
+      "status": "approved",
       "repoUrl": "https://github.com/MarihanGamal/Multi_Coding_agents",
       "driveUrl": "https://drive.google.com/drive/folders/1XnVJic_n84mBvjsWlArhbITmkhn44fge?usp=drive_link",
       "previousAliases": [
@@ -863,7 +863,8 @@
         "ماريهان"
       ],
       "previousRepoUrl": "",
-      "previousDriveUrl": ""
+      "previousDriveUrl": "",
+      "reviewedAt": "2026-07-04T00:43:43.260Z"
     },
     {
       "id": "profile-tasneem-1783045912356",
@@ -1038,6 +1039,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T00:09:23.063Z"
+    "updatedAt": "2026-07-04T00:43:43.260Z"
   }
 }
