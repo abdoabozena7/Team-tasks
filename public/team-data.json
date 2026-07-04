@@ -116,7 +116,7 @@
         "renad",
         "ريناد"
       ],
-      "hidden": true,
+      "hidden": false,
       "baseCompleted": 0,
       "basePoints": 1,
       "adminNote": "",
@@ -1039,6 +1039,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T00:43:43.260Z"
+    "updatedAt": "2026-07-04T00:44:57.401Z"
   }
 }
