@@ -347,6 +347,7 @@ const MEMBER_SENT_STATE_KEY = "hivo-studio-member-sent-state";
 const LOCAL_QUEUE_KEY = "hivo-studio-local-admin-queue";
 const SEEN_MEETINGS_KEY = "hivo-studio-seen-meetings";
 const SEEN_TASK_UPDATES_KEY = "hivo-studio-seen-task-updates";
+const PENDING_RESPONSE_KEYS = "hivo-studio-pending-responses";
 const GITHUB_OWNER = "abdoabozena7";
 const GITHUB_REPO = "Team-tasks";
 const GITHUB_BRANCH = "main";
@@ -430,6 +431,33 @@ function readSeenTaskUpdateIds(memberId: string) {
 function writeSeenTaskUpdateIds(memberId: string, ids: string[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(seenTaskUpdatesStorageKey(memberId), JSON.stringify(uniqueText(ids)));
+}
+
+function pendingResponseStorageKey(memberId: string) {
+  return `${PENDING_RESPONSE_KEYS}:${memberId}`;
+}
+
+function responseCelebrationKey(memberId: string, taskId: string, submittedAt: string) {
+  return `hivo:accepted-celebrated:${memberId}:${taskId}:${submittedAt}`;
+}
+
+function responsePendingKey(memberId: string, taskId: string, submittedAt: string) {
+  return `${memberId}:${taskId}:${submittedAt}`;
+}
+
+function readPendingResponseKeys(memberId: string) {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(pendingResponseStorageKey(memberId)) || "[]");
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingResponseKeys(memberId: string, keys: string[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(pendingResponseStorageKey(memberId), JSON.stringify(uniqueText(keys)));
 }
 
 function isStatsLoginName(value: string) {
@@ -1849,15 +1877,36 @@ function MemberView({
   }, []);
 
   useEffect(() => {
-    const acceptedTask = data.tasks.find((task) => {
+    const pendingKeys = readPendingResponseKeys(activeMember.member.id);
+    const pendingSet = new Set(pendingKeys);
+    const nextPendingKeys = [...pendingKeys];
+    let acceptedTask: StudioTask | undefined;
+    let acceptedCelebrationKey = "";
+
+    for (const task of data.tasks) {
       const response = getResponse(data, task.id, activeMember.member.id);
-      if (response?.status !== "approved") return false;
-      return window.localStorage.getItem(`hivo:accepted-celebrated:${activeMember.member.id}:${task.id}`) !== "seen";
-    });
+      if (!response?.submittedAt) continue;
+      const pendingKey = responsePendingKey(activeMember.member.id, task.id, response.submittedAt);
+
+      if (response.status === "submitted") {
+        nextPendingKeys.push(pendingKey);
+        continue;
+      }
+
+      if (response.status === "approved" && pendingSet.has(pendingKey)) {
+        const celebrationKey = responseCelebrationKey(activeMember.member.id, task.id, response.submittedAt);
+        if (!acceptedTask && window.localStorage.getItem(celebrationKey) !== "seen") {
+          acceptedTask = task;
+          acceptedCelebrationKey = celebrationKey;
+        }
+      }
+    }
+
+    writePendingResponseKeys(activeMember.member.id, nextPendingKeys);
     if (!acceptedTask) return;
-    window.localStorage.setItem(`hivo:accepted-celebrated:${activeMember.member.id}:${acceptedTask.id}`, "seen");
+    window.localStorage.setItem(acceptedCelebrationKey, "seen");
     setCelebrationTaskId(acceptedTask.id);
-    const timer = window.setTimeout(() => setCelebrationTaskId(null), 2600);
+    const timer = window.setTimeout(() => setCelebrationTaskId(null), 3200);
     return () => window.clearTimeout(timer);
   }, [activeMember.member.id, data.tasks, data.responses]);
 
@@ -2179,13 +2228,10 @@ function MemberView({
 
       {celebrationTaskId && (
         <div className="member-acceptance-party" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-          <span />
-          <span />
-          <span />
-          <strong>اتقبلت!</strong>
+          {Array.from({ length: 18 }, (_, index) => (
+            <span key={index} />
+          ))}
+          <strong>{"\u0645\u0628\u0631\u0648\u0643 \u0627\u062a\u0642\u0628\u0644\u062a!"}</strong>
         </div>
       )}
 
