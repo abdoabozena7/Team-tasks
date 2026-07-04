@@ -958,6 +958,14 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "renad:task:task-1783008997895",
+      "memberId": "renad",
+      "targetType": "task",
+      "targetId": "task-1783008997895",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-04T18:45:07.055Z"
+    },
+    {
       "id": "rodina:task:task-1783008997895",
       "memberId": "rodina",
       "targetType": "task",
@@ -1407,6 +1415,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T18:44:21.787Z"
+    "updatedAt": "2026-07-04T18:45:07.055Z"
   }
 }
