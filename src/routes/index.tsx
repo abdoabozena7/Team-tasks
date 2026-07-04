@@ -1755,12 +1755,13 @@ function MemberView({
   const [expandedTaskSectionIndex, setExpandedTaskSectionIndex] = useState(0);
   const [problemSolutionsTaskId, setProblemSolutionsTaskId] = useState<string | null>(null);
   const [pasteWarningTaskId, setPasteWarningTaskId] = useState<string | null>(null);
+  const [celebrationTaskId, setCelebrationTaskId] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState("");
   const [nowTime, setNowTime] = useState(() => Date.now());
   const memberTasks = data.tasks.filter((task) => {
     if (!taskIsForMember(task, activeMember.member.id)) return false;
     if (isTaskSkipped(data, task.id, activeMember.member.id)) return false;
-    return getResponse(data, task.id, activeMember.member.id)?.status !== "approved";
+    return true;
   });
   const memberLogTasks = data.tasks.filter((task) =>
     taskIsForMember(task, activeMember.member.id),
@@ -1838,6 +1839,19 @@ function MemberView({
     const timer = window.setInterval(() => setNowTime(Date.now()), 30000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const acceptedTask = data.tasks.find((task) => {
+      const response = getResponse(data, task.id, activeMember.member.id);
+      if (response?.status !== "approved") return false;
+      return window.localStorage.getItem(`hivo:accepted-celebrated:${activeMember.member.id}:${task.id}`) !== "seen";
+    });
+    if (!acceptedTask) return;
+    window.localStorage.setItem(`hivo:accepted-celebrated:${activeMember.member.id}:${acceptedTask.id}`, "seen");
+    setCelebrationTaskId(acceptedTask.id);
+    const timer = window.setTimeout(() => setCelebrationTaskId(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [activeMember.member.id, data.tasks, data.responses]);
 
   useEffect(() => {
     if (!expandedTaskId && !problemSolutionsTaskId) return;
@@ -1956,6 +1970,10 @@ function MemberView({
     return Object.values(data.responses[task.id] ?? {})
       .filter((response) => response.memberId !== activeMember.member.id)
       .sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+  }
+
+  function visibleProblemSolutionEntries(task: StudioTask) {
+    return problemSolutionEntries(task).filter((response) => response.status !== "rejected");
   }
 
   function problemSubmissionRank(task: StudioTask) {
@@ -2143,6 +2161,18 @@ function MemberView({
         </div>
       )}
 
+      {celebrationTaskId && (
+        <div className="member-acceptance-party" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+          <strong>اتقبلت!</strong>
+        </div>
+      )}
+
       {expandedTask && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 px-4 py-6">
           <section
@@ -2272,10 +2302,26 @@ function MemberView({
                   return (
                     <article
                       key={`${response.memberId}:${response.submittedAt}`}
-                      className="rounded-xl border-[2px] border-ink/20 bg-paper p-3"
+                      className={cn(
+                        "rounded-xl border-[2px] p-3",
+                        response.status === "approved"
+                          ? "border-emerald-200 bg-emerald-50"
+                          : response.status === "rejected"
+                            ? "border-red-200 bg-red-50"
+                            : "border-yellow-200 bg-yellow-50",
+                      )}
                     >
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <strong>
+                        <strong
+                          className={cn(
+                            "rounded-full border px-2 py-1",
+                            response.status === "approved"
+                              ? "border-emerald-300 bg-emerald-100 text-emerald-900"
+                              : response.status === "rejected"
+                                ? "border-red-300 bg-red-100 text-red-900"
+                                : "border-yellow-300 bg-yellow-100 text-yellow-900",
+                          )}
+                        >
                           #{index + 1} {member ? memberArabicName(member) : response.memberName}
                         </strong>
                         <span className="rounded-full border border-ink/20 bg-white px-2 py-0.5 text-xs font-bold">
@@ -2507,7 +2553,9 @@ function MemberView({
               const finalSent = sentState[key];
               const finalFeedback = actionFeedback[key];
               const progressFeedback = actionFeedback[taskProgressKey];
-              const sharedDraft = draftAnswers[key] ?? draftAnswers[taskProgressKey] ?? existing?.answer ?? "";
+              const existingDraftAnswer = existing?.status === "rejected" ? "" : existing?.answer ?? "";
+              const sharedDraft = draftAnswers[key] ?? draftAnswers[taskProgressKey] ?? existingDraftAnswer;
+              const reviewNote = latestReviewNote(existing);
               const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
                 (update) => update.memberId === activeMember.member.id,
               );
@@ -2529,7 +2577,7 @@ function MemberView({
               const taskAudienceLabel = task.scope === "all" ? "تاسك عام لكل التيم" : "تاسك مخصص ليك";
               const taskPointsLabel = formatTaskPointsLabel(taskPoints);
               const problemTask = isProblemTask(task);
-              const priorProblemSolutions = problemTask ? problemSolutionEntries(task) : [];
+              const priorProblemSolutions = problemTask ? visibleProblemSolutionEntries(task) : [];
               const taskSeen = hasSeenTarget("task", task.id);
 
               return (
@@ -2639,25 +2687,17 @@ function MemberView({
                     )}
                   </div>
                   {problemTask && priorProblemSolutions.length > 0 && (
-                    <div className="mb-4 rounded-xl border-[2px] border-red-200 bg-red-50 p-3 text-red-950">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <strong>Problem mode</strong>
-                          <p className="mt-1 text-xs font-bold text-red-900/65">
-                            شوف اللي اتسلم قبلك عشان ما تكررش نفس الحل.
-                          </p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setProblemSolutionsTaskId(task.id)}
-                          className="border-[2px] border-red-700 bg-white text-red-950"
-                        >
-                          <Eye data-icon="inline-start" />
-                          شوف الحلول اللي قبلك
-                        </Button>
-                      </div>
+                    <div className="mb-4 flex justify-start">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setProblemSolutionsTaskId(task.id)}
+                        className="problem-solutions-alert border-[2px] border-red-700 bg-red-50 px-3 py-1.5 text-xs text-red-950"
+                      >
+                        <Eye data-icon="inline-start" />
+                        شوف الحلول اللي قبلك
+                      </Button>
                     </div>
                   )}
                   {taskUpdates.length > 0 && (
@@ -2712,32 +2752,47 @@ function MemberView({
                       )}
                     </div>
                   )}
+                  {existing?.status === "rejected" && reviewNote && (
+                    <div className="mb-3 rounded-xl border-[2px] border-red-200 bg-red-50 p-3 text-sm font-bold text-red-900">
+                      <span className="block text-xs text-red-700/75">سبب الرفض</span>
+                      <StructuredTextBlock text={reviewNote} compact memberFacing />
+                    </div>
+                  )}
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <strong className="text-base">
                       {problemTask ? "اكتب الحل" : "اكتب الرد أو التحديث"}
                     </strong>
                   </div>
-                  <Textarea
-                    value={sharedDraft}
-                    onChange={(event) => {
-                      onDraftChange(key, event.target.value);
-                      if (!problemTask) onDraftChange(taskProgressKey, event.target.value);
-                    }}
-                    onPaste={problemTask ? (event) => blockProblemPaste(event, task.id) : undefined}
-                    onDrop={problemTask ? (event) => blockProblemDrop(event, task.id) : undefined}
-                    onBeforeInput={problemTask ? (event) => blockProblemBeforeInput(event, task.id) : undefined}
-                    onContextMenu={problemTask ? (event) => event.preventDefault() : undefined}
-                    placeholder={problemTask ? "اكتب حل مختلف وواضح هنا..." : "اكتب هنا الرد النهائي أو تحديث المتابعة..."}
-                    className={cn(
-                      "min-h-20 border-[2px] border-ink bg-paper px-3 py-2 text-sm leading-6 sm:min-h-[88px]",
-                      problemTask && "problem-answer-input",
-                    )}
-                  />
-                  {pasteWarningTaskId === task.id && (
-                    <div className="problem-paste-alert mt-2">
-                      الباست محظور في problem. اكتب الحل بإيدك.
+                  {existing?.status === "approved" ? (
+                    <div className="rounded-xl border-[2px] border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
+                      تم قبول التسليم. الدرجة اتحسبت خلاص.
                     </div>
+                  ) : (
+                    <>
+                      <Textarea
+                        value={sharedDraft}
+                        onChange={(event) => {
+                          onDraftChange(key, event.target.value);
+                          if (!problemTask) onDraftChange(taskProgressKey, event.target.value);
+                        }}
+                        onPaste={problemTask ? (event) => blockProblemPaste(event, task.id) : undefined}
+                        onDrop={problemTask ? (event) => blockProblemDrop(event, task.id) : undefined}
+                        onBeforeInput={problemTask ? (event) => blockProblemBeforeInput(event, task.id) : undefined}
+                        onContextMenu={problemTask ? (event) => event.preventDefault() : undefined}
+                        placeholder={problemTask ? "اكتب حل مختلف وواضح هنا..." : "اكتب هنا الرد النهائي أو تحديث المتابعة..."}
+                        className={cn(
+                          "min-h-20 border-[2px] border-ink bg-paper px-3 py-2 text-sm leading-6 sm:min-h-[88px]",
+                          problemTask && "problem-answer-input",
+                        )}
+                      />
+                      {pasteWarningTaskId === task.id && (
+                        <div className="problem-paste-alert mt-2">
+                          الباست محظور في problem. اكتب الحل بإيدك.
+                        </div>
+                      )}
+                    </>
                   )}
+                  {existing?.status !== "approved" && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button
                       type="button"
@@ -2795,6 +2850,7 @@ function MemberView({
                       </Button>
                     )}
                   </div>
+                  )}
                   <ActionFeedbackLine feedback={finalFeedback} />
                   {!problemTask && <ActionFeedbackLine feedback={progressFeedback} />}
 
