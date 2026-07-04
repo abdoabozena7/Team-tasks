@@ -1714,6 +1714,7 @@ function MemberView({
   onMarkInteraction,
   onLogout,
   onRefreshData,
+  adminPreview = false,
 }: {
   data: StudioData;
   activeMember: ActiveMember;
@@ -1731,6 +1732,7 @@ function MemberView({
   onMarkInteraction: (item: InteractionInput) => boolean | Promise<boolean>;
   onLogout: () => void;
   onRefreshData: () => Promise<void>;
+  adminPreview?: boolean;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nicknameDraft, setNicknameDraft] = useState("");
@@ -1759,6 +1761,7 @@ function MemberView({
   const [copyFeedback, setCopyFeedback] = useState("");
   const [nowTime, setNowTime] = useState(() => Date.now());
   const memberTasks = data.tasks.filter((task) => {
+    if (!isActiveTask(task)) return false;
     if (!taskIsForMember(task, activeMember.member.id)) return false;
     if (isTaskSkipped(data, task.id, activeMember.member.id)) return false;
     return true;
@@ -2025,6 +2028,12 @@ function MemberView({
     window.setTimeout(() => setCopyFeedback(""), 2000);
   }
 
+  async function copyMemberPreviewText(text: string, message = "Copied.") {
+    await copyTextToClipboard(cleanTextForMember(text));
+    setCopyFeedback(message);
+    window.setTimeout(() => setCopyFeedback(""), 2000);
+  }
+
   function setMemberFeedback(key: string, feedback: ActionFeedback) {
     setActionFeedback((current) => ({ ...current, [key]: feedback }));
     clearFeedbackAfterSuccess(key, feedback, setActionFeedback);
@@ -2232,6 +2241,18 @@ function MemberView({
                     <p className="mt-1 text-xs font-bold text-sky-900/55">
                       {formatDateTime(update.createdAt)}
                     </p>
+                    {adminPreview && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void copyMemberPreviewText(update.message, "Update copied.")}
+                        className="mt-2 border border-sky-200 bg-white"
+                      >
+                        <Copy data-icon="inline-start" />
+                        Copy update
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2284,6 +2305,31 @@ function MemberView({
                 <X className="size-4" />
               </Button>
             </div>
+            {adminPreview && problemSolutions.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    void copyMemberPreviewText(
+                      problemSolutions
+                        .map((response, index) => {
+                          const member = data.members.find((item) => item.id === response.memberId);
+                          return `#${index + 1} ${member ? memberArabicName(member) : response.memberName}\n${response.answer}`;
+                        })
+                        .join("\n\n"),
+                      "Solutions copied.",
+                    )
+                  }
+                  className="border-[2px] border-ink bg-white"
+                >
+                  <Copy data-icon="inline-start" />
+                  Copy all
+                </Button>
+                {copyFeedback && <span className="text-xs font-bold text-emerald-700">{copyFeedback}</span>}
+              </div>
+            )}
 
             {problemSolutions.length === 0 ? (
               <div className="rounded-xl border-[2px] border-dashed border-ink/25 bg-paper p-5 text-center font-bold text-foreground/55">
@@ -2334,6 +2380,18 @@ function MemberView({
                       <div className={cn("text-sm", textAlignClass(response.answer))} dir={textDirection(response.answer)}>
                         <StructuredTextBlock text={response.answer} compact memberFacing />
                       </div>
+                      {adminPreview && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void copyMemberPreviewText(response.answer, "Solution copied.")}
+                          className="mt-2 border border-ink/20 bg-white"
+                        >
+                          <Copy data-icon="inline-start" />
+                          Copy solution
+                        </Button>
+                      )}
                     </article>
                   );
                 })}
@@ -2664,6 +2722,18 @@ function MemberView({
                       text={task.question}
                       onOpenSection={(sectionIndex) => openTaskDetails(task.id, sectionIndex)}
                     />
+                    {adminPreview && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void copyMemberPreviewText(task.question, "Task text copied.")}
+                        className="mt-2 border border-ink/20 bg-white"
+                      >
+                        <Copy data-icon="inline-start" />
+                        Copy text
+                      </Button>
+                    )}
                     {false && (
                       <>
                     <StructuredTextBlock text={task.question} compact memberFacing />
@@ -2735,6 +2805,18 @@ function MemberView({
                             <p className="mt-1 text-xs font-bold text-sky-900/55">
                               {formatDateTime(update.createdAt)}
                             </p>
+                            {adminPreview && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void copyMemberPreviewText(update.message, "Update copied.")}
+                                className="mt-2 border border-sky-200 bg-white"
+                              >
+                                <Copy data-icon="inline-start" />
+                                Copy update
+                              </Button>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -2775,10 +2857,10 @@ function MemberView({
                           onDraftChange(key, event.target.value);
                           if (!problemTask) onDraftChange(taskProgressKey, event.target.value);
                         }}
-                        onPaste={problemTask ? (event) => blockProblemPaste(event, task.id) : undefined}
-                        onDrop={problemTask ? (event) => blockProblemDrop(event, task.id) : undefined}
-                        onBeforeInput={problemTask ? (event) => blockProblemBeforeInput(event, task.id) : undefined}
-                        onContextMenu={problemTask ? (event) => event.preventDefault() : undefined}
+                        onPaste={problemTask && !adminPreview ? (event) => blockProblemPaste(event, task.id) : undefined}
+                        onDrop={problemTask && !adminPreview ? (event) => blockProblemDrop(event, task.id) : undefined}
+                        onBeforeInput={problemTask && !adminPreview ? (event) => blockProblemBeforeInput(event, task.id) : undefined}
+                        onContextMenu={problemTask && !adminPreview ? (event) => event.preventDefault() : undefined}
                         placeholder={problemTask ? "اكتب حل مختلف وواضح هنا..." : "اكتب هنا الرد النهائي أو تحديث المتابعة..."}
                         className={cn(
                           "min-h-20 border-[2px] border-ink bg-paper px-3 py-2 text-sm leading-6 sm:min-h-[88px]",
@@ -4255,6 +4337,12 @@ function AdminView({
     const archiveTaskKey = `admin:problem-archive:${task.id}`;
     const restoreTaskKey = `admin:problem-restore:${task.id}`;
     const deleteTaskKey = `admin:problem-delete:${task.id}`;
+    const taskUpdateKey = `admin:problem-update:${task.id}`;
+    const taskUpdateDraft = taskUpdateDrafts[task.id] ?? "";
+    const taskUpdates = data.taskUpdates?.[task.id] ?? [];
+    const taskCanSendNotification = !isHiddenTask(task);
+    const taskUpdateActionLabel = isActiveTask(task) ? "Send notification" : "Save admin note";
+    const taskUpdateSuccess = isActiveTask(task) ? "Notification sent." : "Admin note saved.";
 
     return (
       <section className="min-w-0 rounded-xl border border-red-100 bg-white p-4 shadow-sm">
@@ -4339,6 +4427,70 @@ function AdminView({
         <div className="mt-4 rounded-lg border border-ink/10 bg-paper p-3">
           <div className="mb-2 text-sm font-bold text-foreground/60">Problem text</div>
           <StructuredTextBlock text={task.question} compact forceCollapse className="text-sm" />
+        </div>
+
+        <div className="mt-4 rounded-lg border border-sky-100 bg-sky-50 p-3">
+          <div className="mb-3 flex items-center gap-2 font-bold text-sky-950">
+            <Bell className="size-4" />
+            {taskUpdateActionLabel}
+          </div>
+          <Textarea
+            value={taskUpdateDraft}
+            onChange={(event) =>
+              setTaskUpdateDrafts((current) => ({
+                ...current,
+                [task.id]: event.target.value,
+              }))
+            }
+            placeholder="Write a problem notification or admin note..."
+            className="min-h-20 border border-sky-200 bg-white"
+            disabled={!taskCanSendNotification}
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              data-testid={`admin-add-problem-update-${task.id}`}
+              onClick={() => {
+                if (!taskUpdateDraft.trim()) {
+                  blockAdminAction(taskUpdateKey, ["notification message"]);
+                  return;
+                }
+                void runAdminAction(
+                  taskUpdateKey,
+                  () => onAddTaskUpdate(task.id, taskUpdateDraft.trim()),
+                  taskUpdateSuccess,
+                  "Notification failed. Try again.",
+                ).then((ok) => {
+                  if (ok) setTaskUpdateDrafts((current) => ({ ...current, [task.id]: "" }));
+                });
+              }}
+              disabled={!taskCanSendNotification}
+              className={actionButtonClass("bg-sky-500 text-white hover:bg-sky-600", actionFeedback[taskUpdateKey])}
+            >
+              <Bell data-icon="inline-start" />
+              {taskUpdateActionLabel}
+            </Button>
+            <span className="text-xs font-bold text-sky-900/65">
+              {isHiddenTask(task)
+                ? "Publish this problem before sending notifications."
+                : isActiveTask(task)
+                  ? "Assigned members see this as an in-app notification until Seen."
+                  : "Archived problems keep the note here without creating active member alerts."}
+            </span>
+          </div>
+          <ActionFeedbackLine feedback={actionFeedback[taskUpdateKey]} />
+          {taskUpdates.length > 0 && (
+            <div className="mt-3 grid gap-2 border-t border-sky-200 pt-3">
+              {taskUpdates.map((update) => (
+                <div key={update.id} className="rounded-md border border-sky-200 bg-white p-2 text-sm">
+                  <StructuredTextBlock text={update.message} compact forceCollapse />
+                  <p className="mt-1 text-xs font-bold text-foreground/45">
+                    {formatDateTime(update.createdAt)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="mt-4 grid gap-3">
@@ -4503,6 +4655,9 @@ function AdminView({
     const editDraft = taskEditDraft(task);
     const taskUpdateDraft = taskUpdateDrafts[task.id] ?? "";
     const taskUpdates = data.taskUpdates?.[task.id] ?? [];
+    const taskCanSendNotification = !isHiddenTask(task);
+    const taskUpdateActionLabel = isActiveTask(task) ? "Send notification" : "Save admin note";
+    const taskUpdateSuccess = isActiveTask(task) ? "Notification sent." : "Admin note saved.";
 
     return (
       <section className="min-w-0 rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
@@ -4745,7 +4900,7 @@ function AdminView({
         <div className="mt-4 rounded-lg border border-sky-100 bg-sky-50 p-3">
           <div className="mb-3 flex items-center gap-2 font-bold text-sky-950">
             <Bell className="size-4" />
-            Send task update
+            {taskUpdateActionLabel}
           </div>
           <Textarea
             value={taskUpdateDraft}
@@ -4757,6 +4912,7 @@ function AdminView({
             }
             placeholder="اكتب تحديث جديد يظهر للناس فوق التاسك من غير ما تغير الوصف الأصلي..."
             className="min-h-20 border border-sky-200 bg-white"
+            disabled={!taskCanSendNotification}
           />
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Button
@@ -4770,7 +4926,7 @@ function AdminView({
                 void runAdminAction(
                   taskUpdateKey,
                   () => onAddTaskUpdate(task.id, taskUpdateDraft.trim()),
-                  "Task update sent.",
+                  taskUpdateSuccess,
                   "Task update failed. Try again.",
                 ).then((ok) => {
                   if (ok) {
@@ -4778,10 +4934,11 @@ function AdminView({
                   }
                 });
               }}
+              disabled={!taskCanSendNotification}
               className={actionButtonClass("bg-sky-500 text-white hover:bg-sky-600", actionFeedback[taskUpdateKey])}
             >
               <Bell data-icon="inline-start" />
-              Send update
+              {taskUpdateActionLabel}
             </Button>
             <span className="text-xs font-bold text-sky-900/65">
               ده إضافة جديدة للتاسك، مش تعديل على الكلام القديم.
@@ -10055,6 +10212,7 @@ function Index() {
           onMarkInteraction={markInteraction}
           onLogout={() => setActiveMember(null)}
           onRefreshData={refreshData}
+          adminPreview
         />
       </div>
     );
