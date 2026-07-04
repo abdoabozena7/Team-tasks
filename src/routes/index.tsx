@@ -1,5 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type ClipboardEvent,
+  type Dispatch,
+  type DragEvent,
+  type FormEvent,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   Archive,
   BarChart3,
@@ -68,6 +78,7 @@ type StudioTask = {
   title: string;
   question: string;
   points: number;
+  taskType?: "task" | "problem";
   scope: "all" | "member";
   memberId?: string;
   memberIds?: string[];
@@ -140,6 +151,25 @@ type MeetingAttendance = {
   score: number;
 };
 
+type InteractionTargetType = "task" | "taskUpdate" | "meeting";
+
+type MemberInteraction = {
+  id: string;
+  memberId: string;
+  targetType: InteractionTargetType;
+  targetId: string;
+  taskId?: string;
+  seenAt: string;
+};
+
+type BonusGrade = {
+  id: string;
+  memberId: string;
+  points: number;
+  note: string;
+  createdAt: string;
+};
+
 type StudioSettings = {
   adminPassword: string;
   statsPassword: string;
@@ -210,6 +240,13 @@ type MemberProfileRequestInput = {
   driveUrl?: string;
 };
 
+type InteractionInput = {
+  memberId: string;
+  targetType: InteractionTargetType;
+  targetId: string;
+  taskId?: string;
+};
+
 type StudioData = {
   projectName: string;
   announcement?: string;
@@ -222,6 +259,8 @@ type StudioData = {
   taskUpdates?: Record<string, TaskAnnouncement[]>;
   meetings?: Meeting[];
   meetingAttendance?: Record<string, Record<string, MeetingAttendance>>;
+  interactions?: MemberInteraction[];
+  bonusGrades?: BonusGrade[];
   repoUpdates?: RepoUpdate[];
   profileRequests?: MemberProfileRequest[];
   meta: { updatedAt: string };
@@ -247,8 +286,11 @@ type MemberScore = {
   completed: number;
   taskPoints: number;
   basePoints: number;
+  bonusPoints: number;
+  bonusCount: number;
   meetingPoints: number;
   points: number;
+  privateTasks: number;
   avgHours: number | null;
   responseRate: number;
   approvalRate: number;
@@ -256,6 +298,16 @@ type MemberScore = {
   accountableMeetings: number;
   meetingAttendanceRate: number;
   avgMeetingLateMinutes: number | null;
+  seenTargets: number;
+  expectedSeenTargets: number;
+  avgSeenHours: number | null;
+  submissionScore: number;
+  completionScore: number;
+  qualityScore: number;
+  speedScore: number;
+  interactionScore: number;
+  meetingScore: number;
+  effortScore: number;
 };
 
 type TaskMetric = {
@@ -316,6 +368,8 @@ const DEFAULT_DATA: StudioData = {
   taskUpdates: {},
   meetings: [],
   meetingAttendance: {},
+  interactions: [],
+  bonusGrades: [],
   repoUpdates: [],
   profileRequests: [],
   meta: { updatedAt: new Date().toISOString() },
@@ -462,6 +516,7 @@ function sanitizeData(data: StudioData): StudioData {
   const tasks: StudioTask[] = (data.tasks ?? []).map((task) => ({
     ...task,
     points: sanitizeNumber(task.points) || 1,
+    taskType: task.taskType === "problem" ? "problem" : "task",
     scope: task.scope === "member" ? "member" : "all",
     memberId:
       task.scope === "member"
@@ -486,6 +541,8 @@ function sanitizeData(data: StudioData): StudioData {
     createdAt: meeting.createdAt || new Date().toISOString(),
   }));
   const meetingIds = new Set(meetings.map((meeting) => meeting.id));
+  const memberIds = new Set((data.members ?? []).map((member) => member.id));
+  const interactionKeys = new Set<string>();
 
   return {
     ...DEFAULT_DATA,
@@ -533,12 +590,58 @@ function sanitizeData(data: StudioData): StudioData {
     meetingAttendance: Object.fromEntries(
       Object.entries(data.meetingAttendance ?? {}).filter(([meetingId]) => meetingIds.has(meetingId)),
     ),
+    interactions: (data.interactions ?? [])
+      .filter((interaction) => {
+        if (!memberIds.has(interaction.memberId)) return false;
+        if (!["task", "taskUpdate", "meeting"].includes(interaction.targetType)) return false;
+        if (!interaction.targetId || !interaction.seenAt) return false;
+        if (interaction.targetType === "task" && !taskIds.has(interaction.targetId)) return false;
+        if (interaction.targetType === "taskUpdate" && (!interaction.taskId || !taskIds.has(interaction.taskId))) return false;
+        if (interaction.targetType === "meeting" && !meetingIds.has(interaction.targetId)) return false;
+        const key = interactionKey(interaction.memberId, interaction.targetType, interaction.targetId);
+        if (interactionKeys.has(key)) return false;
+        interactionKeys.add(key);
+        return true;
+      })
+      .map((interaction) => ({
+        ...interaction,
+        id:
+          interaction.id ||
+          interactionKey(interaction.memberId, interaction.targetType, interaction.targetId),
+        taskId: interaction.taskId || undefined,
+      }))
+      .sort((a, b) => new Date(b.seenAt).getTime() - new Date(a.seenAt).getTime()),
+    bonusGrades: (data.bonusGrades ?? [])
+      .filter((bonus) => memberIds.has(bonus.memberId) && String(bonus.note ?? "").trim())
+      .map((bonus) => ({
+        id: bonus.id || `bonus-${bonus.memberId}-${bonus.createdAt || Date.now()}`,
+        memberId: bonus.memberId,
+        points: sanitizeNumber(bonus.points),
+        note: String(bonus.note ?? "").trim(),
+        createdAt: bonus.createdAt || new Date().toISOString(),
+      }))
+      .filter((bonus) => bonus.points !== 0)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     repoUpdates: (data.repoUpdates ?? []).filter(
       (update) => !update.taskId || taskIds.has(update.taskId),
     ),
     profileRequests: data.profileRequests ?? [],
     meta: data.meta ?? DEFAULT_DATA.meta,
   };
+}
+
+function interactionKey(memberId: string, targetType: InteractionTargetType, targetId: string) {
+  return `${memberId}:${targetType}:${targetId}`;
+}
+
+function isProblemTask(task: StudioTask) {
+  return task.taskType === "problem";
+}
+
+function privateTaskMemberId(task: StudioTask) {
+  if (task.scope !== "member") return null;
+  const memberIds = uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []));
+  return memberIds.length === 1 ? memberIds[0] : null;
 }
 
 function taskIsForMember(task: StudioTask, memberId: string) {
@@ -753,6 +856,17 @@ function formatPercent(value: number) {
   return `${Math.round(value)}%`;
 }
 
+function clampScore(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function normalizedInverseScore(value: number | null, min: number | null, max: number | null) {
+  if (value === null || min === null || max === null) return 0;
+  if (max <= min) return 100;
+  return clampScore(100 - ((value - min) / (max - min)) * 100);
+}
+
 function createStats(data: StudioData) {
   const activeTasks = data.tasks.filter(isActiveTask);
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
@@ -763,7 +877,7 @@ function createStats(data: StudioData) {
     return phase === "live" || phase === "ended";
   });
   const memberOrder = new Map(data.members.map((member, index) => [member.id, index]));
-  const memberStats = data.members.map((member) => {
+  const rawMemberStats = data.members.map((member) => {
     const assignedTasks = activeTasks.filter(
       (task) => taskIsForMember(task, member.id) && !isTaskSkipped(data, task.id, member.id),
     );
@@ -788,6 +902,11 @@ function createStats(data: StudioData) {
     const baseApproved = 0;
     const baseRejected = 0;
     const basePoints = sanitizeNumber(member.basePoints);
+    const memberBonusGrades = (data.bonusGrades ?? []).filter((bonus) => bonus.memberId === member.id);
+    const bonusPoints = memberBonusGrades.reduce((sum, bonus) => sum + sanitizeNumber(bonus.points), 0);
+    const privateTasks = data.tasks.filter(
+      (task) => privateTaskMemberId(task) === member.id && !isTaskSkipped(data, task.id, member.id),
+    ).length;
     const meetingPoints = scoreMeetings.reduce(
       (sum, meeting) => sum + (data.meetingAttendance?.[meeting.id]?.[member.id]?.score ?? 0),
       0,
@@ -812,6 +931,45 @@ function createStats(data: StudioData) {
     const attendedMeetings = meetingAttendances.length;
     const meetingAttendanceRate =
       accountableMeetings.length > 0 ? (attendedMeetings / accountableMeetings.length) * 100 : 100;
+    const interactionTargets = [
+      ...assignedTasks.map((task) => ({
+        targetType: "task" as const,
+        targetId: task.id,
+        taskId: task.id,
+        createdAt: task.startAt || task.createdAt,
+      })),
+      ...assignedTasks.flatMap((task) =>
+        (data.taskUpdates?.[task.id] ?? []).map((update) => ({
+          targetType: "taskUpdate" as const,
+          targetId: update.id,
+          taskId: task.id,
+          createdAt: update.createdAt,
+        })),
+      ),
+      ...activeMeetings.map((meeting) => ({
+        targetType: "meeting" as const,
+        targetId: meeting.id,
+        taskId: undefined,
+        createdAt: meeting.createdAt || meeting.startsAt,
+      })),
+    ];
+    const memberInteractions = new Map(
+      (data.interactions ?? [])
+        .filter((interaction) => interaction.memberId === member.id)
+        .map((interaction) => [`${interaction.targetType}:${interaction.targetId}`, interaction]),
+    );
+    const seenSamples: number[] = [];
+    const seenTargets = interactionTargets.reduce((sum, target) => {
+      const interaction = memberInteractions.get(`${target.targetType}:${target.targetId}`);
+      if (!interaction) return sum;
+      const hours = hoursBetween(target.createdAt, interaction.seenAt);
+      if (hours !== null) seenSamples.push(hours);
+      return sum + 1;
+    }, 0);
+    const avgSeenHours =
+      seenSamples.length > 0
+        ? seenSamples.reduce((sum, value) => sum + value, 0) / seenSamples.length
+        : null;
 
     return {
       member,
@@ -828,8 +986,11 @@ function createStats(data: StudioData) {
       completed: approvedTasks.length,
       taskPoints,
       basePoints,
+      bonusPoints,
+      bonusCount: memberBonusGrades.length,
       meetingPoints,
-      points: Math.round((basePoints + taskPoints + meetingPoints) * 100) / 100,
+      points: Math.round((basePoints + bonusPoints + taskPoints + meetingPoints) * 100) / 100,
+      privateTasks,
       avgHours,
       responseRate,
       approvalRate,
@@ -837,10 +998,67 @@ function createStats(data: StudioData) {
       accountableMeetings: accountableMeetings.length,
       meetingAttendanceRate,
       avgMeetingLateMinutes,
+      seenTargets,
+      expectedSeenTargets: interactionTargets.length,
+      avgSeenHours,
+      submissionScore: 0,
+      completionScore: 0,
+      qualityScore: 0,
+      speedScore: 0,
+      interactionScore: 0,
+      meetingScore: 0,
+      effortScore: 0,
+    };
+  });
+  const visibleRawStats = rawMemberStats.filter((item) => !item.member.hidden);
+  const maxSubmitted = Math.max(0, ...visibleRawStats.map((item) => item.submitted));
+  const avgHourValues = visibleRawStats
+    .map((item) => item.avgHours)
+    .filter((value): value is number => value !== null);
+  const minAvgHours = avgHourValues.length > 0 ? Math.min(...avgHourValues) : null;
+  const maxAvgHours = avgHourValues.length > 0 ? Math.max(...avgHourValues) : null;
+  const seenHourValues = visibleRawStats
+    .map((item) => item.avgSeenHours)
+    .filter((value): value is number => value !== null);
+  const minSeenHours = seenHourValues.length > 0 ? Math.min(...seenHourValues) : null;
+  const maxSeenHours = seenHourValues.length > 0 ? Math.max(...seenHourValues) : null;
+  const memberStats = rawMemberStats.map((item) => {
+    const submissionScore = maxSubmitted > 0 ? (item.submitted / maxSubmitted) * 100 : 0;
+    const completionScore = item.responseRate;
+    const qualityScore = clampScore(item.approvalRate - item.rejectionRate * 0.7);
+    const speedScore = normalizedInverseScore(item.avgHours, minAvgHours, maxAvgHours);
+    const seenRate =
+      item.expectedSeenTargets > 0 ? (item.seenTargets / item.expectedSeenTargets) * 100 : 100;
+    const seenSpeedScore = normalizedInverseScore(item.avgSeenHours, minSeenHours, maxSeenHours);
+    const interactionScore =
+      item.expectedSeenTargets > 0 ? seenRate * 0.65 + seenSpeedScore * 0.35 : 100;
+    const punctualityScore =
+      item.avgMeetingLateMinutes === null ? 100 : clampScore(100 - (item.avgMeetingLateMinutes / 60) * 100);
+    const meetingScore =
+      item.accountableMeetings > 0 ? item.meetingAttendanceRate * 0.75 + punctualityScore * 0.25 : 100;
+    const effortScore = clampScore(
+      submissionScore * 0.35 +
+        completionScore * 0.2 +
+        qualityScore * 0.2 +
+        speedScore * 0.1 +
+        interactionScore * 0.1 +
+        meetingScore * 0.05,
+    );
+
+    return {
+      ...item,
+      submissionScore,
+      completionScore,
+      qualityScore,
+      speedScore,
+      interactionScore,
+      meetingScore,
+      effortScore,
     };
   });
   const visibleStats = memberStats.filter((item) => !item.member.hidden);
   const rankedMembers = [...visibleStats].sort((a, b) => {
+    if (b.effortScore !== a.effortScore) return b.effortScore - a.effortScore;
     if (b.submitted !== a.submitted) return b.submitted - a.submitted;
     if (b.responseRate !== a.responseRate) return b.responseRate - a.responseRate;
     if (a.rejectionRate !== b.rejectionRate) return a.rejectionRate - b.rejectionRate;
@@ -858,6 +1076,8 @@ function createStats(data: StudioData) {
       if (b.avgMeetingLateMinutes === null) return -1;
       return a.avgMeetingLateMinutes - b.avgMeetingLateMinutes;
     }
+    if (b.interactionScore !== a.interactionScore) return b.interactionScore - a.interactionScore;
+    if (b.meetingScore !== a.meetingScore) return b.meetingScore - a.meetingScore;
     if (b.completed !== a.completed) return b.completed - a.completed;
     if (b.points !== a.points) return b.points - a.points;
     if (b.assignedTasks !== a.assignedTasks) return b.assignedTasks - a.assignedTasks;
@@ -1059,6 +1279,12 @@ function MemberDetails({ item }: { item: MemberScore }) {
       <span>نسبة التسليم: {formatPercent(item.responseRate)}</span>
       <span>نسبة القبول: {formatPercent(item.approvalRate)}</span>
       <span>متوسط السرعة: {formatHours(item.avgHours)}</span>
+      <span>تسكات خاصة: {item.privateTasks}</span>
+      <span>درجات يدوية: {item.basePoints}</span>
+      <span>بونص: {item.bonusPoints} ({item.bonusCount})</span>
+      <span>Effort: {formatPercent(item.effortScore)}</span>
+      <span>Seen: {item.seenTargets}/{item.expectedSeenTargets}</span>
+      <span>Interaction: {formatPercent(item.interactionScore)}</span>
     </div>
   );
 }
@@ -1075,8 +1301,48 @@ function StatsMemberDetails({ item }: { item: MemberScore }) {
       <span>Submission rate: {formatPercent(item.responseRate)}</span>
       <span>Approval rate: {formatPercent(item.approvalRate)}</span>
       <span>Average speed: {formatHours(item.avgHours)}</span>
+      <span>Private tasks: {item.privateTasks}</span>
+      <span>Manual grades: {item.basePoints}</span>
+      <span>Bonus: {item.bonusPoints} ({item.bonusCount})</span>
+      <span>Effort: {formatPercent(item.effortScore)}</span>
+      <span>Seen: {item.seenTargets}/{item.expectedSeenTargets}</span>
+      <span>Interaction: {formatPercent(item.interactionScore)}</span>
     </div>
   );
+}
+
+function leadershipReason(leader: MemberScore, runner?: MemberScore) {
+  if (!runner) {
+    if (leader.submitted > 0) {
+      return `سلم ${leader.submitted} مرة وقبوله ${formatPercent(leader.approvalRate)}`;
+    }
+    return "أعلى نشاط متاح حاليا";
+  }
+  if (leader.submitted > runner.submitted) {
+    return `سلم أكتر (${leader.submitted} مقابل ${runner.submitted})`;
+  }
+  if (leader.responseRate > runner.responseRate) {
+    return `التزامه أعلى (${formatPercent(leader.responseRate)})`;
+  }
+  if (leader.approvalRate > runner.approvalRate) {
+    return `قبوله أعلى (${formatPercent(leader.approvalRate)})`;
+  }
+  if (leader.avgHours !== null && (runner.avgHours === null || leader.avgHours < runner.avgHours)) {
+    return `بيسلم أسرع (${formatHours(leader.avgHours)})`;
+  }
+  if (leader.interactionScore > runner.interactionScore) {
+    return `تفاعله أسرع (${formatPercent(leader.interactionScore)})`;
+  }
+  if (leader.meetingScore > runner.meetingScore) {
+    return `حضوره أقوى (${formatPercent(leader.meetingScore)})`;
+  }
+  return `مجهوده الإجمالي أعلى (${formatPercent(leader.effortScore)})`;
+}
+
+function leaderboardLeaderHeadline(scores: MemberScore[]) {
+  const leader = scores[0];
+  if (!leader) return "لسه مفيش نشاط كفاية للترتيب";
+  return `${memberArabicName(leader.member)} في الصدارة: ${leadershipReason(leader, scores[1])}`;
 }
 
 function LeaderboardStatPill({
@@ -1351,6 +1617,7 @@ function MemberView({
   onRepoAttention,
   onDriveAttention,
   onProfileChangeRequest,
+  onMarkInteraction,
   onLogout,
   onRefreshData,
 }: {
@@ -1367,6 +1634,7 @@ function MemberView({
   onRepoAttention: (task: StudioTask) => boolean | Promise<boolean>;
   onDriveAttention: (task: StudioTask) => boolean | Promise<boolean>;
   onProfileChangeRequest: (item: MemberProfileRequestInput) => boolean | Promise<boolean>;
+  onMarkInteraction: (item: InteractionInput) => boolean | Promise<boolean>;
   onLogout: () => void;
   onRefreshData: () => Promise<void>;
 }) {
@@ -1390,6 +1658,9 @@ function MemberView({
     readSeenTaskUpdateIds(activeMember.member.id),
   );
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [expandedTaskSectionIndex, setExpandedTaskSectionIndex] = useState(0);
+  const [problemSolutionsTaskId, setProblemSolutionsTaskId] = useState<string | null>(null);
+  const [pasteWarningTaskId, setPasteWarningTaskId] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState("");
   const [nowTime, setNowTime] = useState(() => Date.now());
   const memberTasks = data.tasks.filter((task) => {
@@ -1401,21 +1672,38 @@ function MemberView({
     taskIsForMember(task, activeMember.member.id),
   );
   const nowDate = useMemo(() => new Date(nowTime), [nowTime]);
+  const memberInteractionKeys = useMemo(
+    () =>
+      new Set(
+        (data.interactions ?? [])
+          .filter((interaction) => interaction.memberId === activeMember.member.id)
+          .map((interaction) => `${interaction.targetType}:${interaction.targetId}`),
+      ),
+    [activeMember.member.id, data.interactions],
+  );
   const visibleMeetingNotices = useMemo(() => {
     const seenIds = new Set(seenMeetingIds);
-    return memberVisibleMeetings(data.meetings ?? [], nowDate).filter((meeting) => !seenIds.has(meeting.id));
-  }, [data.meetings, nowDate, seenMeetingIds]);
+    return memberVisibleMeetings(data.meetings ?? [], nowDate).filter(
+      (meeting) => !seenIds.has(meeting.id) && !memberInteractionKeys.has(`meeting:${meeting.id}`),
+    );
+  }, [data.meetings, memberInteractionKeys, nowDate, seenMeetingIds]);
   const visibleTaskUpdateNotices = useMemo(() => {
     const seenIds = new Set(seenTaskUpdateIds);
     return memberTasks
       .map((task) => ({
         task,
-        updates: (data.taskUpdates?.[task.id] ?? []).filter((update) => !seenIds.has(update.id)),
+        updates: (data.taskUpdates?.[task.id] ?? []).filter(
+          (update) => !seenIds.has(update.id) && !memberInteractionKeys.has(`taskUpdate:${update.id}`),
+        ),
       }))
       .filter((item) => item.updates.length > 0);
-  }, [data.taskUpdates, memberTasks, seenTaskUpdateIds]);
+  }, [data.taskUpdates, memberInteractionKeys, memberTasks, seenTaskUpdateIds]);
   const expandedTask = expandedTaskId ? memberTasks.find((task) => task.id === expandedTaskId) : undefined;
   const expandedTaskUpdates = expandedTask ? data.taskUpdates?.[expandedTask.id] ?? [] : [];
+  const problemSolutionsTask = problemSolutionsTaskId
+    ? memberTasks.find((task) => task.id === problemSolutionsTaskId)
+    : undefined;
+  const problemSolutions = problemSolutionsTask ? problemSolutionEntries(problemSolutionsTask) : [];
   const activeMemberScore = useMemo(
     () => stats.allMemberStats.find((item) => item.member.id === activeMember.member.id),
     [activeMember.member.id, stats.allMemberStats],
@@ -1436,6 +1724,9 @@ function MemberView({
       ),
     [activeMember.member.aliases, activeMember.member.name],
   );
+  function hasSeenTarget(targetType: InteractionTargetType, targetId: string) {
+    return memberInteractionKeys.has(`${targetType}:${targetId}`);
+  }
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -1455,13 +1746,13 @@ function MemberView({
   }, []);
 
   useEffect(() => {
-    if (!expandedTaskId) return;
+    if (!expandedTaskId && !problemSolutionsTaskId) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [expandedTaskId]);
+  }, [expandedTaskId, problemSolutionsTaskId]);
 
   async function refreshMemberData() {
     setRefreshing(true);
@@ -1485,14 +1776,134 @@ function MemberView({
       writeSeenMeetingIds(activeMember.member.id, next);
       return next;
     });
+    void onMarkInteraction({
+      memberId: activeMember.member.id,
+      targetType: "meeting",
+      targetId: meetingId,
+    });
   }
 
-  function markTaskUpdatesSeen(updateIds: string[]) {
+  function markTaskSeen(taskId: string) {
+    void onMarkInteraction({
+      memberId: activeMember.member.id,
+      targetType: "task",
+      targetId: taskId,
+      taskId,
+    });
+  }
+
+  function markTaskUpdatesSeen(updateIds: string[], taskId?: string) {
     setSeenTaskUpdateIds((current) => {
       const next = uniqueText([...current, ...updateIds]);
       writeSeenTaskUpdateIds(activeMember.member.id, next);
       return next;
     });
+    updateIds.forEach((updateId) => {
+      void onMarkInteraction({
+        memberId: activeMember.member.id,
+        targetType: "taskUpdate",
+        targetId: updateId,
+        taskId,
+      });
+    });
+  }
+
+  function markVisiblePageSeen() {
+    const meetingIds = visibleMeetingNotices.map((meeting) => meeting.id);
+    const updateTargets = visibleTaskUpdateNotices.flatMap(({ task, updates }) =>
+      updates.map((update) => ({ updateId: update.id, taskId: task.id })),
+    );
+    const taskIds = memberTasks
+      .map((task) => task.id)
+      .filter((taskId) => !hasSeenTarget("task", taskId));
+
+    if (meetingIds.length > 0) {
+      setSeenMeetingIds((current) => {
+        const next = uniqueText([...current, ...meetingIds]);
+        writeSeenMeetingIds(activeMember.member.id, next);
+        return next;
+      });
+    }
+
+    if (updateTargets.length > 0) {
+      setSeenTaskUpdateIds((current) => {
+        const next = uniqueText([...current, ...updateTargets.map((target) => target.updateId)]);
+        writeSeenTaskUpdateIds(activeMember.member.id, next);
+        return next;
+      });
+    }
+
+    meetingIds.forEach((meetingId) => {
+      void onMarkInteraction({
+        memberId: activeMember.member.id,
+        targetType: "meeting",
+        targetId: meetingId,
+      });
+    });
+    updateTargets.forEach((target) => {
+      void onMarkInteraction({
+        memberId: activeMember.member.id,
+        targetType: "taskUpdate",
+        targetId: target.updateId,
+        taskId: target.taskId,
+      });
+    });
+    taskIds.forEach((taskId) => {
+      void onMarkInteraction({
+        memberId: activeMember.member.id,
+        targetType: "task",
+        targetId: taskId,
+        taskId,
+      });
+    });
+  }
+
+  function problemSolutionEntries(task: StudioTask) {
+    return Object.values(data.responses[task.id] ?? {})
+      .filter((response) => response.memberId !== activeMember.member.id)
+      .sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+  }
+
+  function problemSubmissionRank(task: StudioTask) {
+    const now = Date.now();
+    return (
+      Object.values(data.responses[task.id] ?? {}).filter(
+        (response) =>
+          response.memberId !== activeMember.member.id &&
+          new Date(response.submittedAt).getTime() <= now,
+      ).length + 1
+    );
+  }
+
+  function showProblemPasteWarning(taskId: string) {
+    setPasteWarningTaskId(taskId);
+    window.setTimeout(() => {
+      setPasteWarningTaskId((current) => (current === taskId ? null : current));
+    }, 3000);
+  }
+
+  function blockProblemPaste(event: ClipboardEvent<HTMLTextAreaElement>, taskId: string) {
+    event.preventDefault();
+    showProblemPasteWarning(taskId);
+  }
+
+  function blockProblemDrop(event: DragEvent<HTMLTextAreaElement>, taskId: string) {
+    event.preventDefault();
+    showProblemPasteWarning(taskId);
+  }
+
+  function blockProblemBeforeInput(event: FormEvent<HTMLTextAreaElement>, taskId: string) {
+    const inputType = (event.nativeEvent as InputEvent).inputType ?? "";
+    if (inputType.includes("Paste") || inputType === "insertFromDrop") {
+      event.preventDefault();
+      showProblemPasteWarning(taskId);
+    }
+  }
+
+  function openTaskDetails(taskId: string, sectionIndex = 0) {
+    setExpandedTaskSectionIndex(sectionIndex);
+    setExpandedTaskId(taskId);
+    setCopyFeedback("");
   }
 
   async function copyExpandedTaskText() {
@@ -1675,7 +2086,11 @@ function MemberView({
               )}
               dir={textDirection(expandedTask.question)}
             >
-              <StructuredTextBlock text={expandedTask.question} memberFacing />
+              <StructuredTextBlock
+                text={expandedTask.question}
+                memberFacing
+                defaultOpenIndex={expandedTaskSectionIndex}
+              />
             </div>
             {expandedTaskUpdates.length > 0 && (
               <div className="mt-4 grid gap-2">
@@ -1708,6 +2123,82 @@ function MemberView({
               </Button>
               {copyFeedback && <span className="text-sm font-bold text-emerald-700">{copyFeedback}</span>}
             </div>
+          </section>
+        </div>
+      )}
+
+      {problemSolutionsTask && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink/35 px-4 py-6">
+          <section
+            data-testid="problem-solutions-modal"
+            className="scrollbar-none max-h-[88vh] w-full max-w-2xl overflow-y-auto overscroll-contain border-[2.5px] border-ink bg-card p-4 doodle-shadow"
+            style={{ borderRadius: "22px 28px 18px 26px / 24px 18px 28px 20px" }}
+          >
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-wide text-red-700">
+                  Problem submissions
+                </p>
+                <h2
+                  className={cn("mt-1 break-words text-2xl font-bold", textAlignClass(problemSolutionsTask.title))}
+                  dir={textDirection(problemSolutionsTask.title)}
+                >
+                  {problemSolutionsTask.title}
+                </h2>
+                <p className="mt-1 text-sm font-bold text-foreground/60">
+                  الحلول دي اتسلمت قبلك. اقرأها عشان ما تكررش نفس الفكرة.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => setProblemSolutionsTaskId(null)}
+                className="shrink-0 border-[2px] border-ink bg-white"
+                aria-label="Close problem submissions"
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+
+            {problemSolutions.length === 0 ? (
+              <div className="rounded-xl border-[2px] border-dashed border-ink/25 bg-paper p-5 text-center font-bold text-foreground/55">
+                لسه مفيش حد سلّم حل قبلك.
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {problemSolutions.map((response, index) => {
+                  const member = data.members.find((item) => item.id === response.memberId);
+                  const statusLabel =
+                    response.status === "approved"
+                      ? "مقبول"
+                      : response.status === "rejected"
+                        ? "مرفوض"
+                        : "مستني مراجعة";
+                  return (
+                    <article
+                      key={`${response.memberId}:${response.submittedAt}`}
+                      className="rounded-xl border-[2px] border-ink/20 bg-paper p-3"
+                    >
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <strong>
+                          #{index + 1} {member ? memberArabicName(member) : response.memberName}
+                        </strong>
+                        <span className="rounded-full border border-ink/20 bg-white px-2 py-0.5 text-xs font-bold">
+                          {statusLabel}
+                        </span>
+                      </div>
+                      <p className="mb-2 text-xs font-bold text-foreground/50">
+                        {formatDateTime(response.submittedAt)}
+                      </p>
+                      <div className={cn("text-sm", textAlignClass(response.answer))} dir={textDirection(response.answer)}>
+                        <StructuredTextBlock text={response.answer} compact memberFacing />
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
           </section>
         </div>
       )}
@@ -1809,7 +2300,7 @@ function MemberView({
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => markMeetingSeen(meeting.id)}
+                    onClick={markVisiblePageSeen}
                     className="shrink-0 border border-sky-300 bg-white text-sky-900"
                   >
                     <Eye data-icon="inline-start" />
@@ -1827,7 +2318,6 @@ function MemberView({
             style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
           >
             {visibleTaskUpdateNotices.map(({ task, updates }) => {
-              const latestUpdate = updates[0];
               return (
                 <div key={task.id} className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -1840,13 +2330,10 @@ function MemberView({
                     >
                       {task.title}
                     </h2>
-                    <StructuredTextBlock
-                      text={latestUpdate.message}
-                      compact
-                      memberFacing
-                      className="mt-2 text-yellow-950"
-                    />
-                    {updates.length > 1 && (
+                    <p className="mt-2 text-sm font-bold text-yellow-900/75">
+                      فيه تحديث جديد. افتح التاسك وشوف التفاصيل.
+                    </p>
+                    {false && updates.length > 1 && (
                       <p className="mt-1 text-xs font-bold text-yellow-900/60">
                         +{updates.length - 1} تحديث كمان
                       </p>
@@ -1856,7 +2343,7 @@ function MemberView({
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => markTaskUpdatesSeen(updates.map((update) => update.id))}
+                    onClick={markVisiblePageSeen}
                     className="shrink-0 border border-yellow-700 bg-white text-yellow-950"
                   >
                     <Eye data-icon="inline-start" />
@@ -1941,10 +2428,16 @@ function MemberView({
                 task.question.trim().length > 180 || task.question.trim().split(/\n/).length > 3;
               const taskQuestionHasSections = splitMemberTextSections(task.question).length > 1;
               const taskUpdates = data.taskUpdates?.[task.id] ?? [];
-              const unseenTaskUpdates = taskUpdates.filter((update) => !seenTaskUpdateIds.includes(update.id));
+              const unseenTaskUpdates = taskUpdates.filter(
+                (update) =>
+                  !seenTaskUpdateIds.includes(update.id) &&
+                  !hasSeenTarget("taskUpdate", update.id),
+              );
               const taskPoints = sanitizePositiveNumber(task.points, 1);
               const taskAudienceLabel = task.scope === "all" ? "تاسك عام لكل التيم" : "تاسك مخصص ليك";
               const taskPointsLabel = formatTaskPointsLabel(taskPoints);
+              const problemTask = isProblemTask(task);
+              const taskSeen = hasSeenTarget("task", task.id);
 
               return (
                 <article
@@ -1966,6 +2459,14 @@ function MemberView({
                         <span>{taskAudienceLabel}</span>
                         <span className="mx-1.5">•</span>
                         <span className="text-red-600">{taskPointsLabel}</span>
+                        {problemTask && (
+                          <>
+                            <span className="mx-1.5">•</span>
+                            <span className="rounded-full border border-red-700 bg-red-50 px-2 py-0.5 text-red-700">
+                              Problem
+                            </span>
+                          </>
+                        )}
                       </p>
                       <div className="mb-2 flex w-full flex-wrap items-center justify-center gap-2 text-xs font-bold" dir="ltr">
                         <span className="rounded-full border-[2px] border-ink bg-white px-2.5 py-1">
@@ -1993,6 +2494,18 @@ function MemberView({
                         مستني مراجعة الأدمن
                       </span>
                     )}
+                    {!taskSeen && !existing && !finalSent && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={markVisiblePageSeen}
+                        className="border-[2px] border-ink bg-white"
+                      >
+                        <Eye data-icon="inline-start" />
+                        Seen
+                      </Button>
+                    )}
                   </div>
                   <div
                     data-testid={`task-text-preview-${task.id}`}
@@ -2006,14 +2519,19 @@ function MemberView({
                     )}
                     dir={taskQuestionDir}
                   >
+                    <StructuredTextPreviewList
+                      text={task.question}
+                      onOpenSection={(sectionIndex) => openTaskDetails(task.id, sectionIndex)}
+                    />
+                    {false && (
+                      <>
                     <StructuredTextBlock text={task.question} compact memberFacing />
                     {(taskQuestionIsLong || taskQuestionHasSections) && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setExpandedTaskId(task.id);
-                          setCopyFeedback("");
-                        }}
+                      onClick={() => {
+                            openTaskDetails(task.id, 0);
+                          }}
                         className="mt-2 inline-flex rounded-full border border-ink/20 bg-white px-3 py-1 text-xs font-bold text-foreground/60"
                       >
                         افتح الكلام كله
@@ -2024,7 +2542,31 @@ function MemberView({
                         فيه {taskUpdates.length} تحديث إضافي
                       </span>
                     )}
+                      </>
+                    )}
                   </div>
+                  {problemTask && (
+                    <div className="mb-4 rounded-xl border-[2px] border-red-200 bg-red-50 p-3 text-red-950">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <strong>Problem mode</strong>
+                          <p className="mt-1 text-xs font-bold text-red-900/65">
+                            شوف اللي اتسلم قبلك عشان ما تكررش نفس الحل.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setProblemSolutionsTaskId(task.id)}
+                          className="border-[2px] border-red-700 bg-white text-red-950"
+                        >
+                          <Eye data-icon="inline-start" />
+                          شوف الحلول اللي قبلك
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   {taskUpdates.length > 0 && (
                     <div className="mb-4 rounded-xl border-[2px] border-sky-200 bg-sky-50 p-3 text-sky-950">
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -2041,7 +2583,7 @@ function MemberView({
                             type="button"
                             variant="outline"
                             size="sm"
-                            onClick={() => markTaskUpdatesSeen(unseenTaskUpdates.map((update) => update.id))}
+                            onClick={markVisiblePageSeen}
                             className="border border-sky-300 bg-white text-sky-950"
                           >
                             <Eye data-icon="inline-start" />
@@ -2086,9 +2628,21 @@ function MemberView({
                       onDraftChange(key, event.target.value);
                       onDraftChange(taskProgressKey, event.target.value);
                     }}
+                    onPaste={problemTask ? (event) => blockProblemPaste(event, task.id) : undefined}
+                    onDrop={problemTask ? (event) => blockProblemDrop(event, task.id) : undefined}
+                    onBeforeInput={problemTask ? (event) => blockProblemBeforeInput(event, task.id) : undefined}
+                    onContextMenu={problemTask ? (event) => event.preventDefault() : undefined}
                     placeholder="اكتب هنا الرد النهائي أو تحديث المتابعة..."
-                    className="min-h-20 border-[2px] border-ink bg-paper px-3 py-2 text-sm leading-6 sm:min-h-[88px]"
+                    className={cn(
+                      "min-h-20 border-[2px] border-ink bg-paper px-3 py-2 text-sm leading-6 sm:min-h-[88px]",
+                      problemTask && "problem-answer-input",
+                    )}
                   />
+                  {pasteWarningTaskId === task.id && (
+                    <div className="problem-paste-alert mt-2">
+                      الباست محظور في problem. اكتب الحل بإيدك.
+                    </div>
+                  )}
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Button
                       type="button"
@@ -2098,10 +2652,13 @@ function MemberView({
                           blockMemberAction(key, ["answer"]);
                           return;
                         }
+                        markTaskSeen(task.id);
                         void runMemberAction(
                           key,
                           () => onSubmitFinal(task),
-                          "Submitted. Waiting for admin review.",
+                          problemTask
+                            ? `تم التسليم. أنت رقم ${problemSubmissionRank(task)} في التسليم.`
+                            : "Submitted. Waiting for admin review.",
                           "Submission failed. Try again.",
                         );
                       }}
@@ -2122,6 +2679,7 @@ function MemberView({
                           blockMemberAction(taskProgressKey, ["progress note"]);
                           return;
                         }
+                        markTaskSeen(task.id);
                         void runMemberAction(
                           taskProgressKey,
                           () => onSubmitProgress(task),
@@ -2144,6 +2702,7 @@ function MemberView({
                       data-testid={`repo-attention-${task.id}`}
                       onClick={() => {
                         const repoKey = `repo:${task.id}:${activeMember.member.id}`;
+                        markTaskSeen(task.id);
                         void runMemberAction(
                           repoKey,
                           () => onRepoAttention(task),
@@ -2166,6 +2725,7 @@ function MemberView({
                       data-testid={`drive-attention-${task.id}`}
                       onClick={() => {
                         const driveKey = `drive:${task.id}:${activeMember.member.id}`;
+                        markTaskSeen(task.id);
                         void runMemberAction(
                           driveKey,
                           () => onDriveAttention(task),
@@ -2224,9 +2784,7 @@ function MemberView({
               </h2>
               <div className="min-w-0 text-base font-bold leading-7 md:text-lg">
                 <span className="highlight-blue">
-                  {stats.leader && stats.leader.points > 0
-                    ? `${memberArabicName(stats.leader.member)} متصدر بـ ${formatTaskPointsLabel(stats.leader.points)} عن الكل`
-                    : "لسه مفيش إنجازات محسوبة"}
+                  {leaderboardLeaderHeadline(stats.memberStats)}
                 </span>
               </div>
             </div>
@@ -2548,12 +3106,14 @@ function StructuredTextBlock({
   compact = false,
   memberFacing = false,
   forceCollapse = false,
+  defaultOpenIndex,
   className,
 }: {
   text: string;
   compact?: boolean;
   memberFacing?: boolean;
   forceCollapse?: boolean;
+  defaultOpenIndex?: number;
   className?: string;
 }) {
   const rawText = text.trim();
@@ -2584,6 +3144,7 @@ function StructuredTextBlock({
             key={`${index}-${section.slice(0, 24)}`}
             className="structured-text-details"
             dir={textDirection(section)}
+            open={defaultOpenIndex === index}
           >
             <summary className="structured-text-summary">
               <span className="min-w-0 flex-1">
@@ -2601,6 +3162,45 @@ function StructuredTextBlock({
               <TaskMessageBody text={section} compact={compact} />
             </div>
           </details>
+        );
+      })}
+    </div>
+  );
+}
+
+function StructuredTextPreviewList({
+  text,
+  onOpenSection,
+}: {
+  text: string;
+  onOpenSection: (sectionIndex: number) => void;
+}) {
+  const sections = splitMemberTextSections(text);
+
+  return (
+    <div className="grid gap-2">
+      {sections.map((section, index) => {
+        const title = sections.length > 1 ? structuredTextTitle(section, index) : "عرض النص";
+        const previewSource = section.replace(/\s+/g, " ").trim();
+        const preview = previewSource.slice(0, 150);
+        const previewIsTrimmed = previewSource.length > preview.length;
+
+        return (
+          <button
+            key={`${index}-${section.slice(0, 24)}`}
+            type="button"
+            onClick={() => onOpenSection(index)}
+            className="structured-text-preview-button"
+            dir={textDirection(section)}
+          >
+            <span className={cn("block truncate text-sm font-bold", textAlignClass(title))}>{title}</span>
+            {preview && preview !== title && (
+              <span className={cn("structured-text-summary-preview", textAlignClass(section))}>
+                {preview}
+                {previewIsTrimmed ? "..." : ""}
+              </span>
+            )}
+          </button>
         );
       })}
     </div>
@@ -2867,6 +3467,7 @@ function AdminView({
   onDismissQueuedProgress,
   onAddProgressUpdate,
   onReviewAnswer,
+  onAddBonusGrade,
   onUpdateMember,
   onUpdateSettings,
   onMarkRepoUpdateSeen,
@@ -2911,6 +3512,7 @@ function AdminView({
     awardedPoints?: number,
     overrideLocked?: boolean,
   ) => void;
+  onAddBonusGrade: (memberId: string, points: number, note: string) => ActionResult;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
   onMarkRepoUpdateSeen: (updateId: string) => ActionResult;
@@ -2928,6 +3530,7 @@ function AdminView({
   const [taskPoints, setTaskPoints] = useState(1);
   const [taskScope, setTaskScope] = useState<"all" | "member">("all");
   const [taskMemberIds, setTaskMemberIds] = useState<string[]>([]);
+  const [taskType, setTaskType] = useState<"task" | "problem">("task");
   const [taskStartAt, setTaskStartAt] = useState("");
   const [taskDeadlineAt, setTaskDeadlineAt] = useState("");
   const [meetingTitle, setMeetingTitle] = useState("");
@@ -2941,11 +3544,13 @@ function AdminView({
   const [manualApproveScores, setManualApproveScores] = useState<Record<string, string>>({});
   const [progressMembers, setProgressMembers] = useState<Record<string, string>>({});
   const [progressNotes, setProgressNotes] = useState<Record<string, string>>({});
+  const [bonusPointsDrafts, setBonusPointsDrafts] = useState<Record<string, string>>({});
+  const [bonusNoteDrafts, setBonusNoteDrafts] = useState<Record<string, string>>({});
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [reviewScores, setReviewScores] = useState<Record<string, string>>({});
   const [skipNotes, setSkipNotes] = useState<Record<string, string>>({});
   const [taskEditDrafts, setTaskEditDrafts] = useState<
-    Record<string, { title: string; question: string; points: string; scope: "all" | "member"; memberIds: string[] }>
+    Record<string, { title: string; question: string; points: string; taskType: "task" | "problem"; scope: "all" | "member"; memberIds: string[] }>
   >({});
   const [taskUpdateDrafts, setTaskUpdateDrafts] = useState<Record<string, string>>({});
   const [logMode, setLogMode] = useState<"task" | "member">("task");
@@ -3056,6 +3661,7 @@ function AdminView({
             title: taskTitle.trim(),
             question: taskQuestion.trim(),
             points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
+            taskType,
             scope: effectiveScope,
             memberId: effectiveScope === "member" ? cleanMemberIds[0] : undefined,
             memberIds: effectiveScope === "member" ? cleanMemberIds : [],
@@ -3072,6 +3678,7 @@ function AdminView({
     setTaskPoints(1);
     setTaskScope("all");
     setTaskMemberIds([]);
+    setTaskType("task");
     setTaskStartAt("");
     setTaskDeadlineAt("");
   }
@@ -3141,6 +3748,33 @@ function AdminView({
     return `${memberIds.length} members`;
   }
 
+  function bonusGradesForMember(memberId: string) {
+    return (data.bonusGrades ?? []).filter((bonus) => bonus.memberId === memberId);
+  }
+
+  async function submitBonusGrade(member: Member) {
+    const points = sanitizeNumber(bonusPointsDrafts[member.id]);
+    const note = (bonusNoteDrafts[member.id] ?? "").trim();
+    const key = `admin:add-bonus:${member.id}`;
+    const missing = [
+      points === 0 ? "bonus points" : "",
+      !note ? "bonus note" : "",
+    ].filter((field): field is string => Boolean(field));
+    if (missing.length > 0) {
+      blockAdminAction(key, missing);
+      return;
+    }
+    const ok = await runAdminAction(
+      key,
+      () => onAddBonusGrade(member.id, points, note),
+      "Bonus saved.",
+      "Bonus was not saved.",
+    );
+    if (!ok) return;
+    setBonusPointsDrafts((current) => ({ ...current, [member.id]: "" }));
+    setBonusNoteDrafts((current) => ({ ...current, [member.id]: "" }));
+  }
+
   function toggleTaskMemberDraft(memberId: string) {
     setTaskScope("member");
     setTaskMemberIds((current) =>
@@ -3161,6 +3795,7 @@ function AdminView({
         title: task.title,
         question: task.question,
         points: String(sanitizePositiveNumber(task.points, 1)),
+        taskType: isProblemTask(task) ? "problem" : "task",
         scope: task.scope,
         memberIds: task.scope === "member" ? selectedMemberIdsForTask(task) : [],
       }
@@ -3169,7 +3804,7 @@ function AdminView({
 
   function updateTaskEditDraft(
     task: StudioTask,
-    updates: Partial<{ title: string; question: string; points: string; scope: "all" | "member"; memberIds: string[] }>,
+    updates: Partial<{ title: string; question: string; points: string; taskType: "task" | "problem"; scope: "all" | "member"; memberIds: string[] }>,
   ) {
     setTaskEditDrafts((current) => ({
       ...current,
@@ -3394,6 +4029,21 @@ function AdminView({
               placeholder="Question or instructions"
               className="min-h-24 border border-ink/20 bg-white"
             />
+            <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
+              {(["task", "problem"] as const).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => updateTaskEditDraft(task, { taskType: type })}
+                  className={cn(
+                    "flex-1 rounded-md px-3 py-2 transition",
+                    editDraft.taskType === type ? "bg-ink text-white" : "text-foreground/65 hover:bg-paper",
+                  )}
+                >
+                  {type === "problem" ? "Problem" : "Task"}
+                </button>
+              ))}
+            </div>
             <div className="grid gap-3 lg:grid-cols-[140px_1fr]">
               <Input
                 type="number"
@@ -3451,6 +4101,7 @@ function AdminView({
                         title: editDraft.title.trim(),
                         question: editDraft.question.trim(),
                         points: sanitizePositiveNumber(editDraft.points, sanitizePositiveNumber(task.points, 1)),
+                        taskType: editDraft.taskType,
                         scope: effectiveScope,
                         memberId: effectiveScope === "member" ? cleanMemberIds[0] : undefined,
                         memberIds: effectiveScope === "member" ? cleanMemberIds : [],
@@ -4568,12 +5219,63 @@ function AdminView({
                 </div>
               </div>
 
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-2xl font-bold">Submissions waiting review</h2>
+                    <p className="mt-1 text-sm text-amber-900/70">
+                      Final answers that still need approve, override, or reject.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-amber-300 bg-white px-3 py-1 text-sm font-bold text-amber-900">
+                    {pendingSubmissions.length} pending
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {pendingSubmissions.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-amber-300 bg-white p-4 text-sm text-foreground/60">
+                      No final submissions are waiting right now.
+                    </p>
+                  ) : (
+                    pendingSubmissions.map((item) => {
+                      const task = data.tasks.find((candidate) => candidate.id === item.taskId);
+                      return (
+                        <button
+                          key={`attention-${item.id}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedTaskId(item.taskId);
+                            setSection("reviews");
+                          }}
+                          className="rounded-lg border border-amber-200 bg-white p-3 text-start transition hover:border-amber-400 hover:bg-amber-50"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <strong>{item.memberName}</strong>
+                              <p className="mt-1 text-sm font-bold text-foreground/65">
+                                {task?.title ?? item.taskId}
+                              </p>
+                              <p className="mt-1 text-xs text-foreground/50">
+                                {formatDateTime(item.submittedAt)}
+                              </p>
+                            </div>
+                            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-900">
+                              Needs review
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h2 className="text-2xl font-bold">Updates need attention</h2>
                     <p className="mt-1 text-sm text-yellow-900/70">
-                      These are progress notes, GitHub requests, Drive requests, or submissions that need admin attention.
+                      These are progress notes, GitHub requests, and Drive requests that need admin attention.
                     </p>
                   </div>
                   <span className="rounded-full border border-yellow-300 bg-white px-3 py-1 text-sm font-bold text-yellow-900">
@@ -4761,6 +5463,21 @@ function AdminView({
                   <div className="mt-4 grid gap-3">
                     <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Task title" className="h-11 border border-ink/20 bg-white" />
                     <Textarea value={taskQuestion} onChange={(event) => setTaskQuestion(event.target.value)} placeholder="Question or instructions" className="min-h-24 border border-ink/20 bg-white" />
+                    <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
+                      {(["task", "problem"] as const).map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => setTaskType(type)}
+                          className={cn(
+                            "flex-1 rounded-md px-3 py-2 transition",
+                            taskType === type ? "bg-ink text-white" : "text-foreground/65 hover:bg-paper",
+                          )}
+                        >
+                          {type === "problem" ? "Problem" : "Task"}
+                        </button>
+                      ))}
+                    </div>
                     <div className="grid gap-3">
                       <label className="grid gap-1 text-xs font-bold text-foreground/65">
                         Base points
@@ -4919,6 +5636,8 @@ function AdminView({
                           <span>Approved {memberScore?.approved ?? 0}</span>
                           <span>Approval {formatPercent(memberScore?.approvalRate ?? 0)}</span>
                           <span>Points {memberScore?.points ?? 0}</span>
+                          <span>Private tasks {memberScore?.privateTasks ?? 0}</span>
+                          <span>Bonus {memberScore?.bonusPoints ?? 0}</span>
                         </div>
                       </div>
                       <Button
@@ -4955,7 +5674,6 @@ function AdminView({
                           Manual grades
                           <Input
                             type="number"
-                            min={0}
                             value={member.basePoints ?? 0}
                             onChange={(event) =>
                               onUpdateMember(member.id, { basePoints: sanitizeNumber(event.target.value) })
@@ -4963,6 +5681,57 @@ function AdminView({
                             className="max-w-xs border border-ink/20 bg-yellow-50 text-center"
                           />
                         </label>
+                        <div className="grid gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+                          <div className="font-bold">Bonus grades</div>
+                          <div className="grid gap-2 sm:grid-cols-[120px_1fr_auto]">
+                            <Input
+                              type="number"
+                              step={0.5}
+                              value={bonusPointsDrafts[member.id] ?? ""}
+                              onChange={(event) =>
+                                setBonusPointsDrafts((current) => ({
+                                  ...current,
+                                  [member.id]: event.target.value,
+                                }))
+                              }
+                              placeholder="+ points"
+                              className="border border-ink/20 bg-white text-center"
+                            />
+                            <Input
+                              value={bonusNoteDrafts[member.id] ?? ""}
+                              onChange={(event) =>
+                                setBonusNoteDrafts((current) => ({
+                                  ...current,
+                                  [member.id]: event.target.value,
+                                }))
+                              }
+                              placeholder="Bonus note"
+                              className="border border-ink/20 bg-white"
+                            />
+                            <Button
+                              type="button"
+                              onClick={() => void submitBonusGrade(member)}
+                              className={actionButtonClass(
+                                "bg-emerald-600 text-white hover:bg-emerald-700",
+                                actionFeedback[`admin:add-bonus:${member.id}`],
+                              )}
+                            >
+                              <Plus data-icon="inline-start" />
+                              Add
+                            </Button>
+                          </div>
+                          <ActionFeedbackLine feedback={actionFeedback[`admin:add-bonus:${member.id}`]} />
+                          {bonusGradesForMember(member.id).length > 0 && (
+                            <div className="grid gap-1 text-xs font-bold text-foreground/65">
+                              {bonusGradesForMember(member.id).slice(0, 4).map((bonus) => (
+                                <div key={bonus.id} className="rounded-md border border-ink/10 bg-white px-2 py-1">
+                                  <span className="text-emerald-700">{bonus.points > 0 ? "+" : ""}{bonus.points}</span>
+                                  <span> - {bonus.note}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                         <Input value={member.publicFlag ?? ""} onChange={(event) => onUpdateMember(member.id, { publicFlag: event.target.value })} placeholder="Public flag" className="border border-ink/20 bg-red-50" />
                         <Input value={member.adminNote ?? ""} onChange={(event) => onUpdateMember(member.id, { adminNote: event.target.value })} placeholder="Private admin note" className="border border-ink/20 bg-paper" />
                         <Input value={member.repoUrl ?? ""} onChange={(event) => onUpdateMember(member.id, { repoUrl: event.target.value })} placeholder="Repo URL" dir="ltr" className="border border-ink/20 bg-paper text-left" />
@@ -7263,6 +8032,10 @@ async function postProfileChangeRequest(item: MemberProfileRequestInput) {
   return sanitizeData(await postApi<StudioData>("/api/profile-requests", item));
 }
 
+async function postInteraction(item: InteractionInput) {
+  return sanitizeData(await postApi<StudioData>("/api/interactions", item));
+}
+
 async function postAdminMutation(
   adminPassword: string,
   action: string,
@@ -7459,6 +8232,33 @@ function Index() {
     setRefreshStatus("تم تحديث الداتا،");
   }
 
+  async function markInteraction(item: InteractionInput) {
+    const optimistic: MemberInteraction = {
+      id: interactionKey(item.memberId, item.targetType, item.targetId),
+      memberId: item.memberId,
+      targetType: item.targetType,
+      targetId: item.targetId,
+      taskId: item.taskId,
+      seenAt: new Date().toISOString(),
+    };
+    setData((current) =>
+      sanitizeData({
+        ...current,
+        interactions: [optimistic, ...(current.interactions ?? [])],
+      }),
+    );
+
+    try {
+      const nextData = await postInteraction(item);
+      setData(nextData);
+      setIsDirty(false);
+      return true;
+    } catch (error) {
+      setRefreshStatus(error instanceof Error ? error.message : "Seen was saved locally only.");
+      return false;
+    }
+  }
+
   function loginMember(member: Member, displayName: string) {
     setActiveAdmin(false);
     setActiveStats(false);
@@ -7550,6 +8350,32 @@ function Index() {
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Task update sent.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function addBonusGrade(memberId: string, points: number, note: string) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Saving bonus grade...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "addBonusGrade", {
+        memberId,
+        points,
+        note: note.trim(),
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Bonus grade saved.");
       return true;
     } catch (error) {
       setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
@@ -8206,6 +9032,7 @@ function Index() {
         onDismissQueuedProgress={removeQueuedProgress}
         onAddProgressUpdate={addProgressUpdate}
         onReviewAnswer={reviewAnswer}
+        onAddBonusGrade={addBonusGrade}
         onUpdateMember={updateMember}
         onUpdateSettings={updateSettings}
         onMarkRepoUpdateSeen={markRepoUpdateSeen}
@@ -8245,6 +9072,7 @@ function Index() {
         onRepoAttention={sendRepoAttention}
         onDriveAttention={sendDriveAttention}
         onProfileChangeRequest={submitProfileChangeRequest}
+        onMarkInteraction={markInteraction}
         onLogout={logout}
         onRefreshData={refreshData}
       />

@@ -18,6 +18,7 @@ type StudioTask = {
   title: string;
   question: string;
   points: number;
+  taskType?: "task" | "problem";
   scope: "all" | "member";
   memberId?: string;
   memberIds?: string[];
@@ -90,6 +91,25 @@ type MeetingAttendance = {
   score: number;
 };
 
+type InteractionTargetType = "task" | "taskUpdate" | "meeting";
+
+type MemberInteraction = {
+  id: string;
+  memberId: string;
+  targetType: InteractionTargetType;
+  targetId: string;
+  taskId?: string;
+  seenAt: string;
+};
+
+type BonusGrade = {
+  id: string;
+  memberId: string;
+  points: number;
+  note: string;
+  createdAt: string;
+};
+
 type RepoUpdate = {
   id: string;
   memberId: string;
@@ -132,6 +152,8 @@ type StudioData = {
   taskUpdates?: Record<string, TaskAnnouncement[]>;
   meetings?: Meeting[];
   meetingAttendance?: Record<string, Record<string, MeetingAttendance>>;
+  interactions?: MemberInteraction[];
+  bonusGrades?: BonusGrade[];
   repoUpdates?: RepoUpdate[];
   profileRequests?: MemberProfileRequest[];
   meta?: { updatedAt: string };
@@ -179,12 +201,21 @@ function nonNegativeNumber(value: unknown, fallback: number) {
   return Number.isFinite(numberValue) && numberValue >= 0 ? numberValue : fallback;
 }
 
+function anyNumber(value: unknown, fallback = 0) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
 function roundScore(value: number) {
   return Math.round(value * 100) / 100;
 }
 
 function uniqueText(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function interactionKey(memberId: string, targetType: InteractionTargetType, targetId: string) {
+  return `${memberId}:${targetType}:${targetId}`;
 }
 
 function taskWindowDuration(task: StudioTask) {
@@ -268,6 +299,7 @@ function withReviewEvent(
 function normalizeData(data: StudioData): StudioData {
   const tasks: StudioTask[] = (data.tasks ?? []).map((task) => ({
     ...task,
+    taskType: task.taskType === "problem" ? "problem" : "task",
     scope: task.scope === "member" ? "member" : "all",
     memberId:
       task.scope === "member"
@@ -292,6 +324,14 @@ function normalizeData(data: StudioData): StudioData {
     createdAt: meeting.createdAt || new Date().toISOString(),
   }));
   const meetingIds = new Set(meetings.map((meeting) => meeting.id));
+  const members: Member[] = (data.members ?? []).map((member) => ({
+    ...member,
+    aliases: uniqueText(member.aliases ?? []),
+    basePoints: anyNumber(member.basePoints, 0),
+    driveUrl: member.driveUrl ?? "",
+    repoUrl: member.repoUrl ?? "",
+  }));
+  const memberIds = new Set(members.map((member) => member.id));
 
   return {
     projectName: data.projectName || "Hivo Studio",
@@ -301,12 +341,7 @@ function normalizeData(data: StudioData): StudioData {
       statsPassword: data.settings?.statsPassword ?? "",
       backendUrl: data.settings?.backendUrl ?? "",
     },
-    members: (data.members ?? []).map((member) => ({
-      ...member,
-      aliases: uniqueText(member.aliases ?? []),
-      driveUrl: member.driveUrl ?? "",
-      repoUrl: member.repoUrl ?? "",
-    })),
+    members,
     tasks,
     responses: data.responses ?? {},
     taskSkips: data.taskSkips ?? {},
@@ -331,6 +366,50 @@ function normalizeData(data: StudioData): StudioData {
     meetingAttendance: Object.fromEntries(
       Object.entries(data.meetingAttendance ?? {}).filter(([meetingId]) => meetingIds.has(meetingId)),
     ),
+    interactions: Array.from(
+      new Map(
+        (data.interactions ?? [])
+          .filter((interaction) => {
+            if (!memberIds.has(interaction.memberId)) return false;
+            if (!interaction.targetId) return false;
+            if (interaction.targetType === "task") return taskIds.has(interaction.targetId);
+            if (interaction.targetType === "taskUpdate") {
+              return Boolean(interaction.taskId && taskIds.has(interaction.taskId));
+            }
+            if (interaction.targetType === "meeting") return meetingIds.has(interaction.targetId);
+            return false;
+          })
+          .map((interaction) => {
+            const targetType: InteractionTargetType =
+              interaction.targetType === "taskUpdate"
+                ? "taskUpdate"
+                : interaction.targetType === "meeting"
+                  ? "meeting"
+                  : "task";
+            const targetId = String(interaction.targetId);
+            const clean: MemberInteraction = {
+              id: interaction.id || interactionKey(interaction.memberId, targetType, targetId),
+              memberId: interaction.memberId,
+              targetType,
+              targetId,
+              ...(interaction.taskId ? { taskId: interaction.taskId } : {}),
+              seenAt: interaction.seenAt || new Date().toISOString(),
+            };
+            return [interactionKey(clean.memberId, clean.targetType, clean.targetId), clean] as const;
+          }),
+      ).values(),
+    ).sort((a, b) => new Date(b.seenAt).getTime() - new Date(a.seenAt).getTime()),
+    bonusGrades: (data.bonusGrades ?? [])
+      .filter((bonus) => memberIds.has(bonus.memberId) && String(bonus.note ?? "").trim())
+      .map((bonus) => ({
+        id: bonus.id || `bonus-${bonus.memberId}-${bonus.createdAt || Date.now()}`,
+        memberId: bonus.memberId,
+        points: anyNumber(bonus.points, 0),
+        note: String(bonus.note ?? "").trim(),
+        createdAt: bonus.createdAt || new Date().toISOString(),
+      }))
+      .filter((bonus) => bonus.points !== 0)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     repoUpdates: (data.repoUpdates ?? []).filter(
       (update) => !update.taskId || taskIds.has(update.taskId),
     ),
@@ -666,6 +745,29 @@ function mergeMeetingAttendance(latest: StudioData, incoming: StudioData) {
   return attendance;
 }
 
+function mergeInteractions(latest: StudioData, incoming: StudioData) {
+  const byKey = new Map<string, MemberInteraction>();
+  for (const interaction of incoming.interactions ?? []) {
+    byKey.set(interactionKey(interaction.memberId, interaction.targetType, interaction.targetId), interaction);
+  }
+  for (const interaction of latest.interactions ?? []) {
+    const key = interactionKey(interaction.memberId, interaction.targetType, interaction.targetId);
+    if (!byKey.has(key)) byKey.set(key, interaction);
+  }
+  return Array.from(byKey.values()).sort(
+    (a, b) => new Date(b.seenAt).getTime() - new Date(a.seenAt).getTime(),
+  );
+}
+
+function mergeBonusGrades(latest: StudioData, incoming: StudioData) {
+  const byId = new Map<string, BonusGrade>();
+  for (const bonus of incoming.bonusGrades ?? []) byId.set(bonus.id, bonus);
+  for (const bonus of latest.bonusGrades ?? []) byId.set(bonus.id, bonus);
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+}
+
 function mergeAdminReplacement(latest: StudioData, incomingPayload: StudioData) {
   const incoming = normalizeData(incomingPayload);
   return {
@@ -675,6 +777,8 @@ function mergeAdminReplacement(latest: StudioData, incomingPayload: StudioData) 
     progressUpdates: mergeProgressUpdates(latest, incoming),
     taskUpdates: mergeTaskUpdates(latest, incoming),
     meetingAttendance: mergeMeetingAttendance(latest, incoming),
+    interactions: mergeInteractions(latest, incoming),
+    bonusGrades: mergeBonusGrades(latest, incoming),
     repoUpdates: mergeRepoUpdates(latest, incoming),
     profileRequests: mergeProfileRequests(latest, incoming),
   };
@@ -790,6 +894,50 @@ export default {
         return json(env, next);
       }
 
+      if (request.method === "POST" && url.pathname === "/api/interactions") {
+        const item = (await request.json()) as Partial<MemberInteraction>;
+        const next = await commitData(env, `Seen ${item.targetType ?? "target"} by ${item.memberId ?? "member"}`, (data) => {
+          const memberId = String(item.memberId ?? "");
+          const targetId = String(item.targetId ?? "");
+          const targetType =
+            item.targetType === "taskUpdate"
+              ? "taskUpdate"
+              : item.targetType === "meeting"
+                ? "meeting"
+                : item.targetType === "task"
+                  ? "task"
+                  : "";
+          if (!memberId || !targetId || !targetType) throw new Error("Seen target is required.");
+          getMember(data, memberId);
+          const taskId = item.taskId ? String(item.taskId) : undefined;
+          if (targetType === "task") getTask(data, targetId);
+          if (targetType === "taskUpdate") {
+            if (!taskId) throw new Error("Task update seen needs task id.");
+            getTask(data, taskId);
+            const updateExists = (data.taskUpdates?.[taskId] ?? []).some((update) => update.id === targetId);
+            if (!updateExists) throw new Error("Task update not found.");
+          }
+          if (targetType === "meeting") getMeeting(data, targetId);
+          const key = interactionKey(memberId, targetType, targetId);
+          if ((data.interactions ?? []).some((interaction) => interactionKey(interaction.memberId, interaction.targetType, interaction.targetId) === key)) {
+            return data;
+          }
+          const interaction: MemberInteraction = {
+            id: key,
+            memberId,
+            targetType,
+            targetId,
+            ...(taskId ? { taskId } : {}),
+            seenAt: new Date().toISOString(),
+          };
+          return {
+            ...data,
+            interactions: [interaction, ...(data.interactions ?? [])],
+          };
+        });
+        return json(env, next);
+      }
+
       if (request.method === "POST" && url.pathname === "/api/profile-requests") {
         const item = (await request.json()) as {
           memberId: string;
@@ -851,6 +999,7 @@ export default {
               title: String(task.title),
               question: String(task.question),
               points: positiveNumber(task.points, 1),
+              taskType: task.taskType === "problem" ? "problem" : "task",
               scope,
               memberId: scope === "member" ? memberIds[0] : undefined,
               memberIds,
@@ -891,6 +1040,14 @@ export default {
                         updates.points === undefined
                           ? task.points
                           : positiveNumber(updates.points, task.points || 1),
+                      taskType:
+                        updates.taskType === "problem"
+                          ? "problem"
+                          : updates.taskType === "task"
+                            ? "task"
+                            : task.taskType === "problem"
+                              ? "problem"
+                              : "task",
                       status: updates.status === "archived" ? "archived" : updates.status === "active" ? "active" : taskStatus(task),
                     }
                   : task,
@@ -976,6 +1133,9 @@ export default {
               ...data,
               meetings: (data.meetings ?? []).filter((meeting) => meeting.id !== meetingId),
               meetingAttendance,
+              interactions: (data.interactions ?? []).filter(
+                (interaction) => !(interaction.targetType === "meeting" && interaction.targetId === meetingId),
+              ),
             };
           }
 
@@ -1026,7 +1186,34 @@ export default {
               progressUpdates,
               taskSkips,
               taskUpdates,
+              interactions: (data.interactions ?? []).filter(
+                (interaction) =>
+                  !(
+                    interaction.taskId === taskId ||
+                    (interaction.targetType === "task" && interaction.targetId === taskId)
+                  ),
+              ),
               repoUpdates: (data.repoUpdates ?? []).filter((update) => update.taskId !== taskId),
+            };
+          }
+
+          if (action === "addBonusGrade") {
+            const memberId = String(payload.memberId ?? "");
+            const member = getMember(data, memberId);
+            const points = anyNumber(payload.points, 0);
+            const note = String(payload.note ?? "").trim();
+            if (points === 0) throw new Error("Bonus points must not be zero.");
+            if (!note) throw new Error("Bonus note is required.");
+            const bonus: BonusGrade = {
+              id: `bonus-${member.id}-${Date.now()}`,
+              memberId: member.id,
+              points: roundScore(points),
+              note,
+              createdAt: new Date().toISOString(),
+            };
+            return {
+              ...data,
+              bonusGrades: [bonus, ...(data.bonusGrades ?? [])],
             };
           }
 
