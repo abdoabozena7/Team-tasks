@@ -54,9 +54,10 @@ export const Route = createFileRoute("/")({
       { name: "description", content: "Hivo Studio team tasks and idea review board." },
     ],
     links: [
-      { rel: "icon", type: "image/png", href: `${import.meta.env.BASE_URL}hivo.png?v=2` },
-      { rel: "shortcut icon", type: "image/png", href: `${import.meta.env.BASE_URL}hivo.png?v=2` },
-      { rel: "apple-touch-icon", href: `${import.meta.env.BASE_URL}hivo.png?v=2` },
+      { rel: "preload", as: "image", href: HIVO_LOGO_SRC },
+      { rel: "icon", type: "image/png", href: HIVO_LOGO_SRC },
+      { rel: "shortcut icon", type: "image/png", href: HIVO_LOGO_SRC },
+      { rel: "apple-touch-icon", href: HIVO_LOGO_SRC },
     ],
   }),
 });
@@ -371,7 +372,6 @@ const ADMIN_SESSION_KEY = "hivo-studio-admin";
 const ADMIN_AUTH_KEY = "hivo-studio-admin-auth";
 const STATS_SESSION_KEY = "hivo-studio-stats";
 const GITHUB_TOKEN_KEY = "hivo-studio-github-token";
-const REFRESHED_SESSION_KEY = "hivo-studio-refreshed-this-session";
 const NICKNAME_HINT_KEY = "hivo-studio-nickname-hint";
 const MEMBER_DRAFTS_KEY = "hivo-studio-member-drafts";
 const MEMBER_SENT_STATE_KEY = "hivo-studio-member-sent-state";
@@ -393,6 +393,7 @@ const HIVO_API_URL = (import.meta.env.VITE_HIVO_API_URL || DEFAULT_HIVO_API_URL)
 const HIVO_QUEUE_URL = `${HIVO_API_URL}/api`;
 const DOCUMENTATION_POINTS = 1;
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const HIVO_LOGO_SRC = `${import.meta.env.BASE_URL}hivo.png?v=3`;
 
 const DEFAULT_SETTINGS: StudioSettings = {
   adminPassword: DEFAULT_ADMIN_PASSWORD,
@@ -442,7 +443,7 @@ function readSeenMeetingIds(memberId: string) {
   if (typeof window === "undefined") return [];
   try {
     const parsed = JSON.parse(
-      window.sessionStorage.getItem(seenMeetingsStorageKey(memberId)) || "[]",
+      window.localStorage.getItem(seenMeetingsStorageKey(memberId)) || "[]",
     );
     return Array.isArray(parsed)
       ? parsed.filter((item): item is string => typeof item === "string")
@@ -454,7 +455,7 @@ function readSeenMeetingIds(memberId: string) {
 
 function writeSeenMeetingIds(memberId: string, ids: string[]) {
   if (typeof window === "undefined") return;
-  window.sessionStorage.setItem(seenMeetingsStorageKey(memberId), JSON.stringify(uniqueText(ids)));
+  window.localStorage.setItem(seenMeetingsStorageKey(memberId), JSON.stringify(uniqueText(ids)));
 }
 
 function seenTaskUpdatesStorageKey(memberId: string) {
@@ -465,7 +466,7 @@ function readSeenTaskUpdateIds(memberId: string) {
   if (typeof window === "undefined") return [];
   try {
     const parsed = JSON.parse(
-      window.sessionStorage.getItem(seenTaskUpdatesStorageKey(memberId)) || "[]",
+      window.localStorage.getItem(seenTaskUpdatesStorageKey(memberId)) || "[]",
     );
     return Array.isArray(parsed)
       ? parsed.filter((item): item is string => typeof item === "string")
@@ -477,10 +478,7 @@ function readSeenTaskUpdateIds(memberId: string) {
 
 function writeSeenTaskUpdateIds(memberId: string, ids: string[]) {
   if (typeof window === "undefined") return;
-  window.sessionStorage.setItem(
-    seenTaskUpdatesStorageKey(memberId),
-    JSON.stringify(uniqueText(ids)),
-  );
+  window.localStorage.setItem(seenTaskUpdatesStorageKey(memberId), JSON.stringify(uniqueText(ids)));
 }
 
 function pendingResponseStorageKey(memberId: string) {
@@ -1479,7 +1477,7 @@ function rankingBadgeClass(index: number) {
 function Logo({ size = "size-24" }: { size?: string }) {
   return (
     <img
-      src={`${import.meta.env.BASE_URL}hivo.png`}
+      src={HIVO_LOGO_SRC}
       alt="Hivo Studio logo"
       className={`mx-auto rounded-full border-[2.5px] border-ink object-cover doodle-shadow-sm ${size}`}
     />
@@ -1997,9 +1995,6 @@ function MemberView({
   const [driveDraft, setDriveDraft] = useState(activeMember.member.driveUrl ?? "");
   const [memberTab, setMemberTab] = useState<"tasks" | "log">("tasks");
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshedOnce, setRefreshedOnce] = useState(
-    window.sessionStorage.getItem(REFRESHED_SESSION_KEY) === "true",
-  );
   const [showNicknameHint, setShowNicknameHint] = useState(
     window.localStorage.getItem(NICKNAME_HINT_KEY) !== "seen",
   );
@@ -2177,8 +2172,6 @@ function MemberView({
     setRefreshing(true);
     try {
       await onRefreshData();
-      window.sessionStorage.setItem(REFRESHED_SESSION_KEY, "true");
-      setRefreshedOnce(true);
     } finally {
       setRefreshing(false);
     }
@@ -2889,11 +2882,7 @@ function MemberView({
             type="button"
             onClick={refreshMemberData}
             disabled={refreshing}
-            className={`grid size-11 place-items-center rounded-full border-[2px] border-ink doodle-shadow-sm transition ${
-              refreshedOnce
-                ? "bg-card"
-                : "bg-red-500 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.35)]"
-            }`}
+            className="grid size-11 place-items-center rounded-full border-[2px] border-ink bg-card doodle-shadow-sm transition disabled:opacity-60"
             aria-label={refreshing ? "refreshing" : "refresh"}
             title={refreshing ? "جاري التحديث" : "تحديث"}
           >
@@ -9096,7 +9085,7 @@ function StatsView({
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <img
-                  src={`${import.meta.env.BASE_URL}hivo.png`}
+                  src={HIVO_LOGO_SRC}
                   alt="Hivo Studio logo"
                   className="size-16 shrink-0 rounded-full border-[2.5px] border-ink object-cover doodle-shadow-sm"
                 />
@@ -9665,7 +9654,7 @@ function DeanStatsView({
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <img
-                  src={`${import.meta.env.BASE_URL}hivo.png`}
+                  src={HIVO_LOGO_SRC}
                   alt="Hivo Studio logo"
                   className="size-16 shrink-0 rounded-full border-[2.5px] border-ink object-cover doodle-shadow-sm"
                 />
@@ -10376,6 +10365,34 @@ function Index() {
       if (!mounted) return;
       setData(initialData);
       setGithubToken(window.localStorage.getItem(GITHUB_TOKEN_KEY) ?? "");
+      const savedAdminPassword = window.localStorage.getItem(ADMIN_AUTH_KEY) ?? "";
+      if (
+        window.localStorage.getItem(ADMIN_SESSION_KEY) === "true" &&
+        savedAdminPassword === (initialData.settings?.adminPassword ?? DEFAULT_ADMIN_PASSWORD)
+      ) {
+        setAdminPassword(savedAdminPassword);
+        setActiveAdmin(true);
+        setActiveStats(false);
+        setActiveMember(null);
+        return;
+      }
+      if (window.localStorage.getItem(STATS_SESSION_KEY) === "true") {
+        setActiveStats(true);
+        setActiveAdmin(false);
+        setActiveMember(null);
+        return;
+      }
+      const savedMemberId = window.localStorage.getItem(ACTIVE_MEMBER_KEY);
+      const savedDisplayName = window.localStorage.getItem(ACTIVE_DISPLAY_NAME_KEY);
+      const savedMember = initialData.members.find((member) => member.id === savedMemberId);
+      if (savedMember) {
+        setActiveMember({ member: savedMember, displayName: savedDisplayName || savedMember.name });
+        setActiveAdmin(false);
+        setActiveStats(false);
+      } else {
+        window.localStorage.removeItem(ACTIVE_MEMBER_KEY);
+        window.localStorage.removeItem(ACTIVE_DISPLAY_NAME_KEY);
+      }
     }
 
     loadData().catch(() => {
@@ -10486,6 +10503,11 @@ function Index() {
   }
 
   function loginMember(member: Member, displayName: string) {
+    window.localStorage.setItem(ACTIVE_MEMBER_KEY, member.id);
+    window.localStorage.setItem(ACTIVE_DISPLAY_NAME_KEY, displayName);
+    window.localStorage.removeItem(ADMIN_SESSION_KEY);
+    window.localStorage.removeItem(ADMIN_AUTH_KEY);
+    window.localStorage.removeItem(STATS_SESSION_KEY);
     setActiveAdmin(false);
     setActiveStats(false);
     setActiveMember({ member, displayName });
@@ -10498,6 +10520,11 @@ function Index() {
   }
 
   function loginAdmin(password: string) {
+    window.localStorage.setItem(ADMIN_SESSION_KEY, "true");
+    window.localStorage.setItem(ADMIN_AUTH_KEY, password);
+    window.localStorage.removeItem(ACTIVE_MEMBER_KEY);
+    window.localStorage.removeItem(ACTIVE_DISPLAY_NAME_KEY);
+    window.localStorage.removeItem(STATS_SESSION_KEY);
     setActiveMember(null);
     setActiveStats(false);
     setAdminPassword(password);
@@ -10505,6 +10532,11 @@ function Index() {
   }
 
   function loginStats() {
+    window.localStorage.setItem(STATS_SESSION_KEY, "true");
+    window.localStorage.removeItem(ACTIVE_MEMBER_KEY);
+    window.localStorage.removeItem(ACTIVE_DISPLAY_NAME_KEY);
+    window.localStorage.removeItem(ADMIN_SESSION_KEY);
+    window.localStorage.removeItem(ADMIN_AUTH_KEY);
     setActiveMember(null);
     setActiveAdmin(false);
     setActiveStats(true);
