@@ -1202,6 +1202,22 @@
   ],
   "profileRequests": [
     {
+      "id": "profile-shoiab-1783273517660",
+      "memberId": "shoiab",
+      "memberName": "shoiab",
+      "createdAt": "2026-07-05T17:45:17.660Z",
+      "status": "pending",
+      "repoUrl": "https://github.com/mahmoudshoip94/SimpleCodingAgent",
+      "driveUrl": "https://drive.google.com/drive/u/0/folders/1d9pZzxxTFkj-urBp6afiOYz8xFdN0AKg",
+      "previousAliases": [
+        "shoiab",
+        "shoaib",
+        "شعيب"
+      ],
+      "previousRepoUrl": "",
+      "previousDriveUrl": ""
+    },
+    {
       "id": "profile-abo-grir-1783177220625",
       "memberId": "abo-grir",
       "memberName": "Abo grir",
@@ -1450,6 +1466,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-05T14:51:34.196Z"
+    "updatedAt": "2026-07-05T17:45:17.660Z"
   }
 }
