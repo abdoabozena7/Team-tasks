@@ -1089,7 +1089,7 @@
       "source": "submission",
       "excerpt": "رفعته ع ال github",
       "createdAt": "2026-07-04T22:32:30.287Z",
-      "seen": false
+      "seen": true
     },
     {
       "id": "repo-progress-rodina-task-1783176442116-1783177159790",
@@ -1450,6 +1450,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-04T22:32:30.287Z"
+    "updatedAt": "2026-07-05T14:51:29.882Z"
   }
 }
