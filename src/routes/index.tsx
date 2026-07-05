@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
   type ClipboardEvent,
+  type ChangeEvent,
   type Dispatch,
   type DragEvent,
   type FormEvent,
@@ -23,6 +24,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  FileText,
   FolderOpen,
   ListChecks,
   LogOut,
@@ -35,6 +37,7 @@ import {
   Settings,
   Star,
   Trash2,
+  Upload,
   Users,
   X,
 } from "lucide-react";
@@ -173,6 +176,26 @@ type BonusGrade = {
   createdAt: string;
 };
 
+type DocumentationFileMetadata = {
+  name: string;
+  size: number;
+  type: string;
+  lastModified: number;
+};
+
+type DocumentationRequest = {
+  id: string;
+  problemId: string;
+  memberId: string;
+  memberName: string;
+  sourceSubmittedAt: string;
+  requestedAt: string;
+  submittedAt?: string;
+  status: "requested" | "submitted";
+  awardedPoints: number;
+  file?: DocumentationFileMetadata;
+};
+
 type StudioSettings = {
   adminPassword: string;
   statsPassword: string;
@@ -243,6 +266,12 @@ type MemberProfileRequestInput = {
   driveUrl?: string;
 };
 
+type DocumentationUploadInput = {
+  id: string;
+  memberId: string;
+  file: DocumentationFileMetadata;
+};
+
 type InteractionInput = {
   memberId: string;
   targetType: InteractionTargetType;
@@ -266,6 +295,7 @@ type StudioData = {
   bonusGrades?: BonusGrade[];
   repoUpdates?: RepoUpdate[];
   profileRequests?: MemberProfileRequest[];
+  documentationRequests?: DocumentationRequest[];
   meta: { updatedAt: string };
 };
 
@@ -290,6 +320,7 @@ type MemberScore = {
   taskPoints: number;
   basePoints: number;
   bonusPoints: number;
+  documentationPoints: number;
   bonusCount: number;
   meetingPoints: number;
   points: number;
@@ -355,8 +386,13 @@ const submittedResponseKeysThisSession = new Set<string>();
 const responseStatusSnapshotThisSession = new Map<string, TaskResponse["status"]>();
 const GITHUB_DATA_PATHS = ["team-data.json", "public/team-data.json"];
 const DEFAULT_HIVO_API_URL = "https://hivo-studio-api.boodyabozena.workers.dev";
-const HIVO_API_URL = (import.meta.env.VITE_HIVO_API_URL || DEFAULT_HIVO_API_URL).replace(/\/+$/, "");
+const HIVO_API_URL = (import.meta.env.VITE_HIVO_API_URL || DEFAULT_HIVO_API_URL).replace(
+  /\/+$/,
+  "",
+);
 const HIVO_QUEUE_URL = `${HIVO_API_URL}/api`;
+const DOCUMENTATION_POINTS = 1;
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 const DEFAULT_SETTINGS: StudioSettings = {
   adminPassword: DEFAULT_ADMIN_PASSWORD,
@@ -380,6 +416,7 @@ const DEFAULT_DATA: StudioData = {
   bonusGrades: [],
   repoUpdates: [],
   profileRequests: [],
+  documentationRequests: [],
   meta: { updatedAt: new Date().toISOString() },
 };
 
@@ -404,8 +441,12 @@ function seenMeetingsStorageKey(memberId: string) {
 function readSeenMeetingIds(memberId: string) {
   if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(seenMeetingsStorageKey(memberId)) || "[]");
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+    const parsed = JSON.parse(
+      window.sessionStorage.getItem(seenMeetingsStorageKey(memberId)) || "[]",
+    );
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
   } catch {
     return [];
   }
@@ -413,7 +454,7 @@ function readSeenMeetingIds(memberId: string) {
 
 function writeSeenMeetingIds(memberId: string, ids: string[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(seenMeetingsStorageKey(memberId), JSON.stringify(uniqueText(ids)));
+  window.sessionStorage.setItem(seenMeetingsStorageKey(memberId), JSON.stringify(uniqueText(ids)));
 }
 
 function seenTaskUpdatesStorageKey(memberId: string) {
@@ -423,8 +464,12 @@ function seenTaskUpdatesStorageKey(memberId: string) {
 function readSeenTaskUpdateIds(memberId: string) {
   if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(seenTaskUpdatesStorageKey(memberId)) || "[]");
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+    const parsed = JSON.parse(
+      window.sessionStorage.getItem(seenTaskUpdatesStorageKey(memberId)) || "[]",
+    );
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
   } catch {
     return [];
   }
@@ -432,7 +477,10 @@ function readSeenTaskUpdateIds(memberId: string) {
 
 function writeSeenTaskUpdateIds(memberId: string, ids: string[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(seenTaskUpdatesStorageKey(memberId), JSON.stringify(uniqueText(ids)));
+  window.sessionStorage.setItem(
+    seenTaskUpdatesStorageKey(memberId),
+    JSON.stringify(uniqueText(ids)),
+  );
 }
 
 function pendingResponseStorageKey(memberId: string) {
@@ -450,8 +498,12 @@ function responsePendingKey(memberId: string, taskId: string, submittedAt: strin
 function readPendingResponseKeys(memberId: string) {
   if (typeof window === "undefined") return [];
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(pendingResponseStorageKey(memberId)) || "[]");
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+    const parsed = JSON.parse(
+      window.sessionStorage.getItem(pendingResponseStorageKey(memberId)) || "[]",
+    );
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
   } catch {
     return [];
   }
@@ -459,7 +511,10 @@ function readPendingResponseKeys(memberId: string) {
 
 function writePendingResponseKeys(memberId: string, keys: string[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(pendingResponseStorageKey(memberId), JSON.stringify(uniqueText(keys)));
+  window.sessionStorage.setItem(
+    pendingResponseStorageKey(memberId),
+    JSON.stringify(uniqueText(keys)),
+  );
 }
 
 function isStatsLoginName(value: string) {
@@ -576,15 +631,16 @@ function sanitizeData(data: StudioData): StudioData {
       scope: task.scope === "member" ? "member" : "all",
       memberId:
         task.scope === "member"
-          ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
+          ? (task.memberId ?? uniqueText(task.memberIds ?? [])[0])
           : undefined,
       memberIds:
         task.scope === "member"
           ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
           : [],
       startAt: task.startAt ?? task.createdAt,
-      deadlineAt: taskType === "technical" ? "" : task.deadlineAt ?? "",
-      status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
+      deadlineAt: taskType === "technical" ? "" : (task.deadlineAt ?? ""),
+      status:
+        task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
     };
   });
   const taskIds = new Set(tasks.map((task) => task.id));
@@ -598,7 +654,20 @@ function sanitizeData(data: StudioData): StudioData {
     createdAt: meeting.createdAt || new Date().toISOString(),
   }));
   const meetingIds = new Set(meetings.map((meeting) => meeting.id));
-  const memberIds = new Set((data.members ?? []).map((member) => member.id));
+  const members: Member[] = (data.members ?? []).map((member) => ({
+    ...member,
+    aliases: uniqueText(member.aliases ?? []),
+    hidden: Boolean(member.hidden),
+    baseCompleted: sanitizeNumber(member.baseCompleted),
+    baseApproved: sanitizeNumber(member.baseApproved),
+    baseRejected: sanitizeNumber(member.baseRejected),
+    basePoints: sanitizeNumber(member.basePoints),
+    adminNote: member.adminNote ?? "",
+    publicFlag: member.publicFlag ?? "",
+    repoUrl: member.repoUrl ?? "",
+    driveUrl: member.driveUrl ?? "",
+  }));
+  const memberIds = new Set(members.map((member) => member.id));
   const interactionKeys = new Set<string>();
 
   return {
@@ -610,19 +679,7 @@ function sanitizeData(data: StudioData): StudioData {
       statsPassword: data.settings?.statsPassword || DEFAULT_STATS_PASSWORD,
       backendUrl: data.settings?.backendUrl || HIVO_QUEUE_URL,
     },
-    members: (data.members ?? []).map((member) => ({
-      ...member,
-      aliases: uniqueText(member.aliases ?? []),
-      hidden: Boolean(member.hidden),
-      baseCompleted: sanitizeNumber(member.baseCompleted),
-      baseApproved: sanitizeNumber(member.baseApproved),
-      baseRejected: sanitizeNumber(member.baseRejected),
-      basePoints: sanitizeNumber(member.basePoints),
-      adminNote: member.adminNote ?? "",
-      publicFlag: member.publicFlag ?? "",
-      repoUrl: member.repoUrl ?? "",
-      driveUrl: member.driveUrl ?? "",
-    })),
+    members,
     tasks,
     responses: data.responses ?? {},
     taskSkips: data.taskSkips ?? {},
@@ -645,7 +702,9 @@ function sanitizeData(data: StudioData): StudioData {
     ),
     meetings,
     meetingAttendance: Object.fromEntries(
-      Object.entries(data.meetingAttendance ?? {}).filter(([meetingId]) => meetingIds.has(meetingId)),
+      Object.entries(data.meetingAttendance ?? {}).filter(([meetingId]) =>
+        meetingIds.has(meetingId),
+      ),
     ),
     interactions: (data.interactions ?? [])
       .filter((interaction) => {
@@ -653,9 +712,18 @@ function sanitizeData(data: StudioData): StudioData {
         if (!["task", "taskUpdate", "meeting"].includes(interaction.targetType)) return false;
         if (!interaction.targetId || !interaction.seenAt) return false;
         if (interaction.targetType === "task" && !taskIds.has(interaction.targetId)) return false;
-        if (interaction.targetType === "taskUpdate" && (!interaction.taskId || !taskIds.has(interaction.taskId))) return false;
-        if (interaction.targetType === "meeting" && !meetingIds.has(interaction.targetId)) return false;
-        const key = interactionKey(interaction.memberId, interaction.targetType, interaction.targetId);
+        if (
+          interaction.targetType === "taskUpdate" &&
+          (!interaction.taskId || !taskIds.has(interaction.taskId))
+        )
+          return false;
+        if (interaction.targetType === "meeting" && !meetingIds.has(interaction.targetId))
+          return false;
+        const key = interactionKey(
+          interaction.memberId,
+          interaction.targetType,
+          interaction.targetId,
+        );
         if (interactionKeys.has(key)) return false;
         interactionKeys.add(key);
         return true;
@@ -679,6 +747,7 @@ function sanitizeData(data: StudioData): StudioData {
       }))
       .filter((bonus) => bonus.points !== 0)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    documentationRequests: deriveDocumentationRequests(data, tasks, members),
     repoUpdates: (data.repoUpdates ?? []).filter(
       (update) => !update.taskId || taskIds.has(update.taskId),
     ),
@@ -739,7 +808,7 @@ function readMemberDrafts() {
   if (typeof window === "undefined") return {};
 
   try {
-    const raw = window.localStorage.getItem(MEMBER_DRAFTS_KEY);
+    const raw = window.sessionStorage.getItem(MEMBER_DRAFTS_KEY);
     if (!raw) return {};
     return JSON.parse(raw) as Record<string, string>;
   } catch {
@@ -748,14 +817,14 @@ function readMemberDrafts() {
 }
 
 function writeMemberDrafts(drafts: Record<string, string>) {
-  window.localStorage.setItem(MEMBER_DRAFTS_KEY, JSON.stringify(drafts));
+  window.sessionStorage.setItem(MEMBER_DRAFTS_KEY, JSON.stringify(drafts));
 }
 
 function readMemberSentState() {
   if (typeof window === "undefined") return {};
 
   try {
-    const raw = window.localStorage.getItem(MEMBER_SENT_STATE_KEY);
+    const raw = window.sessionStorage.getItem(MEMBER_SENT_STATE_KEY);
     if (!raw) return {};
     return JSON.parse(raw) as Record<string, string>;
   } catch {
@@ -764,7 +833,7 @@ function readMemberSentState() {
 }
 
 function writeMemberSentState(state: Record<string, string>) {
-  window.localStorage.setItem(MEMBER_SENT_STATE_KEY, JSON.stringify(state));
+  window.sessionStorage.setItem(MEMBER_SENT_STATE_KEY, JSON.stringify(state));
 }
 
 function emptyQueue(): AdminQueue {
@@ -862,9 +931,7 @@ function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submit
   const deadlineTime = new Date(task.deadlineAt).getTime();
   const submittedTime = new Date(response.submittedAt).getTime();
   return (
-    Number.isFinite(deadlineTime) &&
-    Number.isFinite(submittedTime) &&
-    submittedTime > deadlineTime
+    Number.isFinite(deadlineTime) && Number.isFinite(submittedTime) && submittedTime > deadlineTime
   );
 }
 
@@ -891,6 +958,115 @@ function calculateAwardedPoints(
 function responseAwardedPoints(task: StudioTask, response?: TaskResponse) {
   if (!response || response.status !== "approved") return 0;
   return response.awardedPoints ?? calculateAwardedPoints(task, response, response.status);
+}
+
+function documentationAwardedPoints(request: DocumentationRequest) {
+  return request.status === "submitted"
+    ? sanitizeScore(request.awardedPoints, DOCUMENTATION_POINTS)
+    : 0;
+}
+
+function documentationRequestKey(problemId: string, memberId: string, submittedAt: string) {
+  return `${problemId}:${memberId}:${submittedAt}`;
+}
+
+function documentationRequestId(problemId: string, memberId: string, submittedAt: string) {
+  const submittedTime = new Date(submittedAt).getTime();
+  return `documentation-${problemId}-${memberId}-${Number.isFinite(submittedTime) ? submittedTime : submittedAt}`;
+}
+
+function documentationForSolution(data: StudioData, problemId: string, response: TaskResponse) {
+  return (data.documentationRequests ?? []).find(
+    (request) =>
+      request.problemId === problemId &&
+      request.memberId === response.memberId &&
+      request.sourceSubmittedAt === response.submittedAt,
+  );
+}
+
+function memberDocumentationRequests(data: StudioData, memberId: string) {
+  return (data.documentationRequests ?? [])
+    .filter((request) => request.memberId === memberId)
+    .filter((request) => {
+      const task = data.tasks.find((item) => item.id === request.problemId);
+      return Boolean(task && !isHiddenTask(task));
+    })
+    .sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
+}
+
+function isDocxFile(file: File) {
+  return file.name.toLowerCase().endsWith(".docx") || file.type === DOCX_MIME;
+}
+
+function documentationFileMetadata(file: File): DocumentationFileMetadata {
+  return {
+    name: file.name,
+    size: file.size,
+    type: file.type || DOCX_MIME,
+    lastModified: file.lastModified,
+  };
+}
+
+function deriveDocumentationRequests(
+  data: StudioData,
+  tasks: StudioTask[],
+  members: Member[],
+): DocumentationRequest[] {
+  const taskIds = new Set(tasks.map((task) => task.id));
+  const memberMap = new Map(members.map((member) => [member.id, member]));
+  const byKey = new Map<string, DocumentationRequest>();
+
+  for (const request of data.documentationRequests ?? []) {
+    if (!taskIds.has(request.problemId) || !memberMap.has(request.memberId)) continue;
+    if (!request.sourceSubmittedAt || !request.requestedAt) continue;
+    const key = documentationRequestKey(
+      request.problemId,
+      request.memberId,
+      request.sourceSubmittedAt,
+    );
+    if (byKey.has(key)) continue;
+    const status = request.status === "submitted" && request.file ? "submitted" : "requested";
+    byKey.set(key, {
+      ...request,
+      id:
+        request.id ||
+        documentationRequestId(request.problemId, request.memberId, request.sourceSubmittedAt),
+      memberName: request.memberName || memberMap.get(request.memberId)?.name || request.memberId,
+      status,
+      awardedPoints: status === "submitted" ? DOCUMENTATION_POINTS : 0,
+      file: request.file
+        ? {
+            name: request.file.name,
+            size: sanitizeNumber(request.file.size),
+            type: request.file.type || DOCX_MIME,
+            lastModified: sanitizeNumber(request.file.lastModified),
+          }
+        : undefined,
+    });
+  }
+
+  for (const task of tasks.filter(isProblemTask)) {
+    for (const response of Object.values(data.responses[task.id] ?? {})) {
+      if (response.status !== "approved") continue;
+      if (!memberMap.has(response.memberId)) continue;
+      const key = documentationRequestKey(task.id, response.memberId, response.submittedAt);
+      if (byKey.has(key)) continue;
+      byKey.set(key, {
+        id: documentationRequestId(task.id, response.memberId, response.submittedAt),
+        problemId: task.id,
+        memberId: response.memberId,
+        memberName: memberMap.get(response.memberId)?.name || response.memberName,
+        sourceSubmittedAt: response.submittedAt,
+        requestedAt: response.reviewedAt || response.submittedAt,
+        status: "requested",
+        awardedPoints: 0,
+      });
+    }
+  }
+
+  return Array.from(byKey.values()).sort(
+    (a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime(),
+  );
 }
 
 function responseIsLate(task: StudioTask, response?: TaskResponse) {
@@ -986,7 +1162,9 @@ function createStats(data: StudioData) {
       0,
     );
     const speedSamples = responses
-      .map((item) => hoursBetween(item.task.startAt || item.task.createdAt, item.response.submittedAt))
+      .map((item) =>
+        hoursBetween(item.task.startAt || item.task.createdAt, item.response.submittedAt),
+      )
       .filter((value): value is number => value !== null);
     const avgHours =
       speedSamples.length > 0
@@ -994,7 +1172,9 @@ function createStats(data: StudioData) {
         : null;
     const fastSpeedSamples = responses
       .filter((item) => !isTechnicalTask(item.task))
-      .map((item) => hoursBetween(item.task.startAt || item.task.createdAt, item.response.submittedAt))
+      .map((item) =>
+        hoursBetween(item.task.startAt || item.task.createdAt, item.response.submittedAt),
+      )
       .filter((value): value is number => value !== null);
     const avgFastHours =
       fastSpeedSamples.length > 0
@@ -1005,14 +1185,23 @@ function createStats(data: StudioData) {
       .map((item) => technicalTimingScore(item.task, item.response));
     const technicalTimingScoreValue =
       technicalTimingSamples.length > 0
-        ? technicalTimingSamples.reduce((sum, value) => sum + value, 0) / technicalTimingSamples.length
+        ? technicalTimingSamples.reduce((sum, value) => sum + value, 0) /
+          technicalTimingSamples.length
         : null;
     const baseCompleted = 0;
     const baseApproved = 0;
     const baseRejected = 0;
     const basePoints = sanitizeNumber(member.basePoints);
-    const memberBonusGrades = (data.bonusGrades ?? []).filter((bonus) => bonus.memberId === member.id);
-    const bonusPoints = memberBonusGrades.reduce((sum, bonus) => sum + sanitizeNumber(bonus.points), 0);
+    const memberBonusGrades = (data.bonusGrades ?? []).filter(
+      (bonus) => bonus.memberId === member.id,
+    );
+    const bonusPoints = memberBonusGrades.reduce(
+      (sum, bonus) => sum + sanitizeNumber(bonus.points),
+      0,
+    );
+    const documentationPoints = (data.documentationRequests ?? [])
+      .filter((request) => request.memberId === member.id)
+      .reduce((sum, request) => sum + documentationAwardedPoints(request), 0);
     const privateTasks = scoreTasks.filter(
       (task) => privateTaskMemberId(task) === member.id && !isTaskSkipped(data, task.id, member.id),
     ).length;
@@ -1032,7 +1221,9 @@ function createStats(data: StudioData) {
     const meetingAttendances = accountableMeetings
       .map((meeting) => data.meetingAttendance?.[meeting.id]?.[member.id])
       .filter((attendance): attendance is MeetingAttendance => Boolean(attendance));
-    const meetingLateSamples = meetingAttendances.map((attendance) => sanitizeNumber(attendance.lateMinutes));
+    const meetingLateSamples = meetingAttendances.map((attendance) =>
+      sanitizeNumber(attendance.lateMinutes),
+    );
     const avgMeetingLateMinutes =
       meetingLateSamples.length > 0
         ? meetingLateSamples.reduce((sum, value) => sum + value, 0) / meetingLateSamples.length
@@ -1096,9 +1287,13 @@ function createStats(data: StudioData) {
       taskPoints,
       basePoints,
       bonusPoints,
+      documentationPoints,
       bonusCount: memberBonusGrades.length,
       meetingPoints,
-      points: Math.round((basePoints + bonusPoints + taskPoints + meetingPoints) * 100) / 100,
+      points:
+        Math.round(
+          (basePoints + bonusPoints + documentationPoints + taskPoints + meetingPoints) * 100,
+        ) / 100,
       privateTasks,
       avgHours,
       avgFastHours,
@@ -1137,7 +1332,11 @@ function createStats(data: StudioData) {
     const submissionScore = maxSubmitted > 0 ? (item.submitted / maxSubmitted) * 100 : 0;
     const completionScore = item.responseRate;
     const qualityScore = clampScore(item.approvalRate - item.rejectionRate * 0.7);
-    const fastTimingScore = normalizedInverseScore(item.avgFastHours, minAvgFastHours, maxAvgFastHours);
+    const fastTimingScore = normalizedInverseScore(
+      item.avgFastHours,
+      minAvgFastHours,
+      maxAvgFastHours,
+    );
     const timingParts = [
       item.technicalTimingScore,
       item.avgFastHours === null ? null : fastTimingScore,
@@ -1152,9 +1351,13 @@ function createStats(data: StudioData) {
     const interactionScore =
       item.expectedSeenTargets > 0 ? seenRate * 0.65 + seenSpeedScore * 0.35 : 100;
     const punctualityScore =
-      item.avgMeetingLateMinutes === null ? 100 : clampScore(100 - (item.avgMeetingLateMinutes / 60) * 100);
+      item.avgMeetingLateMinutes === null
+        ? 100
+        : clampScore(100 - (item.avgMeetingLateMinutes / 60) * 100);
     const meetingScore =
-      item.accountableMeetings > 0 ? item.meetingAttendanceRate * 0.75 + punctualityScore * 0.25 : 100;
+      item.accountableMeetings > 0
+        ? item.meetingAttendanceRate * 0.75 + punctualityScore * 0.25
+        : 100;
     const effortScore = clampScore(
       submissionScore * 0.35 +
         completionScore * 0.2 +
@@ -1205,7 +1408,9 @@ function createStats(data: StudioData) {
       data.members
         .filter(
           (member) =>
-            !member.hidden && taskIsForMember(task, member.id) && !isTaskSkipped(data, task.id, member.id),
+            !member.hidden &&
+            taskIsForMember(task, member.id) &&
+            !isTaskSkipped(data, task.id, member.id),
         )
         .map((member) => member.id),
     );
@@ -1256,7 +1461,9 @@ function createStats(data: StudioData) {
     activeTasks,
     archivedTasks: data.tasks.filter((task) => taskStatus(task) === "archived"),
     activeMeetings,
-    archivedMeetings: (data.meetings ?? []).filter((meeting) => meetingStatus(meeting) === "archived"),
+    archivedMeetings: (data.meetings ?? []).filter(
+      (meeting) => meetingStatus(meeting) === "archived",
+    ),
     leader,
     worst,
     approvedTotal,
@@ -1311,20 +1518,11 @@ function LoginScreen({
     if (!displayName) return;
 
     if (displayName === settings.adminPassword) {
-      window.localStorage.setItem(ADMIN_SESSION_KEY, "true");
-      window.localStorage.setItem(ADMIN_AUTH_KEY, displayName);
-      window.localStorage.removeItem(STATS_SESSION_KEY);
-      window.localStorage.removeItem(ACTIVE_MEMBER_KEY);
-      window.localStorage.removeItem(ACTIVE_DISPLAY_NAME_KEY);
       onAdminLogin(displayName);
       return;
     }
 
     if (displayName === settings.statsPassword || isStatsLoginName(displayName)) {
-      window.localStorage.setItem(STATS_SESSION_KEY, "true");
-      window.localStorage.removeItem(ADMIN_SESSION_KEY);
-      window.localStorage.removeItem(ACTIVE_MEMBER_KEY);
-      window.localStorage.removeItem(ACTIVE_DISPLAY_NAME_KEY);
       onStatsLogin();
       return;
     }
@@ -1335,10 +1533,6 @@ function LoginScreen({
       return;
     }
 
-    window.localStorage.setItem(ACTIVE_MEMBER_KEY, member.id);
-    window.localStorage.setItem(ACTIVE_DISPLAY_NAME_KEY, displayName);
-    window.localStorage.removeItem(ADMIN_SESSION_KEY);
-    window.localStorage.removeItem(STATS_SESSION_KEY);
     onMemberLogin(member, displayName);
   }
 
@@ -1399,9 +1593,13 @@ function MemberDetails({ item }: { item: MemberScore }) {
       <span>سرعة التسليم السريع: {formatHours(item.avgFastHours)}</span>
       <span>تسكات خاصة: {item.privateTasks}</span>
       <span>درجات يدوية: {item.basePoints}</span>
-      <span>بونص: {item.bonusPoints} ({item.bonusCount})</span>
+      <span>
+        بونص: {item.bonusPoints} ({item.bonusCount})
+      </span>
       <span>Effort: {formatPercent(item.effortScore)}</span>
-      <span>Seen: {item.seenTargets}/{item.expectedSeenTargets}</span>
+      <span>
+        Seen: {item.seenTargets}/{item.expectedSeenTargets}
+      </span>
       <span>Interaction: {formatPercent(item.interactionScore)}</span>
     </div>
   );
@@ -1422,9 +1620,13 @@ function StatsMemberDetails({ item }: { item: MemberScore }) {
       <span>Fast-task speed: {formatHours(item.avgFastHours)}</span>
       <span>Private tasks: {item.privateTasks}</span>
       <span>Manual grades: {item.basePoints}</span>
-      <span>Bonus: {item.bonusPoints} ({item.bonusCount})</span>
+      <span>
+        Bonus: {item.bonusPoints} ({item.bonusCount})
+      </span>
       <span>Effort: {formatPercent(item.effortScore)}</span>
-      <span>Seen: {item.seenTargets}/{item.expectedSeenTargets}</span>
+      <span>
+        Seen: {item.seenTargets}/{item.expectedSeenTargets}
+      </span>
       <span>Interaction: {formatPercent(item.interactionScore)}</span>
     </div>
   );
@@ -1447,7 +1649,10 @@ function leadershipReason(leader: MemberScore, runner?: MemberScore) {
     return `قبوله أعلى (${formatPercent(leader.approvalRate)})`;
   }
   if (leader.timingScore > runner.timingScore) {
-    if (leader.avgFastHours !== null && (runner.avgFastHours === null || leader.avgFastHours < runner.avgFastHours)) {
+    if (
+      leader.avgFastHours !== null &&
+      (runner.avgFastHours === null || leader.avgFastHours < runner.avgFastHours)
+    ) {
       return `بيسلم أسرع في المشاكل والتاسكات السريعة (${formatHours(leader.avgFastHours)})`;
     }
     return `تقييم التوقيت عنده أقوى (${formatPercent(leader.timingScore)})`;
@@ -1564,7 +1769,12 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
         }}
       >
         <div className="relative z-10 grid gap-3">
-          <div className={cn("leaderboard-podium-head", options.featured ? "leaderboard-podium-head-featured" : "")}>
+          <div
+            className={cn(
+              "leaderboard-podium-head",
+              options.featured ? "leaderboard-podium-head-featured" : "",
+            )}
+          >
             {options.featured && (
               <span className="leaderboard-crown-mark" aria-hidden="true">
                 <Crown className="size-5" />
@@ -1675,18 +1885,22 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
           </div>
 
           <div className="flex items-center justify-between gap-3" dir="rtl">
-            <span className="text-sm font-bold text-foreground/70">
-              {item.points} نقطة
-            </span>
-            <span className="leaderboard-acceptance-rate">
-              {formatPercent(item.approvalRate)}
-            </span>
+            <span className="text-sm font-bold text-foreground/70">{item.points} نقطة</span>
+            <span className="leaderboard-acceptance-rate">{formatPercent(item.approvalRate)}</span>
           </div>
 
           <span className="grid grid-cols-4 gap-2" dir="ltr">
             <LeaderboardStatPill label="درجات" value={item.points} />
-            <LeaderboardStatPill label="مقبول" value={item.approved} className="bg-emerald-100/70" />
-            <LeaderboardStatPill label="Assigned" value={item.assignedTasks} className="bg-sky-100/70" />
+            <LeaderboardStatPill
+              label="مقبول"
+              value={item.approved}
+              className="bg-emerald-100/70"
+            />
+            <LeaderboardStatPill
+              label="Assigned"
+              value={item.assignedTasks}
+              className="bg-sky-100/70"
+            />
             <LeaderboardStatPill
               label=""
               value={formatPercent(item.approvalRate)}
@@ -1694,7 +1908,10 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
             />
           </span>
 
-          <span className="block h-2 overflow-hidden rounded-full border border-ink/80 bg-white/75" dir="ltr">
+          <span
+            className="block h-2 overflow-hidden rounded-full border border-ink/80 bg-white/75"
+            dir="ltr"
+          >
             <span
               className="leaderboard-progress block h-full rounded-full bg-emerald-400"
               style={{ width: `${progressWidth}%` }}
@@ -1711,9 +1928,17 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
       {scores.length > 0 && (
         <div className="leaderboard-podium-shell">
           <div className="leaderboard-podium-grid">
-            {podiumSideMembers[0] ? renderPodiumCard(podiumSideMembers[0], 2, { side: "left" }) : <div />}
+            {podiumSideMembers[0] ? (
+              renderPodiumCard(podiumSideMembers[0], 2, { side: "left" })
+            ) : (
+              <div />
+            )}
             {leader ? renderPodiumCard(leader, 1, { featured: true }) : <div />}
-            {podiumSideMembers[1] ? renderPodiumCard(podiumSideMembers[1], 3, { side: "right" }) : <div />}
+            {podiumSideMembers[1] ? (
+              renderPodiumCard(podiumSideMembers[1], 3, { side: "right" })
+            ) : (
+              <div />
+            )}
           </div>
         </div>
       )}
@@ -1738,6 +1963,7 @@ function MemberView({
   isSubmitting,
   onSubmitFinal,
   onSubmitProgress,
+  onSubmitDocumentation,
   onRepoAttention,
   onDriveAttention,
   onProfileChangeRequest,
@@ -1756,6 +1982,7 @@ function MemberView({
   isSubmitting: boolean;
   onSubmitFinal: (task: StudioTask) => boolean | Promise<boolean>;
   onSubmitProgress: (task: StudioTask) => boolean | Promise<boolean>;
+  onSubmitDocumentation: (request: DocumentationRequest, file: File) => boolean | Promise<boolean>;
   onRepoAttention: (task: StudioTask) => boolean | Promise<boolean>;
   onDriveAttention: (task: StudioTask) => boolean | Promise<boolean>;
   onProfileChangeRequest: (item: MemberProfileRequestInput) => boolean | Promise<boolean>;
@@ -1777,6 +2004,7 @@ function MemberView({
     window.localStorage.getItem(NICKNAME_HINT_KEY) !== "seen",
   );
   const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
+  const [documentationErrors, setDocumentationErrors] = useState<Record<string, string>>({});
   const [seenMeetingIds, setSeenMeetingIds] = useState(() =>
     readSeenMeetingIds(activeMember.member.id),
   );
@@ -1796,6 +2024,7 @@ function MemberView({
     if (isTaskSkipped(data, task.id, activeMember.member.id)) return false;
     return true;
   });
+  const documentationTasks = memberDocumentationRequests(data, activeMember.member.id);
   function memberHasTaskHistory(task: StudioTask) {
     return Boolean(getResponse(data, task.id, activeMember.member.id));
   }
@@ -1826,13 +2055,16 @@ function MemberView({
       .map((task) => ({
         task,
         updates: (data.taskUpdates?.[task.id] ?? []).filter(
-          (update) => !seenIds.has(update.id) && !memberInteractionKeys.has(`taskUpdate:${update.id}`),
+          (update) =>
+            !seenIds.has(update.id) && !memberInteractionKeys.has(`taskUpdate:${update.id}`),
         ),
       }))
       .filter((item) => item.updates.length > 0);
   }, [data.taskUpdates, memberInteractionKeys, memberTasks, seenTaskUpdateIds]);
-  const expandedTask = expandedTaskId ? memberTasks.find((task) => task.id === expandedTaskId) : undefined;
-  const expandedTaskUpdates = expandedTask ? data.taskUpdates?.[expandedTask.id] ?? [] : [];
+  const expandedTask = expandedTaskId
+    ? memberTasks.find((task) => task.id === expandedTaskId)
+    : undefined;
+  const expandedTaskUpdates = expandedTask ? (data.taskUpdates?.[expandedTask.id] ?? []) : [];
   const problemSolutionsTask = problemSolutionsTaskId
     ? memberTasks.find((task) => task.id === problemSolutionsTaskId)
     : undefined;
@@ -1852,9 +2084,11 @@ function MemberView({
   const profileFeedback = actionFeedback[profileActionKey];
   const loginAliases = useMemo(
     () =>
-      [...new Set([activeMember.member.name, ...activeMember.member.aliases].map((alias) => alias.trim()))].filter(
-        Boolean,
-      ),
+      [
+        ...new Set(
+          [activeMember.member.name, ...activeMember.member.aliases].map((alias) => alias.trim()),
+        ),
+      ].filter(Boolean),
     [activeMember.member.aliases, activeMember.member.name],
   );
   function hasSeenTarget(targetType: InteractionTargetType, targetId: string) {
@@ -1866,7 +2100,12 @@ function MemberView({
     setNicknameDraft("");
     setRepoDraft(activeMember.member.repoUrl ?? "");
     setDriveDraft(activeMember.member.driveUrl ?? "");
-  }, [activeMember.member.driveUrl, activeMember.member.id, activeMember.member.repoUrl, settingsOpen]);
+  }, [
+    activeMember.member.driveUrl,
+    activeMember.member.id,
+    activeMember.member.repoUrl,
+    settingsOpen,
+  ]);
 
   useEffect(() => {
     setSeenMeetingIds(readSeenMeetingIds(activeMember.member.id));
@@ -1902,7 +2141,11 @@ function MemberView({
         const sawPendingBefore =
           previousStatus === "submitted" || !submittedResponseKeysThisSession.has(pendingKey);
         if (!sawPendingBefore) continue;
-        const celebrationKey = responseCelebrationKey(activeMember.member.id, task.id, response.submittedAt);
+        const celebrationKey = responseCelebrationKey(
+          activeMember.member.id,
+          task.id,
+          response.submittedAt,
+        );
         if (!acceptedTask && window.localStorage.getItem(celebrationKey) !== "seen") {
           acceptedTask = task;
           acceptedCelebrationKey = celebrationKey;
@@ -1919,7 +2162,7 @@ function MemberView({
     setCelebrationTaskId(acceptedTask.id);
     const timer = window.setTimeout(() => setCelebrationTaskId(null), 3200);
     return () => window.clearTimeout(timer);
-  }, [activeMember.member.id, data.tasks, data.responses]);
+  }, [activeMember.member.id, data, data.tasks, data.responses]);
 
   useEffect(() => {
     if (!expandedTaskId && !problemSolutionsTaskId) return;
@@ -2123,6 +2366,142 @@ function MemberView({
     return ok;
   }
 
+  function documentationActionKey(request: DocumentationRequest) {
+    return `documentation:${request.id}`;
+  }
+
+  function handleDocumentationFile(request: DocumentationRequest, file?: File) {
+    const key = documentationActionKey(request);
+    if (!file) {
+      setDocumentationErrors((current) => ({
+        ...current,
+        [request.id]: "Choose a Word .docx file first.",
+      }));
+      return;
+    }
+    if (!isDocxFile(file)) {
+      setDocumentationErrors((current) => ({
+        ...current,
+        [request.id]: "Only Word .docx files are accepted for now.",
+      }));
+      return;
+    }
+    setDocumentationErrors((current) => {
+      const next = { ...current };
+      delete next[request.id];
+      return next;
+    });
+    void runMemberAction(
+      key,
+      () => onSubmitDocumentation(request, file),
+      "Documentation uploaded. 1 point awarded.",
+      "Documentation upload failed. Try again.",
+    );
+  }
+
+  function handleDocumentationInput(
+    request: DocumentationRequest,
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
+    handleDocumentationFile(request, event.target.files?.[0]);
+    event.target.value = "";
+  }
+
+  function handleDocumentationDrop(
+    request: DocumentationRequest,
+    event: DragEvent<HTMLLabelElement>,
+  ) {
+    event.preventDefault();
+    handleDocumentationFile(request, event.dataTransfer.files?.[0]);
+  }
+
+  function renderDocumentationTasks() {
+    if (documentationTasks.length === 0) return null;
+
+    return (
+      <section className="mb-7 grid gap-4">
+        {documentationTasks.map((request) => {
+          const problem = data.tasks.find((task) => task.id === request.problemId);
+          const source = data.responses[request.problemId]?.[request.memberId];
+          const key = documentationActionKey(request);
+          const feedback = actionFeedback[key];
+          const error = documentationErrors[request.id];
+          const submitted = request.status === "submitted" && request.file;
+
+          return (
+            <article
+              key={request.id}
+              className={cn(
+                "border-[2.5px] border-ink p-4 doodle-shadow",
+                submitted ? "bg-emerald-50" : "bg-sky-50",
+              )}
+              style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
+            >
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wide text-sky-700">
+                    Documentation request
+                  </p>
+                  <h2 className="mt-1 break-words text-xl font-bold">
+                    {problem?.title ?? "Problem documentation"}
+                  </h2>
+                  <p className="mt-1 text-sm font-bold text-foreground/60">
+                    Upload one Word .docx file for your accepted solution. This awards 1 point
+                    immediately.
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-xs font-bold",
+                    submitted
+                      ? "border-emerald-300 bg-emerald-100 text-emerald-900"
+                      : "border-sky-300 bg-white text-sky-900",
+                  )}
+                >
+                  {submitted ? "submitted +1" : "waiting for .docx"}
+                </span>
+              </div>
+
+              {source?.answer && (
+                <div className="mb-3 rounded-lg border border-ink/10 bg-white/75 p-3 text-sm">
+                  <div className="mb-1 text-xs font-bold text-foreground/45">Accepted solution</div>
+                  <StructuredTextBlock text={source.answer} compact forceCollapse memberFacing />
+                </div>
+              )}
+
+              {submitted ? (
+                <div className="rounded-xl border-[2px] border-emerald-200 bg-white p-3 text-sm font-bold text-emerald-900">
+                  <FileText data-icon="inline-start" />
+                  {request.file?.name} - uploaded {formatDateTime(request.submittedAt)}
+                </div>
+              ) : (
+                <>
+                  <label
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => handleDocumentationDrop(request, event)}
+                    className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-[2px] border-dashed border-sky-400 bg-white p-4 text-center text-sm font-bold text-sky-950 transition hover:border-sky-600 hover:bg-sky-50"
+                  >
+                    <Upload className="size-6" />
+                    <span>Drop a Word .docx file here, or choose one</span>
+                    <input
+                      type="file"
+                      accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      className="sr-only"
+                      disabled={isSubmitting}
+                      onChange={(event) => handleDocumentationInput(request, event)}
+                    />
+                  </label>
+                  {error && <p className="mt-2 text-sm font-bold text-red-700">{error}</p>}
+                </>
+              )}
+              <ActionFeedbackLine feedback={feedback} />
+            </article>
+          );
+        })}
+      </section>
+    );
+  }
+
   function renderMemberTaskLog() {
     const logResponses = memberLogTasks
       .map((task) => getResponse(data, task.id, activeMember.member.id))
@@ -2130,7 +2509,9 @@ function MemberView({
     const logAssigned = memberLogTasks.length;
     const logSubmitted = logResponses.length;
     const logApproved = logResponses.filter((response) => response.status === "approved").length;
-    const logReviewed = logResponses.filter((response) => response.status === "approved" || response.status === "rejected").length;
+    const logReviewed = logResponses.filter(
+      (response) => response.status === "approved" || response.status === "rejected",
+    ).length;
     const logApprovalRate = logReviewed > 0 ? (logApproved / logReviewed) * 100 : 0;
 
     return (
@@ -2174,8 +2555,10 @@ function MemberView({
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <span className={`border-[2px] px-3 py-1 text-sm font-bold ${statusTone(response?.status)}`}>
-                      {skipped ? "skipped" : response?.status ?? "missing"}
+                    <span
+                      className={`border-[2px] px-3 py-1 text-sm font-bold ${statusTone(response?.status)}`}
+                    >
+                      {skipped ? "skipped" : (response?.status ?? "missing")}
                     </span>
                     {late && (
                       <span className="border-[2px] border-yellow-700 bg-yellow-100 px-3 py-1 text-sm font-bold text-yellow-900">
@@ -2185,11 +2568,17 @@ function MemberView({
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2 text-sm font-bold text-foreground/65">
-                  <span>Points: {awarded}/{sanitizePositiveNumber(task.points, 1)}</span>
+                  <span>
+                    Points: {awarded}/{sanitizePositiveNumber(task.points, 1)}
+                  </span>
                   <span>Rejected: {rejects}</span>
                   {skipped && <span>Skipped: no score impact</span>}
-                  {response?.submittedAt && <span>Submitted: {formatDateTime(response.submittedAt)}</span>}
-                  {response?.reviewedAt && <span>Reviewed: {formatDateTime(response.reviewedAt)}</span>}
+                  {response?.submittedAt && (
+                    <span>Submitted: {formatDateTime(response.submittedAt)}</span>
+                  )}
+                  {response?.reviewedAt && (
+                    <span>Reviewed: {formatDateTime(response.reviewedAt)}</span>
+                  )}
                 </div>
                 {note && (
                   <p className="mt-3 border-[2px] border-ink bg-paper p-3 text-sm leading-6">
@@ -2206,9 +2595,14 @@ function MemberView({
                 {progress.length > 0 && (
                   <div className="mt-3 grid gap-2">
                     {progress.map((update) => (
-                      <div key={update.id} className="border-[2px] border-ink bg-yellow-50 p-3 text-sm">
+                      <div
+                        key={update.id}
+                        className="border-[2px] border-ink bg-yellow-50 p-3 text-sm"
+                      >
                         <StructuredTextBlock text={update.note} compact />
-                        <p className="mt-1 text-xs text-foreground/55">{formatDateTime(update.createdAt)}</p>
+                        <p className="mt-1 text-xs text-foreground/55">
+                          {formatDateTime(update.createdAt)}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -2259,7 +2653,10 @@ function MemberView({
                   Task details
                 </p>
                 <h2
-                  className={cn("mt-1 break-words text-2xl font-bold", textAlignClass(expandedTask.title))}
+                  className={cn(
+                    "mt-1 break-words text-2xl font-bold",
+                    textAlignClass(expandedTask.title),
+                  )}
                   dir={textDirection(expandedTask.title)}
                 >
                   {expandedTask.title}
@@ -2330,7 +2727,9 @@ function MemberView({
                 <Copy data-icon="inline-start" />
                 Copy task text
               </Button>
-              {copyFeedback && <span className="text-sm font-bold text-emerald-700">{copyFeedback}</span>}
+              {copyFeedback && (
+                <span className="text-sm font-bold text-emerald-700">{copyFeedback}</span>
+              )}
             </div>
           </section>
         </div>
@@ -2349,7 +2748,10 @@ function MemberView({
                   Problem submissions
                 </p>
                 <h2
-                  className={cn("mt-1 break-words text-2xl font-bold", textAlignClass(problemSolutionsTask.title))}
+                  className={cn(
+                    "mt-1 break-words text-2xl font-bold",
+                    textAlignClass(problemSolutionsTask.title),
+                  )}
                   dir={textDirection(problemSolutionsTask.title)}
                 >
                   {problemSolutionsTask.title}
@@ -2391,7 +2793,9 @@ function MemberView({
                   <Copy data-icon="inline-start" />
                   Copy all
                 </Button>
-                {copyFeedback && <span className="text-xs font-bold text-emerald-700">{copyFeedback}</span>}
+                {copyFeedback && (
+                  <span className="text-xs font-bold text-emerald-700">{copyFeedback}</span>
+                )}
               </div>
             )}
 
@@ -2441,7 +2845,10 @@ function MemberView({
                       <p className="mb-2 text-xs font-bold text-foreground/50">
                         {formatDateTime(response.submittedAt)}
                       </p>
-                      <div className={cn("text-sm", textAlignClass(response.answer))} dir={textDirection(response.answer)}>
+                      <div
+                        className={cn("text-sm", textAlignClass(response.answer))}
+                        dir={textDirection(response.answer)}
+                      >
                         <StructuredTextBlock text={response.answer} compact memberFacing />
                       </div>
                       {adminPreview && (
@@ -2449,7 +2856,9 @@ function MemberView({
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => void copyMemberPreviewText(response.answer, "Solution copied.")}
+                          onClick={() =>
+                            void copyMemberPreviewText(response.answer, "Solution copied.")
+                          }
                           className="mt-2 border border-ink/20 bg-white"
                         >
                           <Copy data-icon="inline-start" />
@@ -2481,7 +2890,9 @@ function MemberView({
             onClick={refreshMemberData}
             disabled={refreshing}
             className={`grid size-11 place-items-center rounded-full border-[2px] border-ink doodle-shadow-sm transition ${
-              refreshedOnce ? "bg-card" : "bg-red-500 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.35)]"
+              refreshedOnce
+                ? "bg-card"
+                : "bg-red-500 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.35)]"
             }`}
             aria-label={refreshing ? "refreshing" : "refresh"}
             title={refreshing ? "جاري التحديث" : "تحديث"}
@@ -2509,8 +2920,11 @@ function MemberView({
           </p>
           <div className="mt-4 font-bold">
             <span className="highlight-blue">
-              درجاتك: {activeMemberScore?.points ?? 0} | التاسكات عليك: {memberTasks.length} | تاسكات محسوبة:{" "}
-              {activeMemberScore?.completed ?? 0}
+              درجاتك: {activeMemberScore?.points ?? 0} | التاسكات عليك: {memberTasks.length} |
+              تاسكات محسوبة: {activeMemberScore?.completed ?? 0}
+              {documentationTasks.length > 0
+                ? ` | documentation: ${documentationTasks.length}`
+                : ""}
             </span>
           </div>
           {refreshStatus && <p className="mt-3 text-sm text-foreground/65">{refreshStatus}</p>}
@@ -2522,12 +2936,8 @@ function MemberView({
             style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
           >
             <div className="grid gap-2">
-              {!activeMember.member.repoUrl && (
-                <p>حط لينك ال repo من الاعدادات</p>
-              )}
-              {!activeMember.member.driveUrl && (
-                <p>حط لينك ال drive من الاعدادات</p>
-              )}
+              {!activeMember.member.repoUrl && <p>حط لينك ال repo من الاعدادات</p>}
+              {!activeMember.member.driveUrl && <p>حط لينك ال drive من الاعدادات</p>}
             </div>
           </section>
         )}
@@ -2587,7 +2997,10 @@ function MemberView({
                       تحديث جديد على التاسك
                     </p>
                     <h2
-                      className={cn("mt-1 break-words text-xl font-bold", textAlignClass(task.title))}
+                      className={cn(
+                        "mt-1 break-words text-xl font-bold",
+                        textAlignClass(task.title),
+                      )}
                       dir={textDirection(task.title)}
                     >
                       {task.title}
@@ -2595,7 +3008,7 @@ function MemberView({
                     <p className="mt-2 text-sm font-bold text-yellow-900/75">
                       فيه تحديث جديد. افتح التاسك وشوف التفاصيل.
                     </p>
-                    {false && updates.length > 1 && (
+                    {updates.length > 1 && (
                       <p className="mt-1 text-xs font-bold text-yellow-900/60">
                         +{updates.length - 1} تحديث كمان
                       </p>
@@ -2653,372 +3066,418 @@ function MemberView({
           </button>
         </div>
 
-        {memberTab === "log" ? renderMemberTaskLog() : (
-        <section className="mb-7 flex flex-col gap-5">
-          {memberTasks.length === 0 ? (
-            <div
-              className="border-[2.5px] border-ink bg-card p-8 text-center doodle-shadow"
-              style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
-            >
-              <p className="text-2xl font-bold">
-                <span className="highlight-yellow">لسه مفيش تاسكات ليك</span>
-              </p>
-              <p className="mt-2 text-foreground/70">
-                أول ما الأدمن ينزل تاسك عام أو تاسك باسمك هيظهر هنا.
-              </p>
-            </div>
-          ) : (
-            memberTasks.map((task) => {
-              const existing = getResponse(data, task.id, activeMember.member.id);
-              const key = responseKey(task.id, activeMember.member.id);
-              const taskProgressKey = progressKey(task.id, activeMember.member.id);
-              const finalSent = sentState[key];
-              const finalFeedback = actionFeedback[key];
-              const progressFeedback = actionFeedback[taskProgressKey];
-              const existingDraftAnswer = existing?.status === "rejected" ? "" : existing?.answer ?? "";
-              const sharedDraft = draftAnswers[key] ?? draftAnswers[taskProgressKey] ?? existingDraftAnswer;
-              const reviewNote = latestReviewNote(existing);
-              const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
-                (update) => update.memberId === activeMember.member.id,
-              );
-              const canAnswer = !existing || existing.status === "rejected";
-              const taskTitleDir = textDirection(task.title);
-              const taskQuestionDir = textDirection(task.question);
-              const taskQuestionLooksLight =
-                task.question.trim().length <= 90 && task.question.trim().split(/\s+/).length <= 12;
-              const taskQuestionIsLong =
-                task.question.trim().length > 180 || task.question.trim().split(/\n/).length > 3;
-              const taskQuestionHasSections = splitMemberTextSections(task.question).length > 1;
-              const taskUpdates = data.taskUpdates?.[task.id] ?? [];
-              const unseenTaskUpdates = taskUpdates.filter(
-                (update) =>
-                  !seenTaskUpdateIds.includes(update.id) &&
-                  !hasSeenTarget("taskUpdate", update.id),
-              );
-              const taskPoints = sanitizePositiveNumber(task.points, 1);
-              const taskAudienceLabel = task.scope === "all" ? "تاسك عام لكل التيم" : "تاسك مخصص ليك";
-              const taskPointsLabel = formatTaskPointsLabel(taskPoints);
-              const problemTask = isProblemTask(task);
-              const priorProblemSolutions = problemTask ? visibleProblemSolutionEntries(task) : [];
-              const taskSeen = hasSeenTarget("task", task.id);
+        {memberTab === "log" ? (
+          renderMemberTaskLog()
+        ) : (
+          <section className="mb-7 flex flex-col gap-5">
+            {renderDocumentationTasks()}
+            {memberTasks.length === 0 ? (
+              <div
+                className="border-[2.5px] border-ink bg-card p-8 text-center doodle-shadow"
+                style={{ borderRadius: "20px 26px 18px 24px / 24px 18px 26px 20px" }}
+              >
+                <p className="text-2xl font-bold">
+                  <span className="highlight-yellow">لسه مفيش تاسكات ليك</span>
+                </p>
+                <p className="mt-2 text-foreground/70">
+                  أول ما الأدمن ينزل تاسك عام أو تاسك باسمك هيظهر هنا.
+                </p>
+              </div>
+            ) : (
+              memberTasks.map((task) => {
+                const existing = getResponse(data, task.id, activeMember.member.id);
+                const key = responseKey(task.id, activeMember.member.id);
+                const taskProgressKey = progressKey(task.id, activeMember.member.id);
+                const finalSent = sentState[key];
+                const finalFeedback = actionFeedback[key];
+                const progressFeedback = actionFeedback[taskProgressKey];
+                const existingDraftAnswer =
+                  existing?.status === "rejected" ? "" : (existing?.answer ?? "");
+                const sharedDraft =
+                  draftAnswers[key] ?? draftAnswers[taskProgressKey] ?? existingDraftAnswer;
+                const reviewNote = latestReviewNote(existing);
+                const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
+                  (update) => update.memberId === activeMember.member.id,
+                );
+                const canAnswer = !existing || existing.status === "rejected";
+                const taskTitleDir = textDirection(task.title);
+                const taskQuestionDir = textDirection(task.question);
+                const taskQuestionLooksLight =
+                  task.question.trim().length <= 90 &&
+                  task.question.trim().split(/\s+/).length <= 12;
+                const taskQuestionIsLong =
+                  task.question.trim().length > 180 || task.question.trim().split(/\n/).length > 3;
+                const taskQuestionHasSections = splitMemberTextSections(task.question).length > 1;
+                const taskUpdates = data.taskUpdates?.[task.id] ?? [];
+                const unseenTaskUpdates = taskUpdates.filter(
+                  (update) =>
+                    !seenTaskUpdateIds.includes(update.id) &&
+                    !hasSeenTarget("taskUpdate", update.id),
+                );
+                const taskPoints = sanitizePositiveNumber(task.points, 1);
+                const taskAudienceLabel =
+                  task.scope === "all" ? "تاسك عام لكل التيم" : "تاسك مخصص ليك";
+                const taskPointsLabel = formatTaskPointsLabel(taskPoints);
+                const problemTask = isProblemTask(task);
+                const priorProblemSolutions = problemTask
+                  ? visibleProblemSolutionEntries(task)
+                  : [];
+                const taskSeen = hasSeenTarget("task", task.id);
 
-              return (
-                <article
-                  key={task.id}
-                  className={`border-[2.5px] border-ink p-4 doodle-shadow ${
-                    existing?.status === "approved"
-                      ? "bg-emerald-50"
-                      : existing?.status === "submitted" || finalSent
-                        ? "bg-yellow-50"
-                        : existing?.status === "rejected"
-                          ? "bg-red-50"
-                          : "bg-card"
-                  }`}
-                  style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
-                >
-                  <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1 text-center">
-                      <p className="mb-1 text-center text-sm font-bold text-foreground/60">
-                        <span>{taskAudienceLabel}</span>
-                        <span className="mx-1.5">•</span>
-                        <span className="text-red-600">{taskPointsLabel}</span>
-                        {problemTask && (
-                          <>
-                            <span className="mx-1.5">•</span>
-                            <span className="rounded-full border border-red-700 bg-red-50 px-2 py-0.5 text-red-700">
-                              Problem
-                            </span>
-                          </>
-                        )}
-                      </p>
-                      <div className="mb-2 flex w-full flex-wrap items-center justify-center gap-2 text-xs font-bold" dir="ltr">
-                        <span className="rounded-full border-[2px] border-ink bg-white px-2.5 py-1">
-                          deadline: {taskDeadlineLabel(task)}
-                        </span>
-                      </div>
-                      <h2
-                        className={cn("text-lg font-bold leading-tight sm:text-xl", textAlignClass(task.title), "text-center")}
-                        dir={taskTitleDir}
-                      >
-                        {task.title}
-                      </h2>
-                    </div>
-                    {existing && (
-                      <span className="border-[2px] border-ink bg-paper px-3 py-1 text-sm font-bold doodle-shadow-sm">
-                        {existing.status === "approved"
-                          ? "تم القبول"
-                          : existing.status === "rejected"
-                            ? "اترفض - جاوب تاني"
-                            : "مستني المراجعة"}
-                      </span>
-                    )}
-                    {!existing && finalSent && (
-                      <span className="border-[2px] border-ink bg-yellow-100 px-3 py-1 text-sm font-bold doodle-shadow-sm">
-                        مستني مراجعة الأدمن
-                      </span>
-                    )}
-                    {!taskSeen && !existing && !finalSent && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={markVisiblePageSeen}
-                        className="border-[2px] border-ink bg-white"
-                      >
-                        <Eye data-icon="inline-start" />
-                        Seen
-                      </Button>
-                    )}
-                  </div>
-                  <div
-                    data-testid={`task-text-preview-${task.id}`}
-                    className={cn(
-                      "mb-4 w-full rounded-xl text-start leading-7 transition",
-                      taskQuestionIsLong || taskQuestionHasSections
-                        ? "border-[2px] border-ink/20 bg-paper/70 p-3 hover:border-ink/45 hover:bg-white"
-                        : "border-0 bg-transparent p-0",
-                      taskQuestionLooksLight ? "text-lg font-semibold leading-8" : "text-base",
-                      textAlignClass(task.question),
-                    )}
-                    dir={taskQuestionDir}
+                return (
+                  <article
+                    key={task.id}
+                    className={`border-[2.5px] border-ink p-4 doodle-shadow ${
+                      existing?.status === "approved"
+                        ? "bg-emerald-50"
+                        : existing?.status === "submitted" || finalSent
+                          ? "bg-yellow-50"
+                          : existing?.status === "rejected"
+                            ? "bg-red-50"
+                            : "bg-card"
+                    }`}
+                    style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
                   >
-                    <StructuredTextPreviewList
-                      text={task.question}
-                      onOpenSection={(sectionIndex) => openTaskDetails(task.id, sectionIndex)}
-                    />
-                    {adminPreview && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void copyMemberPreviewText(task.question, "Task text copied.")}
-                        className="mt-2 border border-ink/20 bg-white"
-                      >
-                        <Copy data-icon="inline-start" />
-                        Copy text
-                      </Button>
-                    )}
-                    {false && (
-                      <>
-                    <StructuredTextBlock text={task.question} compact memberFacing />
-                    {(taskQuestionIsLong || taskQuestionHasSections) && (
-                      <button
-                        type="button"
-                      onClick={() => {
-                            openTaskDetails(task.id, 0);
-                          }}
-                        className="mt-2 inline-flex rounded-full border border-ink/20 bg-white px-3 py-1 text-xs font-bold text-foreground/60"
-                      >
-                        افتح الكلام كله
-                      </button>
-                    )}
-                    {taskUpdates.length > 0 && (
-                      <span className="mt-2 block text-xs font-bold text-sky-700">
-                        فيه {taskUpdates.length} تحديث إضافي
-                      </span>
-                    )}
-                      </>
-                    )}
-                  </div>
-                  {problemTask && priorProblemSolutions.length > 0 && (
-                    <div className="mb-4 flex justify-start">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setProblemSolutionsTaskId(task.id)}
-                        className="problem-solutions-alert border-[2px] border-red-700 bg-red-50 px-3 py-1.5 text-xs text-red-950"
-                      >
-                        <Eye data-icon="inline-start" />
-                        شوف الحلول اللي قبلك
-                      </Button>
+                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1 text-center">
+                        <p className="mb-1 text-center text-sm font-bold text-foreground/60">
+                          <span>{taskAudienceLabel}</span>
+                          <span className="mx-1.5">•</span>
+                          <span className="text-red-600">{taskPointsLabel}</span>
+                          {problemTask && (
+                            <>
+                              <span className="mx-1.5">•</span>
+                              <span className="rounded-full border border-red-700 bg-red-50 px-2 py-0.5 text-red-700">
+                                Problem
+                              </span>
+                            </>
+                          )}
+                        </p>
+                        <div
+                          className="mb-2 flex w-full flex-wrap items-center justify-center gap-2 text-xs font-bold"
+                          dir="ltr"
+                        >
+                          <span className="rounded-full border-[2px] border-ink bg-white px-2.5 py-1">
+                            deadline: {taskDeadlineLabel(task)}
+                          </span>
+                        </div>
+                        <h2
+                          className={cn(
+                            "text-lg font-bold leading-tight sm:text-xl",
+                            textAlignClass(task.title),
+                            "text-center",
+                          )}
+                          dir={taskTitleDir}
+                        >
+                          {task.title}
+                        </h2>
+                      </div>
+                      {existing && (
+                        <span className="border-[2px] border-ink bg-paper px-3 py-1 text-sm font-bold doodle-shadow-sm">
+                          {existing.status === "approved"
+                            ? "تم القبول"
+                            : existing.status === "rejected"
+                              ? "اترفض - جاوب تاني"
+                              : "مستني المراجعة"}
+                        </span>
+                      )}
+                      {!existing && finalSent && (
+                        <span className="border-[2px] border-ink bg-yellow-100 px-3 py-1 text-sm font-bold doodle-shadow-sm">
+                          مستني مراجعة الأدمن
+                        </span>
+                      )}
+                      {!taskSeen && !existing && !finalSent && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={markVisiblePageSeen}
+                          className="border-[2px] border-ink bg-white"
+                        >
+                          <Eye data-icon="inline-start" />
+                          Seen
+                        </Button>
+                      )}
                     </div>
-                  )}
-                  {taskUpdates.length > 0 && (
-                    <div className="mb-4 rounded-xl border-[2px] border-sky-200 bg-sky-50 p-3 text-sky-950">
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <strong className="text-base">Latest updates</strong>
-                          {unseenTaskUpdates.length > 0 && (
-                            <span className="rounded-full border border-yellow-700 bg-yellow-100 px-2 py-0.5 text-xs font-bold text-yellow-900">
-                              New
+                    <div
+                      data-testid={`task-text-preview-${task.id}`}
+                      className={cn(
+                        "mb-4 w-full rounded-xl text-start leading-7 transition",
+                        taskQuestionIsLong || taskQuestionHasSections
+                          ? "border-[2px] border-ink/20 bg-paper/70 p-3 hover:border-ink/45 hover:bg-white"
+                          : "border-0 bg-transparent p-0",
+                        taskQuestionLooksLight ? "text-lg font-semibold leading-8" : "text-base",
+                        textAlignClass(task.question),
+                      )}
+                      dir={taskQuestionDir}
+                    >
+                      <StructuredTextPreviewList
+                        text={task.question}
+                        onOpenSection={(sectionIndex) => openTaskDetails(task.id, sectionIndex)}
+                      />
+                      {adminPreview && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            void copyMemberPreviewText(task.question, "Task text copied.")
+                          }
+                          className="mt-2 border border-ink/20 bg-white"
+                        >
+                          <Copy data-icon="inline-start" />
+                          Copy text
+                        </Button>
+                      )}
+                      {adminPreview && (
+                        <>
+                          <StructuredTextBlock text={task.question} compact memberFacing />
+                          {(taskQuestionIsLong || taskQuestionHasSections) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                openTaskDetails(task.id, 0);
+                              }}
+                              className="mt-2 inline-flex rounded-full border border-ink/20 bg-white px-3 py-1 text-xs font-bold text-foreground/60"
+                            >
+                              افتح الكلام كله
+                            </button>
+                          )}
+                          {taskUpdates.length > 0 && (
+                            <span className="mt-2 block text-xs font-bold text-sky-700">
+                              فيه {taskUpdates.length} تحديث إضافي
                             </span>
                           )}
+                        </>
+                      )}
+                    </div>
+                    {problemTask && priorProblemSolutions.length > 0 && (
+                      <div className="mb-4 flex justify-start">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setProblemSolutionsTaskId(task.id)}
+                          className="problem-solutions-alert border-[2px] border-red-700 bg-red-50 px-3 py-1.5 text-xs text-red-950"
+                        >
+                          <Eye data-icon="inline-start" />
+                          شوف الحلول اللي قبلك
+                        </Button>
+                      </div>
+                    )}
+                    {taskUpdates.length > 0 && (
+                      <div className="mb-4 rounded-xl border-[2px] border-sky-200 bg-sky-50 p-3 text-sky-950">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <strong className="text-base">Latest updates</strong>
+                            {unseenTaskUpdates.length > 0 && (
+                              <span className="rounded-full border border-yellow-700 bg-yellow-100 px-2 py-0.5 text-xs font-bold text-yellow-900">
+                                New
+                              </span>
+                            )}
+                          </div>
+                          {unseenTaskUpdates.length > 0 && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={markVisiblePageSeen}
+                              className="border border-sky-300 bg-white text-sky-950"
+                            >
+                              <Eye data-icon="inline-start" />
+                              Seen
+                            </Button>
+                          )}
                         </div>
-                        {unseenTaskUpdates.length > 0 && (
+                        <div className="grid gap-2">
+                          {taskUpdates.slice(0, 2).map((update) => (
+                            <div
+                              key={update.id}
+                              className={cn(
+                                "rounded-lg bg-white/75 p-2",
+                                textAlignClass(update.message),
+                              )}
+                              dir={textDirection(update.message)}
+                            >
+                              <StructuredTextBlock text={update.message} compact memberFacing />
+                              <p className="mt-1 text-xs font-bold text-sky-900/55">
+                                {formatDateTime(update.createdAt)}
+                              </p>
+                              {adminPreview && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() =>
+                                    void copyMemberPreviewText(update.message, "Update copied.")
+                                  }
+                                  className="mt-2 border border-sky-200 bg-white"
+                                >
+                                  <Copy data-icon="inline-start" />
+                                  Copy update
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        {taskUpdates.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExpandedTaskId(task.id);
+                              setCopyFeedback("");
+                            }}
+                            className="mt-2 text-xs font-bold text-sky-700 underline underline-offset-4"
+                          >
+                            Show all updates
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {existing?.status === "rejected" && reviewNote && (
+                      <div className="mb-3 rounded-xl border-[2px] border-red-200 bg-red-50 p-3 text-sm font-bold text-red-900">
+                        <span className="block text-xs text-red-700/75">سبب الرفض</span>
+                        <StructuredTextBlock text={reviewNote} compact memberFacing />
+                      </div>
+                    )}
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <strong className="text-base">
+                        {problemTask ? "اكتب الحل" : "اكتب الرد أو التحديث"}
+                      </strong>
+                    </div>
+                    {existing?.status === "approved" ? (
+                      <div className="rounded-xl border-[2px] border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
+                        تم قبول التسليم. الدرجة اتحسبت خلاص.
+                      </div>
+                    ) : (
+                      <>
+                        <Textarea
+                          value={sharedDraft}
+                          onChange={(event) => {
+                            onDraftChange(key, event.target.value);
+                            if (!problemTask) onDraftChange(taskProgressKey, event.target.value);
+                          }}
+                          onPaste={
+                            problemTask && !adminPreview
+                              ? (event) => blockProblemPaste(event, task.id)
+                              : undefined
+                          }
+                          onDrop={
+                            problemTask && !adminPreview
+                              ? (event) => blockProblemDrop(event, task.id)
+                              : undefined
+                          }
+                          onBeforeInput={
+                            problemTask && !adminPreview
+                              ? (event) => blockProblemBeforeInput(event, task.id)
+                              : undefined
+                          }
+                          onContextMenu={
+                            problemTask && !adminPreview
+                              ? (event) => event.preventDefault()
+                              : undefined
+                          }
+                          placeholder={
+                            problemTask
+                              ? "اكتب حل مختلف وواضح هنا..."
+                              : "اكتب هنا الرد النهائي أو تحديث المتابعة..."
+                          }
+                          className={cn(
+                            "min-h-20 border-[2px] border-ink bg-paper px-3 py-2 text-sm leading-6 sm:min-h-[88px]",
+                            problemTask && "problem-answer-input",
+                          )}
+                        />
+                        {pasteWarningTaskId === task.id && (
+                          <div className="problem-paste-alert mt-2">
+                            الباست محظور في problem. اكتب الحل بإيدك.
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {existing?.status !== "approved" && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          data-testid={`submit-final-${task.id}`}
+                          onClick={() => {
+                            if (!sharedDraft.trim()) {
+                              blockMemberAction(key, ["answer"]);
+                              return;
+                            }
+                            markTaskSeen(task.id);
+                            void runMemberAction(
+                              key,
+                              () => onSubmitFinal(task),
+                              problemTask
+                                ? `تم التسليم. أنت رقم ${problemSubmissionRank(task)} في التسليم.`
+                                : "Submitted. Waiting for admin review.",
+                              "Submission failed. Try again.",
+                            );
+                          }}
+                          disabled={!canAnswer || isSubmitting}
+                          className={actionButtonClass(
+                            "border-[2px] border-ink doodle-shadow-sm",
+                            finalFeedback,
+                          )}
+                        >
+                          <Save data-icon="inline-start" />
+                          تسليم للمراجعة
+                        </Button>
+                        {!problemTask && (
                           <Button
                             type="button"
+                            data-testid={`submit-progress-${task.id}`}
+                            onClick={() => {
+                              if (!sharedDraft.trim()) {
+                                blockMemberAction(taskProgressKey, ["progress note"]);
+                                return;
+                              }
+                              markTaskSeen(task.id);
+                              void runMemberAction(
+                                taskProgressKey,
+                                () => onSubmitProgress(task),
+                                "Progress update sent.",
+                                "Progress update failed. Try again.",
+                              );
+                            }}
+                            disabled={isSubmitting}
                             variant="outline"
-                            size="sm"
-                            onClick={markVisiblePageSeen}
-                            className="border border-sky-300 bg-white text-sky-950"
+                            className={actionButtonClass(
+                              "border-[2px] border-ink bg-yellow-200 text-yellow-950 hover:bg-yellow-300 doodle-shadow-sm",
+                              progressFeedback,
+                            )}
                           >
-                            <Eye data-icon="inline-start" />
-                            Seen
+                            <Save data-icon="inline-start" />
+                            إرسال متابعة
                           </Button>
                         )}
                       </div>
-                      <div className="grid gap-2">
-                        {taskUpdates.slice(0, 2).map((update) => (
-                          <div
-                            key={update.id}
-                            className={cn("rounded-lg bg-white/75 p-2", textAlignClass(update.message))}
-                            dir={textDirection(update.message)}
-                          >
-                            <StructuredTextBlock text={update.message} compact memberFacing />
-                            <p className="mt-1 text-xs font-bold text-sky-900/55">
-                              {formatDateTime(update.createdAt)}
-                            </p>
-                            {adminPreview && (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => void copyMemberPreviewText(update.message, "Update copied.")}
-                                className="mt-2 border border-sky-200 bg-white"
-                              >
-                                <Copy data-icon="inline-start" />
-                                Copy update
-                              </Button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      {taskUpdates.length > 2 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setExpandedTaskId(task.id);
-                            setCopyFeedback("");
-                          }}
-                          className="mt-2 text-xs font-bold text-sky-700 underline underline-offset-4"
-                        >
-                          Show all updates
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {existing?.status === "rejected" && reviewNote && (
-                    <div className="mb-3 rounded-xl border-[2px] border-red-200 bg-red-50 p-3 text-sm font-bold text-red-900">
-                      <span className="block text-xs text-red-700/75">سبب الرفض</span>
-                      <StructuredTextBlock text={reviewNote} compact memberFacing />
-                    </div>
-                  )}
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <strong className="text-base">
-                      {problemTask ? "اكتب الحل" : "اكتب الرد أو التحديث"}
-                    </strong>
-                  </div>
-                  {existing?.status === "approved" ? (
-                    <div className="rounded-xl border-[2px] border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
-                      تم قبول التسليم. الدرجة اتحسبت خلاص.
-                    </div>
-                  ) : (
-                    <>
-                      <Textarea
-                        value={sharedDraft}
-                        onChange={(event) => {
-                          onDraftChange(key, event.target.value);
-                          if (!problemTask) onDraftChange(taskProgressKey, event.target.value);
-                        }}
-                        onPaste={problemTask && !adminPreview ? (event) => blockProblemPaste(event, task.id) : undefined}
-                        onDrop={problemTask && !adminPreview ? (event) => blockProblemDrop(event, task.id) : undefined}
-                        onBeforeInput={problemTask && !adminPreview ? (event) => blockProblemBeforeInput(event, task.id) : undefined}
-                        onContextMenu={problemTask && !adminPreview ? (event) => event.preventDefault() : undefined}
-                        placeholder={problemTask ? "اكتب حل مختلف وواضح هنا..." : "اكتب هنا الرد النهائي أو تحديث المتابعة..."}
-                        className={cn(
-                          "min-h-20 border-[2px] border-ink bg-paper px-3 py-2 text-sm leading-6 sm:min-h-[88px]",
-                          problemTask && "problem-answer-input",
-                        )}
-                      />
-                      {pasteWarningTaskId === task.id && (
-                        <div className="problem-paste-alert mt-2">
-                          الباست محظور في problem. اكتب الحل بإيدك.
-                        </div>
-                      )}
-                    </>
-                  )}
-                  {existing?.status !== "approved" && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      data-testid={`submit-final-${task.id}`}
-                      onClick={() => {
-                        if (!sharedDraft.trim()) {
-                          blockMemberAction(key, ["answer"]);
-                          return;
-                        }
-                        markTaskSeen(task.id);
-                        void runMemberAction(
-                          key,
-                          () => onSubmitFinal(task),
-                          problemTask
-                            ? `تم التسليم. أنت رقم ${problemSubmissionRank(task)} في التسليم.`
-                            : "Submitted. Waiting for admin review.",
-                          "Submission failed. Try again.",
-                        );
-                      }}
-                      disabled={!canAnswer || isSubmitting}
-                      className={actionButtonClass(
-                        "border-[2px] border-ink doodle-shadow-sm",
-                        finalFeedback,
-                      )}
-                    >
-                      <Save data-icon="inline-start" />
-                      تسليم للمراجعة
-                    </Button>
-                    {!problemTask && (
-                      <Button
-                        type="button"
-                        data-testid={`submit-progress-${task.id}`}
-                        onClick={() => {
-                          if (!sharedDraft.trim()) {
-                            blockMemberAction(taskProgressKey, ["progress note"]);
-                            return;
-                          }
-                          markTaskSeen(task.id);
-                          void runMemberAction(
-                            taskProgressKey,
-                            () => onSubmitProgress(task),
-                            "Progress update sent.",
-                            "Progress update failed. Try again.",
-                          );
-                        }}
-                        disabled={isSubmitting}
-                        variant="outline"
-                        className={actionButtonClass(
-                          "border-[2px] border-ink bg-yellow-200 text-yellow-950 hover:bg-yellow-300 doodle-shadow-sm",
-                          progressFeedback,
-                        )}
-                      >
-                        <Save data-icon="inline-start" />
-                        إرسال متابعة
-                      </Button>
                     )}
-                  </div>
-                  )}
-                  <ActionFeedbackLine feedback={finalFeedback} />
-                  {!problemTask && <ActionFeedbackLine feedback={progressFeedback} />}
+                    <ActionFeedbackLine feedback={finalFeedback} />
+                    {!problemTask && <ActionFeedbackLine feedback={progressFeedback} />}
 
-                  {!problemTask && officialProgress.length > 0 && (
-                    <div className="mt-4 border-t-[2px] border-ink/20 pt-3">
-                      <div className="mb-2 grid gap-2">
-                        {officialProgress.map((update) => (
-                          <div key={update.id} className="border-[2px] border-ink bg-yellow-50 p-3">
-                            <StructuredTextBlock text={update.note} compact />
-                            <p className="mt-1 text-xs text-foreground/55">
-                              محفوظ رسميًا: {new Date(update.createdAt).toLocaleString()}
-                            </p>
-                          </div>
-                        ))}
+                    {!problemTask && officialProgress.length > 0 && (
+                      <div className="mt-4 border-t-[2px] border-ink/20 pt-3">
+                        <div className="mb-2 grid gap-2">
+                          {officialProgress.map((update) => (
+                            <div
+                              key={update.id}
+                              className="border-[2px] border-ink bg-yellow-50 p-3"
+                            >
+                              <StructuredTextBlock text={update.note} compact />
+                              <p className="mt-1 text-xs text-foreground/55">
+                                محفوظ رسميًا: {new Date(update.createdAt).toLocaleString()}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </article>
-              );
-            })
-          )}
-        </section>
+                    )}
+                  </article>
+                );
+              })
+            )}
+          </section>
         )}
 
         {memberTab === "tasks" && (
@@ -3068,7 +3527,10 @@ function MemberView({
             <p className="mb-2 text-sm text-foreground/65">الأسماء المتاحة للدخول:</p>
             <div className="mb-3 flex flex-wrap gap-2">
               {loginAliases.map((alias) => (
-                <span key={alias} className="border-[1.5px] border-ink bg-paper px-2 py-0.5 text-xs">
+                <span
+                  key={alias}
+                  className="border-[1.5px] border-ink bg-paper px-2 py-0.5 text-xs"
+                >
                   {alias}
                 </span>
               ))}
@@ -3119,7 +3581,10 @@ function MemberView({
               </p>
               <ActionFeedbackLine feedback={nicknameFeedback} />
 
-              <label className="mt-3 block border-t-[2px] border-ink/15 pt-2 font-bold" htmlFor="member-repo">
+              <label
+                className="mt-3 block border-t-[2px] border-ink/15 pt-2 font-bold"
+                htmlFor="member-repo"
+              >
                 GitHub repo
               </label>
               <Input
@@ -3282,7 +3747,9 @@ function buildTaskCopyText(task: StudioTask, updates: TaskAnnouncement[]) {
     parts.push(
       "",
       "Task updates:",
-      ...updates.map((update) => `${formatDateTime(update.createdAt)}\n${cleanTextForMember(update.message)}`),
+      ...updates.map(
+        (update) => `${formatDateTime(update.createdAt)}\n${cleanTextForMember(update.message)}`,
+      ),
     );
   }
 
@@ -3318,13 +3785,10 @@ function TaskMessageBody({ text, compact = false }: { text: string; compact?: bo
           return <div key={`${index}-rule`} className="my-2 border-t-[2px] border-ink/15" />;
         }
 
-        const isNumbered = /^\d+[\).]\s+/.test(trimmed);
+        const isNumbered = /^\d+[).]\s+/.test(trimmed);
         const isBullet = /^[-*•]\s+/.test(trimmed);
         const isHeading =
-          !isNumbered &&
-          !isBullet &&
-          trimmed.length <= 72 &&
-          !/[.!?؟،,;:]$/.test(trimmed);
+          !isNumbered && !isBullet && trimmed.length <= 72 && !/[.!?؟،,;:]$/.test(trimmed);
         const direction = textDirection(trimmed);
 
         return (
@@ -3445,7 +3909,9 @@ function StructuredTextPreviewList({
             className="structured-text-preview-button"
             dir={textDirection(section)}
           >
-            <span className={cn("block truncate text-sm font-bold", textAlignClass(title))}>{title}</span>
+            <span className={cn("block truncate text-sm font-bold", textAlignClass(title))}>
+              {title}
+            </span>
             {preview && preview !== title && (
               <span className={cn("structured-text-summary-preview", textAlignClass(section))}>
                 {preview}
@@ -3487,9 +3953,7 @@ function DateTimeField({
   return (
     <label
       className={`min-w-0 overflow-hidden rounded-xl border p-3 ${
-        tone === "deadline"
-          ? "border-yellow-200 bg-yellow-50"
-          : "border-sky-100 bg-sky-50/70"
+        tone === "deadline" ? "border-yellow-200 bg-yellow-50" : "border-sky-100 bg-sky-50/70"
       }`}
     >
       <span className="mb-2 flex min-w-0 items-center gap-2 text-xs font-bold uppercase tracking-wide text-foreground/60">
@@ -3503,7 +3967,9 @@ function DateTimeField({
         className="block h-11 min-w-0 max-w-full border border-ink/20 bg-white px-3 text-left font-mono text-sm"
         dir="ltr"
       />
-      <span className="mt-2 block max-w-full text-wrap break-words text-xs leading-5 text-foreground/55">{help}</span>
+      <span className="mt-2 block max-w-full text-wrap break-words text-xs leading-5 text-foreground/55">
+        {help}
+      </span>
     </label>
   );
 }
@@ -3675,10 +4141,19 @@ function CompactMetric({
     <div
       className={cn(
         "rounded-lg border border-ink/10 bg-white px-4 py-3",
-        horizontal ? "flex min-h-[84px] items-center justify-between gap-3 text-right" : "text-center",
+        horizontal
+          ? "flex min-h-[84px] items-center justify-between gap-3 text-right"
+          : "text-center",
       )}
     >
-      <div className={cn("text-2xl font-bold leading-none", horizontal ? "shrink-0 text-3xl" : "mx-auto")}>{value}</div>
+      <div
+        className={cn(
+          "text-2xl font-bold leading-none",
+          horizontal ? "shrink-0 text-3xl" : "mx-auto",
+        )}
+      >
+        {value}
+      </div>
       <div
         className={cn(
           "text-xs font-medium text-foreground/55",
@@ -3810,7 +4285,18 @@ function AdminView({
   const [meetingScoreDrafts, setMeetingScoreDrafts] = useState<Record<string, string>>({});
   const [skipNotes, setSkipNotes] = useState<Record<string, string>>({});
   const [taskEditDrafts, setTaskEditDrafts] = useState<
-    Record<string, { title: string; question: string; points: string; taskType: TaskType; status: "active" | "hidden" | "archived"; scope: "all" | "member"; memberIds: string[] }>
+    Record<
+      string,
+      {
+        title: string;
+        question: string;
+        points: string;
+        taskType: TaskType;
+        status: "active" | "hidden" | "archived";
+        scope: "all" | "member";
+        memberIds: string[];
+      }
+    >
   >({});
   const [taskUpdateDrafts, setTaskUpdateDrafts] = useState<Record<string, string>>({});
   const [logMode, setLogMode] = useState<"task" | "member">("task");
@@ -3825,15 +4311,18 @@ function AdminView({
   const archivedTasks = data.tasks.filter((task) => taskStatus(task) === "archived");
   const problemTasks = data.tasks.filter((task) => isProblemTask(task) && !isHiddenTask(task));
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
-  const archivedMeetings = (data.meetings ?? []).filter((meeting) => meetingStatus(meeting) === "archived");
+  const archivedMeetings = (data.meetings ?? []).filter(
+    (meeting) => meetingStatus(meeting) === "archived",
+  );
   const visibleArchive = archivedTasks.filter((task) =>
     `${task.title} ${task.question}`.toLowerCase().includes(query.toLowerCase()),
   );
   const selectedTask =
     data.tasks.find((task) => task.id === selectedTaskId) ?? activeTasks[0] ?? archivedTasks[0];
   const selectedProblemTask =
-    (selectedTask && isProblemTask(selectedTask) && !isHiddenTask(selectedTask) ? selectedTask : undefined) ??
-    problemTasks[0];
+    (selectedTask && isProblemTask(selectedTask) && !isHiddenTask(selectedTask)
+      ? selectedTask
+      : undefined) ?? problemTasks[0];
   const selectedMeeting =
     (data.meetings ?? []).find((meeting) => meeting.id === selectedMeetingId) ??
     activeMeetings[0] ??
@@ -3845,15 +4334,15 @@ function AdminView({
     isHiddenTask(task)
       ? []
       : Object.values(data.responses[task.id] ?? {})
-      .filter((response) => response.status === "submitted")
-      .map((response) => ({
-        id: `${task.id}:${response.memberId}`,
-        taskId: task.id,
-        memberId: response.memberId,
-        memberName: response.memberName,
-        answer: response.answer,
-        submittedAt: response.submittedAt,
-      })),
+          .filter((response) => response.status === "submitted")
+          .map((response) => ({
+            id: `${task.id}:${response.memberId}`,
+            taskId: task.id,
+            memberId: response.memberId,
+            memberName: response.memberName,
+            answer: response.answer,
+            submittedAt: response.submittedAt,
+          })),
   );
   const queuedProgress = adminQueue.progressUpdates;
   const unseenUpdates =
@@ -3987,19 +4476,19 @@ function AdminView({
 
     const ok = await runAdminAction(
       "admin:add-task",
-        () =>
-          onAddTask({
-            title: taskTitle.trim(),
-            question: taskQuestion.trim(),
-            points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
-            taskType,
-            scope: effectiveScope,
-            memberId: effectiveScope === "member" ? cleanMemberIds[0] : undefined,
-            memberIds: effectiveScope === "member" ? cleanMemberIds : [],
-            startAt: fromDateTimeInputValue(taskStartAt) || new Date().toISOString(),
-            deadlineAt: taskType === "technical" ? "" : fromDateTimeInputValue(taskDeadlineAt),
-            status: taskStatusDraft,
-          }),
+      () =>
+        onAddTask({
+          title: taskTitle.trim(),
+          question: taskQuestion.trim(),
+          points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
+          taskType,
+          scope: effectiveScope,
+          memberId: effectiveScope === "member" ? cleanMemberIds[0] : undefined,
+          memberIds: effectiveScope === "member" ? cleanMemberIds : [],
+          startAt: fromDateTimeInputValue(taskStartAt) || new Date().toISOString(),
+          deadlineAt: taskType === "technical" ? "" : fromDateTimeInputValue(taskDeadlineAt),
+          status: taskStatusDraft,
+        }),
       taskStatusDraft === "hidden" ? "Hidden item prepared." : "Task added.",
       "Task was not added. Try again.",
     );
@@ -4102,10 +4591,9 @@ function AdminView({
     const points = sanitizeNumber(bonusPointsDrafts[member.id]);
     const note = (bonusNoteDrafts[member.id] ?? "").trim();
     const key = `admin:add-bonus:${member.id}`;
-    const missing = [
-      points === 0 ? "bonus points" : "",
-      !note ? "bonus note" : "",
-    ].filter((field): field is string => Boolean(field));
+    const missing = [points === 0 ? "bonus points" : "", !note ? "bonus note" : ""].filter(
+      (field): field is string => Boolean(field),
+    );
     if (missing.length > 0) {
       blockAdminAction(key, missing);
       return;
@@ -4124,9 +4612,7 @@ function AdminView({
   function toggleTaskMemberDraft(memberId: string) {
     setTaskScope("member");
     setTaskMemberIds((current) =>
-      current.includes(memberId)
-        ? current.filter((id) => id !== memberId)
-        : [...current, memberId],
+      current.includes(memberId) ? current.filter((id) => id !== memberId) : [...current, memberId],
     );
   }
 
@@ -4151,7 +4637,15 @@ function AdminView({
 
   function updateTaskEditDraft(
     task: StudioTask,
-    updates: Partial<{ title: string; question: string; points: string; taskType: TaskType; status: "active" | "hidden" | "archived"; scope: "all" | "member"; memberIds: string[] }>,
+    updates: Partial<{
+      title: string;
+      question: string;
+      points: string;
+      taskType: TaskType;
+      status: "active" | "hidden" | "archived";
+      scope: "all" | "member";
+      memberIds: string[];
+    }>,
   ) {
     setTaskEditDrafts((current) => ({
       ...current,
@@ -4202,7 +4696,11 @@ function AdminView({
 
   function renderTaskRows(tasks: StudioTask[]) {
     if (tasks.length === 0) {
-      return <p className="rounded-lg border border-dashed border-ink/20 bg-white p-6 text-sm text-foreground/55">No tasks here yet.</p>;
+      return (
+        <p className="rounded-lg border border-dashed border-ink/20 bg-white p-6 text-sm text-foreground/55">
+          No tasks here yet.
+        </p>
+      );
     }
 
     return (
@@ -4223,8 +4721,8 @@ function AdminView({
                 <div className="min-w-0">
                   <div className="break-words text-lg font-bold">{task.title}</div>
                   <div className="mt-1 text-xs text-foreground/55">
-                    {taskAudienceLabel(task)}{" "}
-                    | {task.points || 1} pts | deadline {taskDeadlineLabel(task)}
+                    {taskAudienceLabel(task)} | {task.points || 1} pts | deadline{" "}
+                    {taskDeadlineLabel(task)}
                   </div>
                 </div>
                 <span className="shrink-0 rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
@@ -4256,9 +4754,26 @@ function AdminView({
     );
   }
 
+  function documentationCountsForProblem(task: StudioTask) {
+    const accepted = problemSolutionsForTask(task).filter(
+      (response) => response.status === "approved",
+    );
+    const requested = accepted.filter((response) =>
+      documentationForSolution(data, task.id, response),
+    ).length;
+    const submitted = accepted.filter(
+      (response) => documentationForSolution(data, task.id, response)?.status === "submitted",
+    ).length;
+    return { accepted: accepted.length, requested, submitted };
+  }
+
   function renderHiddenRows(tasks: StudioTask[]) {
     if (tasks.length === 0) {
-      return <p className="rounded-lg border border-dashed border-ink/20 bg-white p-6 text-sm text-foreground/55">No hidden items prepared.</p>;
+      return (
+        <p className="rounded-lg border border-dashed border-ink/20 bg-white p-6 text-sm text-foreground/55">
+          No hidden items prepared.
+        </p>
+      );
     }
 
     return (
@@ -4309,7 +4824,10 @@ function AdminView({
                       "Publish failed.",
                     )
                   }
-                  className={actionButtonClass("bg-emerald-600 text-white hover:bg-emerald-700", actionFeedback[publishKey])}
+                  className={actionButtonClass(
+                    "bg-emerald-600 text-white hover:bg-emerald-700",
+                    actionFeedback[publishKey],
+                  )}
                 >
                   <Eye data-icon="inline-start" />
                   Publish
@@ -4320,9 +4838,17 @@ function AdminView({
                   variant="outline"
                   onClick={() => {
                     if (!window.confirm("Delete this hidden item and all linked data?")) return;
-                    void runAdminAction(deleteKey, () => onRemoveTask(task.id), "Deleted.", "Delete failed.");
+                    void runAdminAction(
+                      deleteKey,
+                      () => onRemoveTask(task.id),
+                      "Deleted.",
+                      "Delete failed.",
+                    );
                   }}
-                  className={actionButtonClass("border border-red-200 bg-red-50 text-red-700", actionFeedback[deleteKey])}
+                  className={actionButtonClass(
+                    "border border-red-200 bg-red-50 text-red-700",
+                    actionFeedback[deleteKey],
+                  )}
                 >
                   <Trash2 data-icon="inline-start" />
                   Delete
@@ -4352,6 +4878,7 @@ function AdminView({
           const approved = responses.filter((response) => response.status === "approved").length;
           const rejected = responses.filter((response) => response.status === "rejected").length;
           const isSelected = selectedProblemTask?.id === task.id;
+          const documentationCounts = documentationCountsForProblem(task);
 
           return (
             <button
@@ -4379,6 +4906,12 @@ function AdminView({
                 <span>Pending {pending}</span>
                 <span>Approved {approved}</span>
                 <span>Rejected {rejected}</span>
+                {documentationCounts.accepted > 0 && (
+                  <span>
+                    Docs {documentationCounts.submitted}/
+                    {documentationCounts.requested || documentationCounts.accepted}
+                  </span>
+                )}
               </div>
             </button>
           );
@@ -4443,7 +4976,10 @@ function AdminView({
                     "Archive failed. Try again.",
                   )
                 }
-                className={actionButtonClass("border border-ink/20 bg-paper", actionFeedback[archiveTaskKey])}
+                className={actionButtonClass(
+                  "border border-ink/20 bg-paper",
+                  actionFeedback[archiveTaskKey],
+                )}
               >
                 <Archive data-icon="inline-start" />
                 Archive
@@ -4456,12 +4992,21 @@ function AdminView({
                     restoreTaskKey,
                     () => onUpdateTask(task.id, { status: "active" }),
                     isHiddenTask(task) ? "Problem published." : "Problem restored.",
-                    isHiddenTask(task) ? "Publish failed. Try again." : "Restore failed. Try again.",
+                    isHiddenTask(task)
+                      ? "Publish failed. Try again."
+                      : "Restore failed. Try again.",
                   )
                 }
-                className={actionButtonClass("border border-ink/20", actionFeedback[restoreTaskKey])}
+                className={actionButtonClass(
+                  "border border-ink/20",
+                  actionFeedback[restoreTaskKey],
+                )}
               >
-                {isHiddenTask(task) ? <Eye data-icon="inline-start" /> : <RotateCcw data-icon="inline-start" />}
+                {isHiddenTask(task) ? (
+                  <Eye data-icon="inline-start" />
+                ) : (
+                  <RotateCcw data-icon="inline-start" />
+                )}
                 {isHiddenTask(task) ? "Publish" : "Restore"}
               </Button>
             )}
@@ -4529,7 +5074,10 @@ function AdminView({
                 });
               }}
               disabled={!taskCanSendNotification}
-              className={actionButtonClass("bg-sky-500 text-white hover:bg-sky-600", actionFeedback[taskUpdateKey])}
+              className={actionButtonClass(
+                "bg-sky-500 text-white hover:bg-sky-600",
+                actionFeedback[taskUpdateKey],
+              )}
             >
               <Bell data-icon="inline-start" />
               {taskUpdateActionLabel}
@@ -4546,7 +5094,10 @@ function AdminView({
           {taskUpdates.length > 0 && (
             <div className="mt-3 grid gap-2 border-t border-sky-200 pt-3">
               {taskUpdates.map((update) => (
-                <div key={update.id} className="rounded-md border border-sky-200 bg-white p-2 text-sm">
+                <div
+                  key={update.id}
+                  className="rounded-md border border-sky-200 bg-white p-2 text-sm"
+                >
                   <StructuredTextBlock text={update.message} compact forceCollapse />
                   <p className="mt-1 text-xs font-bold text-foreground/45">
                     {formatDateTime(update.createdAt)}
@@ -4578,6 +5129,7 @@ function AdminView({
                 String(calculateAwardedPoints(task, response, "approved"));
               const approveKey = `admin:problem-approve:${task.id}:${response.memberId}`;
               const rejectKey = `admin:problem-reject:${task.id}:${response.memberId}`;
+              const documentation = documentationForSolution(data, task.id, response);
 
               return (
                 <article
@@ -4598,7 +5150,12 @@ function AdminView({
                           #{index + 1}
                         </span>
                         <strong>{member ? memberArabicName(member) : response.memberName}</strong>
-                        <span className={cn("rounded-full border px-2 py-1 text-xs font-bold", statusTone(response.status))}>
+                        <span
+                          className={cn(
+                            "rounded-full border px-2 py-1 text-xs font-bold",
+                            statusTone(response.status),
+                          )}
+                        >
                           {responseStatusLabel(response.status)}
                         </span>
                       </div>
@@ -4607,7 +5164,8 @@ function AdminView({
                       </p>
                     </div>
                     <span className="rounded-full border border-ink/10 bg-white px-2 py-1 text-xs font-bold">
-                      {responseAwardedPoints(task, response)}/{sanitizePositiveNumber(task.points, 1)} pts
+                      {responseAwardedPoints(task, response)}/
+                      {sanitizePositiveNumber(task.points, 1)} pts
                     </span>
                   </div>
 
@@ -4617,6 +5175,29 @@ function AdminView({
                     forceCollapse
                     className="mt-3 rounded-md border border-ink/10 bg-white p-2"
                   />
+
+                  {response.status === "approved" && (
+                    <div className="mt-3 rounded-md border border-sky-100 bg-white p-2 text-xs font-bold text-sky-950">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span>
+                          Documentation:{" "}
+                          {documentation
+                            ? documentation.status === "submitted"
+                              ? "submitted"
+                              : "requested"
+                            : "not requested"}
+                        </span>
+                        <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5">
+                          {documentation?.status === "submitted" ? "+1 awarded" : "1 point"}
+                        </span>
+                      </div>
+                      {documentation?.file && (
+                        <p className="mt-1 break-all text-foreground/60">
+                          {documentation.file.name} - {formatDateTime(documentation.submittedAt)}
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   {response.status === "submitted" && (
                     <>
@@ -4675,7 +5256,8 @@ function AdminView({
                           onClick={() =>
                             void runAdminAction(
                               rejectKey,
-                              () => onReviewAnswer(task.id, response.memberId, "rejected", reviewNote),
+                              () =>
+                                onReviewAnswer(task.id, response.memberId, "rejected", reviewNote),
                               "Solution rejected.",
                               "Reject failed. Try again.",
                             )
@@ -4689,7 +5271,9 @@ function AdminView({
                           Reject
                         </Button>
                       </div>
-                      <ActionFeedbackLine feedback={actionFeedback[approveKey] ?? actionFeedback[rejectKey]} />
+                      <ActionFeedbackLine
+                        feedback={actionFeedback[approveKey] ?? actionFeedback[rejectKey]}
+                      />
                     </>
                   )}
                 </article>
@@ -4706,7 +5290,8 @@ function AdminView({
     const members = assignedMembers(task);
     const responses = data.responses[task.id] ?? {};
     const selectedManualMember = manualApproveMembers[task.id] ?? "";
-    const selectedManualScore = manualApproveScores[task.id] ?? String(sanitizePositiveNumber(task.points, 1));
+    const selectedManualScore =
+      manualApproveScores[task.id] ?? String(sanitizePositiveNumber(task.points, 1));
     const selectedProgressMember = progressMembers[task.id] ?? "";
     const progressNote = progressNotes[task.id] ?? "";
     const manualApproveKey = `admin:manual-approve:${task.id}`;
@@ -4758,7 +5343,10 @@ function AdminView({
                     "Archive failed. Try again.",
                   )
                 }
-                className={actionButtonClass("border border-ink/20 bg-paper", actionFeedback[archiveTaskKey])}
+                className={actionButtonClass(
+                  "border border-ink/20 bg-paper",
+                  actionFeedback[archiveTaskKey],
+                )}
               >
                 <Archive data-icon="inline-start" />
                 Archive
@@ -4771,12 +5359,21 @@ function AdminView({
                     restoreTaskKey,
                     () => onUpdateTask(task.id, { status: "active" }),
                     isHiddenTask(task) ? "Task published." : "Task restored.",
-                    isHiddenTask(task) ? "Publish failed. Try again." : "Restore failed. Try again.",
+                    isHiddenTask(task)
+                      ? "Publish failed. Try again."
+                      : "Restore failed. Try again.",
                   )
                 }
-                className={actionButtonClass("border border-ink/20", actionFeedback[restoreTaskKey])}
+                className={actionButtonClass(
+                  "border border-ink/20",
+                  actionFeedback[restoreTaskKey],
+                )}
               >
-                {isHiddenTask(task) ? <Eye data-icon="inline-start" /> : <RotateCcw data-icon="inline-start" />}
+                {isHiddenTask(task) ? (
+                  <Eye data-icon="inline-start" />
+                ) : (
+                  <RotateCcw data-icon="inline-start" />
+                )}
                 {isHiddenTask(task) ? "Publish" : "Restore"}
               </Button>
             )}
@@ -4818,7 +5415,9 @@ function AdminView({
             <DateTimeField
               label="Deadline"
               value={toDateTimeInputValue(task.deadlineAt)}
-              onChange={(value) => onUpdateTask(task.id, { deadlineAt: fromDateTimeInputValue(value) })}
+              onChange={(value) =>
+                onUpdateTask(task.id, { deadlineAt: fromDateTimeInputValue(value) })
+              }
               help="After deadline: default half score. After double time: locked unless overridden."
               tone="deadline"
             />
@@ -4851,7 +5450,9 @@ function AdminView({
                   onClick={() => updateTaskEditDraft(task, { taskType: type })}
                   className={cn(
                     "flex-1 rounded-md px-3 py-2 transition",
-                    editDraft.taskType === type ? "bg-ink text-white" : "text-foreground/65 hover:bg-paper",
+                    editDraft.taskType === type
+                      ? "bg-ink text-white"
+                      : "text-foreground/65 hover:bg-paper",
                   )}
                 >
                   {taskTypeOptionLabel(type)}
@@ -4866,7 +5467,9 @@ function AdminView({
                   onClick={() => updateTaskEditDraft(task, { status })}
                   className={cn(
                     "flex-1 rounded-md px-3 py-2 capitalize transition",
-                    editDraft.status === status ? "bg-ink text-white" : "text-foreground/65 hover:bg-paper",
+                    editDraft.status === status
+                      ? "bg-ink text-white"
+                      : "text-foreground/65 hover:bg-paper",
                   )}
                 >
                   {status}
@@ -4883,24 +5486,24 @@ function AdminView({
                 className="border border-ink/20 bg-white"
               />
               <div className="grid gap-2 rounded-md border border-ink/20 bg-white p-2 text-sm">
-                        <label className="flex h-8 items-center gap-2 font-bold">
-                          <input
-                            type="checkbox"
-                            checked={areAllMembersSelected(editDraft.memberIds)}
-                            onChange={(event) => toggleAllTaskEditMembers(task, event.target.checked)}
-                          />
-                          All team
-                        </label>
-                        <div className="max-h-36 overflow-auto border-t border-ink/10 pt-2">
-                          {data.members.map((member) => (
-                            <label key={member.id} className="flex h-8 items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={editDraft.memberIds.includes(member.id)}
-                                onChange={() => toggleTaskEditMember(task, member.id)}
-                              />
-                              <span className="truncate">{member.name}</span>
-                            </label>
+                <label className="flex h-8 items-center gap-2 font-bold">
+                  <input
+                    type="checkbox"
+                    checked={areAllMembersSelected(editDraft.memberIds)}
+                    onChange={(event) => toggleAllTaskEditMembers(task, event.target.checked)}
+                  />
+                  All team
+                </label>
+                <div className="max-h-36 overflow-auto border-t border-ink/10 pt-2">
+                  {data.members.map((member) => (
+                    <label key={member.id} className="flex h-8 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={editDraft.memberIds.includes(member.id)}
+                        onChange={() => toggleTaskEditMember(task, member.id)}
+                      />
+                      <span className="truncate">{member.name}</span>
+                    </label>
                   ))}
                 </div>
               </div>
@@ -4917,7 +5520,9 @@ function AdminView({
                   const missing = [
                     !editDraft.title.trim() ? "task title" : "",
                     !editDraft.question.trim() ? "question or instructions" : "",
-                    effectiveScope === "member" && cleanMemberIds.length === 0 ? "at least one member" : "",
+                    effectiveScope === "member" && cleanMemberIds.length === 0
+                      ? "at least one member"
+                      : "",
                   ].filter((field): field is string => Boolean(field));
                   if (missing.length > 0) {
                     blockAdminAction(saveTaskKey, missing);
@@ -4929,7 +5534,10 @@ function AdminView({
                       onUpdateTask(task.id, {
                         title: editDraft.title.trim(),
                         question: editDraft.question.trim(),
-                        points: sanitizePositiveNumber(editDraft.points, sanitizePositiveNumber(task.points, 1)),
+                        points: sanitizePositiveNumber(
+                          editDraft.points,
+                          sanitizePositiveNumber(task.points, 1),
+                        ),
                         taskType: editDraft.taskType,
                         deadlineAt: editDraft.taskType === "technical" ? "" : task.deadlineAt,
                         status: editDraft.status,
@@ -4999,7 +5607,10 @@ function AdminView({
                 });
               }}
               disabled={!taskCanSendNotification}
-              className={actionButtonClass("bg-sky-500 text-white hover:bg-sky-600", actionFeedback[taskUpdateKey])}
+              className={actionButtonClass(
+                "bg-sky-500 text-white hover:bg-sky-600",
+                actionFeedback[taskUpdateKey],
+              )}
             >
               <Bell data-icon="inline-start" />
               {taskUpdateActionLabel}
@@ -5012,7 +5623,10 @@ function AdminView({
           {taskUpdates.length > 0 && (
             <div className="mt-3 grid gap-2 border-t border-sky-200 pt-3">
               {taskUpdates.map((update) => (
-                <div key={update.id} className="rounded-md border border-sky-200 bg-white p-2 text-sm">
+                <div
+                  key={update.id}
+                  className="rounded-md border border-sky-200 bg-white p-2 text-sm"
+                >
                   <StructuredTextBlock text={update.message} compact forceCollapse />
                   <p className="mt-1 text-xs font-bold text-foreground/45">
                     {formatDateTime(update.createdAt)}
@@ -5184,12 +5798,12 @@ function AdminView({
                   skipped
                     ? "border-zinc-200 bg-zinc-50"
                     : response?.status === "approved"
-                    ? "border-emerald-200 bg-emerald-50"
-                    : response?.status === "submitted"
-                      ? "border-yellow-200 bg-yellow-50"
-                      : response?.status === "rejected"
-                        ? "border-red-200 bg-red-50"
-                        : "border-ink/10 bg-white"
+                      ? "border-emerald-200 bg-emerald-50"
+                      : response?.status === "submitted"
+                        ? "border-yellow-200 bg-yellow-50"
+                        : response?.status === "rejected"
+                          ? "border-red-200 bg-red-50"
+                          : "border-ink/10 bg-white"
                 }`}
               >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
@@ -5203,8 +5817,10 @@ function AdminView({
                           : "No final submission"}
                     </div>
                   </div>
-                  <span className={`rounded-full border px-2 py-1 text-xs font-bold ${skipped ? "border-zinc-300 bg-zinc-100 text-zinc-600" : statusTone(response?.status)}`}>
-                    {skipped ? "skipped" : response?.status ?? "missing"}
+                  <span
+                    className={`rounded-full border px-2 py-1 text-xs font-bold ${skipped ? "border-zinc-300 bg-zinc-100 text-zinc-600" : statusTone(response?.status)}`}
+                  >
+                    {skipped ? "skipped" : (response?.status ?? "missing")}
                   </span>
                 </summary>
                 <div className="mt-3 grid gap-2 rounded-md border border-zinc-200 bg-white/70 p-3">
@@ -5246,7 +5862,10 @@ function AdminView({
                                 onManualApprove(
                                   task,
                                   member.id,
-                                  sanitizeScore(manualScore, sanitizePositiveNumber(task.points, 1)),
+                                  sanitizeScore(
+                                    manualScore,
+                                    sanitizePositiveNumber(task.points, 1),
+                                  ),
                                 ),
                               "Manual approval saved.",
                               "Manual approval failed. Try again.",
@@ -5295,7 +5914,8 @@ function AdminView({
                             "Member skipped.",
                             "Could not skip member.",
                           ).then((ok) => {
-                            if (ok) setSkipNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                            if (ok)
+                              setSkipNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
                           });
                         }}
                         className={actionButtonClass(
@@ -5310,7 +5930,9 @@ function AdminView({
                       Skip is a full exemption: no points, no penalties, no completion count.
                     </span>
                   </div>
-                  <ActionFeedbackLine feedback={actionFeedback[restoreKey] ?? actionFeedback[skipKey]} />
+                  <ActionFeedbackLine
+                    feedback={actionFeedback[restoreKey] ?? actionFeedback[skipKey]}
+                  />
                 </div>
                 {response && (
                   <div className="mt-3 rounded-md border border-ink/10 bg-paper p-3">
@@ -5362,7 +5984,8 @@ function AdminView({
                         className="border border-ink/20 bg-white"
                       />
                       <span className="font-normal text-foreground/55">
-                        You can award bonus above the task points. Default follows the deadline rule.
+                        You can award bonus above the task points. Default follows the deadline
+                        rule.
                       </span>
                     </label>
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -5371,7 +5994,9 @@ function AdminView({
                         size="sm"
                         onClick={() => {
                           if (hardLocked) {
-                            blockAdminAction(approveKey, ["override approval for locked submission"]);
+                            blockAdminAction(approveKey, [
+                              "override approval for locked submission",
+                            ]);
                             return;
                           }
                           void runAdminAction(
@@ -5382,13 +6007,17 @@ function AdminView({
                                 member.id,
                                 "approved",
                                 reviewNote,
-                                sanitizeScore(scoreValue, calculateAwardedPoints(task, response, "approved")),
+                                sanitizeScore(
+                                  scoreValue,
+                                  calculateAwardedPoints(task, response, "approved"),
+                                ),
                                 false,
                               ),
                             "Submission approved.",
                             "Approve failed. Try again.",
                           ).then((ok) => {
-                            if (ok) setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                            if (ok)
+                              setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
                           });
                         }}
                         className={actionButtonClass("", actionFeedback[approveKey])}
@@ -5415,7 +6044,8 @@ function AdminView({
                               "Override approval saved.",
                               "Override approval failed.",
                             ).then((ok) => {
-                              if (ok) setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                              if (ok)
+                                setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
                             });
                           }}
                           className={actionButtonClass(
@@ -5433,11 +6063,13 @@ function AdminView({
                         onClick={() => {
                           void runAdminAction(
                             rejectKey,
-                            () => onReviewAnswer(task.id, member.id, "rejected", reviewNote, 0, false),
+                            () =>
+                              onReviewAnswer(task.id, member.id, "rejected", reviewNote, 0, false),
                             "Submission rejected.",
                             "Reject failed. Try again.",
                           ).then((ok) => {
-                            if (ok) setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
+                            if (ok)
+                              setReviewNotes((current) => ({ ...current, [reviewNoteKey]: "" }));
                           });
                         }}
                         className={actionButtonClass(
@@ -5461,9 +6093,14 @@ function AdminView({
                 {progress.length > 0 && (
                   <div className="mt-3 grid gap-2">
                     {progress.map((update) => (
-                      <div key={update.id} className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm">
+                      <div
+                        key={update.id}
+                        className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm"
+                      >
                         <StructuredTextBlock text={update.note} compact forceCollapse />
-                        <p className="mt-1 text-xs text-foreground/50">{formatDateTime(update.createdAt)}</p>
+                        <p className="mt-1 text-xs text-foreground/50">
+                          {formatDateTime(update.createdAt)}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -5478,7 +6115,11 @@ function AdminView({
 
   function renderMeetingRows(meetings: Meeting[]) {
     if (meetings.length === 0) {
-      return <p className="rounded-lg border border-dashed border-ink/20 bg-white p-6 text-sm text-foreground/55">No meetings here yet.</p>;
+      return (
+        <p className="rounded-lg border border-dashed border-ink/20 bg-white p-6 text-sm text-foreground/55">
+          No meetings here yet.
+        </p>
+      );
     }
 
     return (
@@ -5500,11 +6141,14 @@ function AdminView({
                 <div className="min-w-0">
                   <div className="truncate text-lg font-bold">{meeting.title}</div>
                   <div className="mt-1 text-xs text-foreground/55">
-                    {formatDateTime(meeting.startsAt)} | {meeting.durationMinutes}m | {meeting.points} pts
+                    {formatDateTime(meeting.startsAt)} | {meeting.durationMinutes}m |{" "}
+                    {meeting.points} pts
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
-                  <span className={`rounded-full border px-2 py-1 text-xs font-bold ${meetingPhaseTone(phase)}`}>
+                  <span
+                    className={`rounded-full border px-2 py-1 text-xs font-bold ${meetingPhaseTone(phase)}`}
+                  >
                     {meetingPhaseLabel(phase)}
                   </span>
                   <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
@@ -5540,13 +6184,17 @@ function AdminView({
               <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
                 {meetingStatus(meeting)}
               </span>
-              <span className={`rounded-full border px-2 py-1 text-xs font-bold ${meetingPhaseTone(phase)}`}>
+              <span
+                className={`rounded-full border px-2 py-1 text-xs font-bold ${meetingPhaseTone(phase)}`}
+              >
                 {meetingPhaseLabel(phase)}
               </span>
             </div>
             <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
               <span>Start: {formatDateTime(meeting.startsAt)}</span>
-              {timeWindow && <span>Ends: {formatDateTime(new Date(timeWindow.endMs).toISOString())}</span>}
+              {timeWindow && (
+                <span>Ends: {formatDateTime(new Date(timeWindow.endMs).toISOString())}</span>
+              )}
               <span>Duration: {meeting.durationMinutes}m</span>
               <span>Points: {meeting.points}</span>
               <span>Total score: {Math.round(totalScore * 100) / 100}</span>
@@ -5565,7 +6213,10 @@ function AdminView({
                     "Archive failed. Try again.",
                   )
                 }
-                className={actionButtonClass("border border-ink/20 bg-paper", actionFeedback[archiveMeetingKey])}
+                className={actionButtonClass(
+                  "border border-ink/20 bg-paper",
+                  actionFeedback[archiveMeetingKey],
+                )}
               >
                 <Archive data-icon="inline-start" />
                 Archive
@@ -5581,7 +6232,10 @@ function AdminView({
                     "Restore failed. Try again.",
                   )
                 }
-                className={actionButtonClass("border border-ink/20", actionFeedback[restoreMeetingKey])}
+                className={actionButtonClass(
+                  "border border-ink/20",
+                  actionFeedback[restoreMeetingKey],
+                )}
               >
                 <RotateCcw data-icon="inline-start" />
                 Restore
@@ -5592,7 +6246,8 @@ function AdminView({
               variant="ghost"
               size="icon"
               onClick={() => {
-                if (!window.confirm("Delete this meeting and all linked attendance/score data?")) return;
+                if (!window.confirm("Delete this meeting and all linked attendance/score data?"))
+                  return;
                 void runAdminAction(
                   deleteMeetingKey,
                   () => onRemoveMeeting(meeting.id),
@@ -5615,7 +6270,9 @@ function AdminView({
           <DateTimeField
             label="Start"
             value={toDateTimeInputValue(meeting.startsAt)}
-            onChange={(value) => onUpdateMeeting(meeting.id, { startsAt: fromDateTimeInputValue(value) })}
+            onChange={(value) =>
+              onUpdateMeeting(meeting.id, { startsAt: fromDateTimeInputValue(value) })
+            }
             help="Used to calculate late minutes."
           />
           <label className="grid gap-1 text-sm font-bold">
@@ -5625,7 +6282,9 @@ function AdminView({
               min={1}
               value={meeting.durationMinutes}
               onChange={(event) =>
-                onUpdateMeeting(meeting.id, { durationMinutes: sanitizeNumber(event.target.value) || 60 })
+                onUpdateMeeting(meeting.id, {
+                  durationMinutes: sanitizeNumber(event.target.value) || 60,
+                })
               }
               className="border border-ink/20 bg-paper"
             />
@@ -5638,7 +6297,9 @@ function AdminView({
               step={0.1}
               value={meeting.points}
               onChange={(event) =>
-                onUpdateMeeting(meeting.id, { points: sanitizePositiveNumber(event.target.value, 1) })
+                onUpdateMeeting(meeting.id, {
+                  points: sanitizePositiveNumber(event.target.value, 1),
+                })
               }
               className="border border-ink/20 bg-paper"
             />
@@ -5653,7 +6314,8 @@ function AdminView({
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-ink/10 bg-paper p-3">
           <div className="text-sm font-bold text-foreground/65">
-            Edit individual scores below. Changing meeting points will not rewrite old scores automatically.
+            Edit individual scores below. Changing meeting points will not rewrite old scores
+            automatically.
           </div>
           <Button
             type="button"
@@ -5667,7 +6329,10 @@ function AdminView({
                 "Recalculate failed.",
               )
             }
-            className={actionButtonClass("border border-ink/20 bg-white", actionFeedback[recalcMeetingKey])}
+            className={actionButtonClass(
+              "border border-ink/20 bg-white",
+              actionFeedback[recalcMeetingKey],
+            )}
           >
             <RefreshCw data-icon="inline-start" />
             Recalculate all
@@ -5693,8 +6358,8 @@ function AdminView({
                   <strong>{member.name}</strong>
                   {attendance ? (
                     <p className="text-xs text-foreground/60">
-                      Checked {formatDateTime(attendance.checkedAt)} | late {attendance.lateMinutes}m | score{" "}
-                      {attendance.score}
+                      Checked {formatDateTime(attendance.checkedAt)} | late {attendance.lateMinutes}
+                      m | score {attendance.score}
                     </p>
                   ) : (
                     <p className="text-xs text-foreground/50">Not checked yet</p>
@@ -5706,7 +6371,10 @@ function AdminView({
                     step={0.1}
                     value={meetingScoreDrafts[draftKey] ?? String(attendance?.score ?? 0)}
                     onChange={(event) =>
-                      setMeetingScoreDrafts((current) => ({ ...current, [draftKey]: event.target.value }))
+                      setMeetingScoreDrafts((current) => ({
+                        ...current,
+                        [draftKey]: event.target.value,
+                      }))
                     }
                     className="h-10 w-24 border border-ink/20 bg-white text-center"
                     aria-label={`Score for ${member.name}`}
@@ -5728,7 +6396,10 @@ function AdminView({
                         "Score failed.",
                       )
                     }
-                    className={actionButtonClass("border border-ink/20 bg-white", actionFeedback[scoreKey])}
+                    className={actionButtonClass(
+                      "border border-ink/20 bg-white",
+                      actionFeedback[scoreKey],
+                    )}
                   >
                     Save score
                   </Button>
@@ -5832,14 +6503,18 @@ function AdminView({
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className={`rounded-full border px-2 py-1 text-xs font-bold ${skipped ? "border-zinc-300 bg-zinc-100 text-zinc-600" : statusTone(response?.status)}`}>
-                    {skipped ? "skipped" : response?.status ?? "missing"}
+                  <span
+                    className={`rounded-full border px-2 py-1 text-xs font-bold ${skipped ? "border-zinc-300 bg-zinc-100 text-zinc-600" : statusTone(response?.status)}`}
+                  >
+                    {skipped ? "skipped" : (response?.status ?? "missing")}
                   </span>
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() => openAdminEntity(isProblemTask(task) ? "problem" : "task", task.id)}
+                    onClick={() =>
+                      openAdminEntity(isProblemTask(task) ? "problem" : "task", task.id)
+                    }
                     className="border border-ink/20 bg-white"
                   >
                     Open
@@ -5847,12 +6522,18 @@ function AdminView({
                 </div>
               </div>
               <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
-                <span>Score {awarded}/{sanitizePositiveNumber(task.points, 1)}</span>
+                <span>
+                  Score {awarded}/{sanitizePositiveNumber(task.points, 1)}
+                </span>
                 <span>Rejections {rejectionCount(response)}</span>
                 {skipped && <span>Skip exemption: no profile impact</span>}
                 {late && <span className="text-yellow-800">Late - half score</span>}
               </div>
-              {note && <p className="mt-2 rounded-md border border-ink/10 bg-paper p-2 text-sm">Note: {note}</p>}
+              {note && (
+                <p className="mt-2 rounded-md border border-ink/10 bg-paper p-2 text-sm">
+                  Note: {note}
+                </p>
+              )}
               {response && (
                 <StructuredTextBlock
                   text={response.answer}
@@ -5862,7 +6543,9 @@ function AdminView({
                 />
               )}
               {progress.length > 0 && (
-                <p className="mt-2 text-xs font-bold text-yellow-800">{progress.length} progress updates</p>
+                <p className="mt-2 text-xs font-bold text-yellow-800">
+                  {progress.length} progress updates
+                </p>
               )}
             </div>
           );
@@ -5911,12 +6594,17 @@ function AdminView({
               const reviewNote = reviewNotes[reviewNoteKey] ?? "";
               const scoreValue =
                 reviewScores[reviewNoteKey] ??
-                String(responseAwardedPoints(task, response) || sanitizePositiveNumber(task.points, 1));
+                String(
+                  responseAwardedPoints(task, response) || sanitizePositiveNumber(task.points, 1),
+                );
               const approveKey = `attention:approve:${task.id}:${response.memberId}`;
               const rejectKey = `attention:reject:${task.id}:${response.memberId}`;
               const locked = isHardLocked(task, response);
               return (
-                <article key={response.memberId} className="rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                <article
+                  key={response.memberId}
+                  className="rounded-lg border border-amber-200 bg-amber-50/50 p-3"
+                >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <strong className="text-lg">{memberDisplayName}</strong>
@@ -5927,13 +6615,21 @@ function AdminView({
                     {renderMemberLinkButtons(member)}
                   </div>
 
-                  <StructuredTextBlock text={response.answer} compact forceCollapse className="mt-3 text-sm" />
+                  <StructuredTextBlock
+                    text={response.answer}
+                    compact
+                    forceCollapse
+                    className="mt-3 text-sm"
+                  />
 
                   <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_120px_auto_auto]">
                     <Input
                       value={reviewNote}
                       onChange={(event) =>
-                        setReviewNotes((current) => ({ ...current, [reviewNoteKey]: event.target.value }))
+                        setReviewNotes((current) => ({
+                          ...current,
+                          [reviewNoteKey]: event.target.value,
+                        }))
                       }
                       placeholder="Review note"
                       className="border border-ink/20 bg-white"
@@ -5944,7 +6640,10 @@ function AdminView({
                       step={0.1}
                       value={scoreValue}
                       onChange={(event) =>
-                        setReviewScores((current) => ({ ...current, [reviewNoteKey]: event.target.value }))
+                        setReviewScores((current) => ({
+                          ...current,
+                          [reviewNoteKey]: event.target.value,
+                        }))
                       }
                       placeholder="Score"
                       className="border border-ink/20 bg-white text-center"
@@ -5992,7 +6691,9 @@ function AdminView({
                       Reject
                     </Button>
                   </div>
-                  <ActionFeedbackLine feedback={actionFeedback[approveKey] ?? actionFeedback[rejectKey]} />
+                  <ActionFeedbackLine
+                    feedback={actionFeedback[approveKey] ?? actionFeedback[rejectKey]}
+                  />
                 </article>
               );
             })
@@ -6088,7 +6789,9 @@ function AdminView({
                 <Menu className="size-4" />
               </Button>
               <div>
-                <h1 className="text-xl font-bold">{navItems.find((item) => item.id === section)?.label}</h1>
+                <h1 className="text-xl font-bold">
+                  {navItems.find((item) => item.id === section)?.label}
+                </h1>
                 <p className="hidden text-xs text-foreground/50 sm:block">
                   Active tasks stay visible. Archived tasks keep their full log.
                 </p>
@@ -6151,25 +6854,29 @@ function AdminView({
           {section === "repo-updates" && (
             <section className="grid gap-5">
               {pendingProfileRequests.length > 0 && (
-              <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-2xl font-bold">Profile requests</h2>
-                    <p className="mt-1 text-sm text-sky-900/70">
-                      Members can request a nickname, GitHub repo, or Drive link change. Approve applies it; reject leaves the official profile unchanged.
-                    </p>
+                <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-2xl font-bold">Profile requests</h2>
+                      <p className="mt-1 text-sm text-sky-900/70">
+                        Members can request a nickname, GitHub repo, or Drive link change. Approve
+                        applies it; reject leaves the official profile unchanged.
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-sky-300 bg-white px-3 py-1 text-sm font-bold text-sky-900">
+                      {pendingProfileRequests.length} pending
+                    </span>
                   </div>
-                  <span className="rounded-full border border-sky-300 bg-white px-3 py-1 text-sm font-bold text-sky-900">
-                    {pendingProfileRequests.length} pending
-                  </span>
-                </div>
-                <div className="mt-4 grid gap-3">
-                  {pendingProfileRequests.map((request) => {
+                  <div className="mt-4 grid gap-3">
+                    {pendingProfileRequests.map((request) => {
                       const member = data.members.find((item) => item.id === request.memberId);
                       const approveProfileKey = `admin:profile-approve:${request.id}`;
                       const rejectProfileKey = `admin:profile-reject:${request.id}`;
                       return (
-                        <div key={request.id} className="rounded-lg border border-sky-200 bg-white p-3">
+                        <div
+                          key={request.id}
+                          className="rounded-lg border border-sky-200 bg-white p-3"
+                        >
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               <strong>{member?.name ?? request.memberName}</strong>
@@ -6189,7 +6896,8 @@ function AdminView({
                                 )}
                                 {request.driveUrl !== undefined && (
                                   <span className="break-all">
-                                    Drive: <strong>{request.driveUrl || "Remove saved Drive"}</strong>
+                                    Drive:{" "}
+                                    <strong>{request.driveUrl || "Remove saved Drive"}</strong>
                                   </span>
                                 )}
                                 {request.previousRepoUrl && (
@@ -6206,13 +6914,25 @@ function AdminView({
                             </div>
                             <div className="flex flex-wrap gap-2">
                               {request.repoUrl && (
-                                <Button type="button" size="sm" onClick={() => window.open(request.repoUrl, "_blank", "noopener,noreferrer")}>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() =>
+                                    window.open(request.repoUrl, "_blank", "noopener,noreferrer")
+                                  }
+                                >
                                   <ExternalLink data-icon="inline-start" />
                                   Open new repo
                                 </Button>
                               )}
                               {request.driveUrl && (
-                                <Button type="button" size="sm" onClick={() => window.open(request.driveUrl, "_blank", "noopener,noreferrer")}>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() =>
+                                    window.open(request.driveUrl, "_blank", "noopener,noreferrer")
+                                  }
+                                >
                                   <FolderOpen data-icon="inline-start" />
                                   Open new Drive
                                 </Button>
@@ -6257,8 +6977,8 @@ function AdminView({
                         </div>
                       );
                     })}
+                  </div>
                 </div>
-              </div>
               )}
 
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
@@ -6281,7 +7001,9 @@ function AdminView({
                   ) : (
                     pendingSubmissions.map((item) => {
                       const task = data.tasks.find((candidate) => candidate.id === item.taskId);
-                      const member = data.members.find((candidate) => candidate.id === item.memberId);
+                      const member = data.members.find(
+                        (candidate) => candidate.id === item.memberId,
+                      );
                       return (
                         <div
                           key={`attention-${item.id}`}
@@ -6326,7 +7048,8 @@ function AdminView({
                   <div>
                     <h2 className="text-2xl font-bold">Updates need attention</h2>
                     <p className="mt-1 text-sm text-yellow-900/70">
-                      These are progress notes, GitHub requests, and Drive requests that need admin attention.
+                      These are progress notes, GitHub requests, and Drive requests that need admin
+                      attention.
                     </p>
                   </div>
                   <span className="rounded-full border border-yellow-300 bg-white px-3 py-1 text-sm font-bold text-yellow-900">
@@ -6346,7 +7069,10 @@ function AdminView({
                         : undefined;
                       const markSeenKey = `admin:mark-seen:${update.id}`;
                       return (
-                        <div key={update.id} className="rounded-lg border border-yellow-200 bg-white p-3">
+                        <div
+                          key={update.id}
+                          className="rounded-lg border border-yellow-200 bg-white p-3"
+                        >
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               {update.taskId ? (
@@ -6379,13 +7105,25 @@ function AdminView({
                             </div>
                             <div className="flex flex-wrap gap-2">
                               {member?.repoUrl && update.source !== "drive" && (
-                                <Button type="button" size="sm" onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() =>
+                                    window.open(member.repoUrl, "_blank", "noopener,noreferrer")
+                                  }
+                                >
                                   <ExternalLink data-icon="inline-start" />
                                   Open repo
                                 </Button>
                               )}
                               {member?.driveUrl && update.source === "drive" && (
-                                <Button type="button" size="sm" onClick={() => window.open(member.driveUrl, "_blank", "noopener,noreferrer")}>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() =>
+                                    window.open(member.driveUrl, "_blank", "noopener,noreferrer")
+                                  }
+                                >
                                   <FolderOpen data-icon="inline-start" />
                                   Open Drive
                                 </Button>
@@ -6434,11 +7172,20 @@ function AdminView({
                 </summary>
                 <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {data.members.map((member) => (
-                    <div key={member.id} className="flex items-center justify-between gap-3 rounded-lg border border-ink/10 bg-paper p-3">
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-ink/10 bg-paper p-3"
+                    >
                       <strong className="truncate">{member.name}</strong>
                       <div className="flex shrink-0 gap-2">
                         {member.repoUrl ? (
-                          <Button type="button" size="sm" onClick={() => window.open(member.repoUrl, "_blank", "noopener,noreferrer")}>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() =>
+                              window.open(member.repoUrl, "_blank", "noopener,noreferrer")
+                            }
+                          >
                             Repo
                           </Button>
                         ) : (
@@ -6447,7 +7194,13 @@ function AdminView({
                           </span>
                         )}
                         {member.driveUrl ? (
-                          <Button type="button" size="sm" onClick={() => window.open(member.driveUrl, "_blank", "noopener,noreferrer")}>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() =>
+                              window.open(member.driveUrl, "_blank", "noopener,noreferrer")
+                            }
+                          >
                             Drive
                           </Button>
                         ) : (
@@ -6493,8 +7246,18 @@ function AdminView({
                     </span>
                   </div>
                   <div className="mt-4 grid gap-3">
-                    <Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Task title" className="h-11 border border-ink/20 bg-white" />
-                    <Textarea value={taskQuestion} onChange={(event) => setTaskQuestion(event.target.value)} placeholder="Question or instructions" className="min-h-24 border border-ink/20 bg-white" />
+                    <Input
+                      value={taskTitle}
+                      onChange={(event) => setTaskTitle(event.target.value)}
+                      placeholder="Task title"
+                      className="h-11 border border-ink/20 bg-white"
+                    />
+                    <Textarea
+                      value={taskQuestion}
+                      onChange={(event) => setTaskQuestion(event.target.value)}
+                      placeholder="Question or instructions"
+                      className="min-h-24 border border-ink/20 bg-white"
+                    />
                     <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
                       {(["technical", "nonTechnical", "problem"] as const).map((type) => (
                         <button
@@ -6503,7 +7266,9 @@ function AdminView({
                           onClick={() => setTaskType(type)}
                           className={cn(
                             "flex-1 rounded-md px-3 py-2 transition",
-                            taskType === type ? "bg-ink text-white" : "text-foreground/65 hover:bg-paper",
+                            taskType === type
+                              ? "bg-ink text-white"
+                              : "text-foreground/65 hover:bg-paper",
                           )}
                         >
                           {taskTypeOptionLabel(type)}
@@ -6518,7 +7283,9 @@ function AdminView({
                           onClick={() => setTaskStatusDraft(status)}
                           className={cn(
                             "flex-1 rounded-md px-3 py-2 capitalize transition",
-                            taskStatusDraft === status ? "bg-ink text-white" : "text-foreground/65 hover:bg-paper",
+                            taskStatusDraft === status
+                              ? "bg-ink text-white"
+                              : "text-foreground/65 hover:bg-paper",
                           )}
                         >
                           {status}
@@ -6528,8 +7295,17 @@ function AdminView({
                     <div className="grid gap-3">
                       <label className="grid gap-1 text-xs font-bold text-foreground/65">
                         Base points
-                        <Input type="number" min={1} value={taskPoints} onChange={(event) => setTaskPoints(Number(event.target.value))} placeholder="Points" className="h-11 border border-ink/20 bg-white" />
-                        <span className="font-normal text-foreground/50">Admin can still award bonus when approving.</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={taskPoints}
+                          onChange={(event) => setTaskPoints(Number(event.target.value))}
+                          placeholder="Points"
+                          className="h-11 border border-ink/20 bg-white"
+                        />
+                        <span className="font-normal text-foreground/50">
+                          Admin can still award bonus when approving.
+                        </span>
                       </label>
                       <div className="grid gap-2 rounded-md border border-ink/20 bg-white p-2 text-sm">
                         <label className="flex h-8 items-center gap-2 font-bold">
@@ -6563,7 +7339,8 @@ function AdminView({
                       />
                       {taskType === "technical" ? (
                         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
-                          Technical tasks have no deadline. They stay open until you review or archive them.
+                          Technical tasks have no deadline. They stay open until you review or
+                          archive them.
                         </div>
                       ) : (
                         <DateTimeField
@@ -6581,7 +7358,8 @@ function AdminView({
                       </div>
                     ) : (
                       <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs leading-5 text-yellow-900">
-                        Deadline rule: late submissions default to half score. Submissions after double the task window require override approval.
+                        Deadline rule: late submissions default to half score. Submissions after
+                        double the task window require override approval.
                       </div>
                     )}
                     <Button
@@ -6604,7 +7382,9 @@ function AdminView({
                   {renderTaskRows(activeTasks)}
                 </div>
               </div>
-              {renderTaskDetail(selectedTask && isActiveTask(selectedTask) ? selectedTask : activeTasks[0])}
+              {renderTaskDetail(
+                selectedTask && isActiveTask(selectedTask) ? selectedTask : activeTasks[0],
+              )}
             </section>
           )}
 
@@ -6734,14 +7514,21 @@ function AdminView({
           {section === "members" && (
             <section className="grid gap-4">
               {data.members.map((member) => {
-                const memberScore = stats.allMemberStats.find((item) => item.member.id === member.id);
+                const memberScore = stats.allMemberStats.find(
+                  (item) => item.member.id === member.id,
+                );
                 return (
-                  <details key={member.id} className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                  <details
+                    key={member.id}
+                    className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm"
+                  >
                     <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
                       <div>
                         <div className="flex items-center gap-2">
                           <strong className="text-xl">{member.name}</strong>
-                          <span className={`rounded-full border px-2 py-1 text-xs font-bold ${member.hidden ? "border-zinc-300 bg-zinc-100 text-zinc-600" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-xs font-bold ${member.hidden ? "border-zinc-300 bg-zinc-100 text-zinc-600" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}
+                          >
                             {member.hidden ? "Hidden" : "Visible"}
                           </span>
                         </div>
@@ -6776,7 +7563,11 @@ function AdminView({
                           }}
                           className="border border-ink/20 bg-paper"
                         >
-                          {member.hidden ? <Eye data-icon="inline-start" /> : <EyeOff data-icon="inline-start" />}
+                          {member.hidden ? (
+                            <Eye data-icon="inline-start" />
+                          ) : (
+                            <EyeOff data-icon="inline-start" />
+                          )}
                           {member.hidden ? "Show" : "Hide"}
                         </Button>
                       </div>
@@ -6804,7 +7595,9 @@ function AdminView({
                             type="number"
                             value={member.basePoints ?? 0}
                             onChange={(event) =>
-                              onUpdateMember(member.id, { basePoints: sanitizeNumber(event.target.value) })
+                              onUpdateMember(member.id, {
+                                basePoints: sanitizeNumber(event.target.value),
+                              })
                             }
                             className="max-w-xs border border-ink/20 bg-yellow-50 text-center"
                           />
@@ -6848,23 +7641,72 @@ function AdminView({
                               Add
                             </Button>
                           </div>
-                          <ActionFeedbackLine feedback={actionFeedback[`admin:add-bonus:${member.id}`]} />
+                          <ActionFeedbackLine
+                            feedback={actionFeedback[`admin:add-bonus:${member.id}`]}
+                          />
                           {bonusGradesForMember(member.id).length > 0 && (
                             <div className="grid gap-1 text-xs font-bold text-foreground/65">
-                              {bonusGradesForMember(member.id).slice(0, 4).map((bonus) => (
-                                <div key={bonus.id} className="rounded-md border border-ink/10 bg-white px-2 py-1">
-                                  <span className="text-emerald-700">{bonus.points > 0 ? "+" : ""}{bonus.points}</span>
-                                  <span> - {bonus.note}</span>
-                                </div>
-                              ))}
+                              {bonusGradesForMember(member.id)
+                                .slice(0, 4)
+                                .map((bonus) => (
+                                  <div
+                                    key={bonus.id}
+                                    className="rounded-md border border-ink/10 bg-white px-2 py-1"
+                                  >
+                                    <span className="text-emerald-700">
+                                      {bonus.points > 0 ? "+" : ""}
+                                      {bonus.points}
+                                    </span>
+                                    <span> - {bonus.note}</span>
+                                  </div>
+                                ))}
                             </div>
                           )}
                         </div>
-                        <Input value={member.publicFlag ?? ""} onChange={(event) => onUpdateMember(member.id, { publicFlag: event.target.value })} placeholder="Public flag" className="border border-ink/20 bg-red-50" />
-                        <Input value={member.adminNote ?? ""} onChange={(event) => onUpdateMember(member.id, { adminNote: event.target.value })} placeholder="Private admin note" className="border border-ink/20 bg-paper" />
-                        <Input value={member.repoUrl ?? ""} onChange={(event) => onUpdateMember(member.id, { repoUrl: event.target.value })} placeholder="Repo URL" dir="ltr" className="border border-ink/20 bg-paper text-left" />
-                        <Input value={member.driveUrl ?? ""} onChange={(event) => onUpdateMember(member.id, { driveUrl: event.target.value })} placeholder="Drive URL" dir="ltr" className="border border-ink/20 bg-paper text-left" />
-                        <Input value={member.aliases.join(", ")} onChange={(event) => onUpdateMember(member.id, { aliases: uniqueText(event.target.value.split(",")) })} placeholder="Aliases" className="border border-ink/20 bg-paper" />
+                        <Input
+                          value={member.publicFlag ?? ""}
+                          onChange={(event) =>
+                            onUpdateMember(member.id, { publicFlag: event.target.value })
+                          }
+                          placeholder="Public flag"
+                          className="border border-ink/20 bg-red-50"
+                        />
+                        <Input
+                          value={member.adminNote ?? ""}
+                          onChange={(event) =>
+                            onUpdateMember(member.id, { adminNote: event.target.value })
+                          }
+                          placeholder="Private admin note"
+                          className="border border-ink/20 bg-paper"
+                        />
+                        <Input
+                          value={member.repoUrl ?? ""}
+                          onChange={(event) =>
+                            onUpdateMember(member.id, { repoUrl: event.target.value })
+                          }
+                          placeholder="Repo URL"
+                          dir="ltr"
+                          className="border border-ink/20 bg-paper text-left"
+                        />
+                        <Input
+                          value={member.driveUrl ?? ""}
+                          onChange={(event) =>
+                            onUpdateMember(member.id, { driveUrl: event.target.value })
+                          }
+                          placeholder="Drive URL"
+                          dir="ltr"
+                          className="border border-ink/20 bg-paper text-left"
+                        />
+                        <Input
+                          value={member.aliases.join(", ")}
+                          onChange={(event) =>
+                            onUpdateMember(member.id, {
+                              aliases: uniqueText(event.target.value.split(",")),
+                            })
+                          }
+                          placeholder="Aliases"
+                          className="border border-ink/20 bg-paper"
+                        />
                       </div>
                       <div>
                         <h3 className="mb-3 text-lg font-bold">Member log</h3>
@@ -6881,8 +7723,20 @@ function AdminView({
             <section className="grid gap-4">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink/10 bg-white p-3 shadow-sm">
                 <div className="flex rounded-lg border border-ink/10 bg-paper p-1">
-                  <button type="button" onClick={() => setLogMode("task")} className={`rounded-md px-3 py-2 text-sm font-bold ${logMode === "task" ? "bg-ink text-white" : ""}`}>By task</button>
-                  <button type="button" onClick={() => setLogMode("member")} className={`rounded-md px-3 py-2 text-sm font-bold ${logMode === "member" ? "bg-ink text-white" : ""}`}>By member</button>
+                  <button
+                    type="button"
+                    onClick={() => setLogMode("task")}
+                    className={`rounded-md px-3 py-2 text-sm font-bold ${logMode === "task" ? "bg-ink text-white" : ""}`}
+                  >
+                    By task
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLogMode("member")}
+                    className={`rounded-md px-3 py-2 text-sm font-bold ${logMode === "member" ? "bg-ink text-white" : ""}`}
+                  >
+                    By member
+                  </button>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-foreground/55">
                   <Search className="size-4" />
@@ -6891,7 +7745,9 @@ function AdminView({
               </div>
               {logMode === "task" ? (
                 <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
-                  <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">{renderTaskRows(data.tasks)}</div>
+                  <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+                    {renderTaskRows(data.tasks)}
+                  </div>
                   {renderTaskDetail(selectedTask)}
                 </div>
               ) : (
@@ -6936,9 +7792,12 @@ function AdminView({
                 <div className="mt-4">{renderHiddenRows(hiddenTasks)}</div>
               </div>
               {(() => {
-                const hiddenTask = selectedTask && isHiddenTask(selectedTask) ? selectedTask : hiddenTasks[0];
+                const hiddenTask =
+                  selectedTask && isHiddenTask(selectedTask) ? selectedTask : hiddenTasks[0];
                 if (!hiddenTask) return null;
-                return isProblemTask(hiddenTask) ? renderProblemDetail(hiddenTask) : renderTaskDetail(hiddenTask);
+                return isProblemTask(hiddenTask)
+                  ? renderProblemDetail(hiddenTask)
+                  : renderTaskDetail(hiddenTask);
               })()}
             </section>
           )}
@@ -6948,20 +7807,30 @@ function AdminView({
               <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
                 <label className="mb-3 flex items-center gap-2 rounded-lg border border-ink/10 bg-paper px-3 py-2">
                   <Search className="size-4 text-foreground/40" />
-                  <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search archive" className="w-full bg-transparent text-sm outline-none" />
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search archive"
+                    className="w-full bg-transparent text-sm outline-none"
+                  />
                 </label>
                 <div className="grid gap-3">
                   <details open className="rounded-lg border border-ink/10 bg-paper p-3">
                     <summary className="cursor-pointer text-sm font-bold">
-                      Archived tasks ({visibleArchive.filter((task) => !isProblemTask(task)).length})
+                      Archived tasks ({visibleArchive.filter((task) => !isProblemTask(task)).length}
+                      )
                     </summary>
-                    <div className="mt-3">{renderTaskRows(visibleArchive.filter((task) => !isProblemTask(task)))}</div>
+                    <div className="mt-3">
+                      {renderTaskRows(visibleArchive.filter((task) => !isProblemTask(task)))}
+                    </div>
                   </details>
                   <details className="rounded-lg border border-ink/10 bg-paper p-3">
                     <summary className="cursor-pointer text-sm font-bold">
                       Archived problems ({visibleArchive.filter(isProblemTask).length})
                     </summary>
-                    <div className="mt-3">{renderProblemRows(visibleArchive.filter(isProblemTask))}</div>
+                    <div className="mt-3">
+                      {renderProblemRows(visibleArchive.filter(isProblemTask))}
+                    </div>
                   </details>
                   <details className="rounded-lg border border-ink/10 bg-paper p-3">
                     <summary className="cursor-pointer text-sm font-bold">
@@ -6972,11 +7841,18 @@ function AdminView({
                 </div>
               </div>
               {(() => {
-                if (selectedMeetingId && archivedMeetings.some((meeting) => meeting.id === selectedMeetingId)) {
+                if (
+                  selectedMeetingId &&
+                  archivedMeetings.some((meeting) => meeting.id === selectedMeetingId)
+                ) {
                   return renderMeetingDetail(selectedMeeting);
                 }
-                const task = selectedTask && taskStatus(selectedTask) === "archived" ? selectedTask : visibleArchive[0];
-                if (!task) return archivedMeetings[0] ? renderMeetingDetail(archivedMeetings[0]) : null;
+                const task =
+                  selectedTask && taskStatus(selectedTask) === "archived"
+                    ? selectedTask
+                    : visibleArchive[0];
+                if (!task)
+                  return archivedMeetings[0] ? renderMeetingDetail(archivedMeetings[0]) : null;
                 return isProblemTask(task) ? renderProblemDetail(task) : renderTaskDetail(task);
               })()}
             </section>
@@ -6987,9 +7863,24 @@ function AdminView({
               <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
                 <h2 className="text-xl font-bold">Access</h2>
                 <div className="mt-3 grid gap-3">
-                  <Input value={data.settings?.adminPassword ?? DEFAULT_ADMIN_PASSWORD} onChange={(event) => onUpdateSettings({ adminPassword: event.target.value })} placeholder="Admin password" className="border border-ink/20 bg-paper" />
-                  <Input value={data.settings?.statsPassword ?? DEFAULT_STATS_PASSWORD} onChange={(event) => onUpdateSettings({ statsPassword: event.target.value })} placeholder="Stats password" className="border border-ink/20 bg-paper" />
-                  <div className="rounded-lg border border-ink/10 bg-paper p-3 text-sm font-bold" dir="ltr">API: {HIVO_API_URL || "not configured"}</div>
+                  <Input
+                    value={data.settings?.adminPassword ?? DEFAULT_ADMIN_PASSWORD}
+                    onChange={(event) => onUpdateSettings({ adminPassword: event.target.value })}
+                    placeholder="Admin password"
+                    className="border border-ink/20 bg-paper"
+                  />
+                  <Input
+                    value={data.settings?.statsPassword ?? DEFAULT_STATS_PASSWORD}
+                    onChange={(event) => onUpdateSettings({ statsPassword: event.target.value })}
+                    placeholder="Stats password"
+                    className="border border-ink/20 bg-paper"
+                  />
+                  <div
+                    className="rounded-lg border border-ink/10 bg-paper p-3 text-sm font-bold"
+                    dir="ltr"
+                  >
+                    API: {HIVO_API_URL || "not configured"}
+                  </div>
                 </div>
               </div>
               <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm lg:col-span-2">
@@ -6999,9 +7890,17 @@ function AdminView({
                 ) : (
                   <div className="mt-3 grid gap-2">
                     {queuedProgress.map((item) => (
-                      <div key={item.id} className="rounded-lg border border-ink/10 bg-yellow-50 p-3">
+                      <div
+                        key={item.id}
+                        className="rounded-lg border border-ink/10 bg-yellow-50 p-3"
+                      >
                         <strong>{item.memberName}</strong>
-                        <StructuredTextBlock text={item.note} compact forceCollapse className="mt-1 text-sm" />
+                        <StructuredTextBlock
+                          text={item.note}
+                          compact
+                          forceCollapse
+                          className="mt-1 text-sm"
+                        />
                         <div className="mt-2 flex gap-2">
                           <Button
                             type="button"
@@ -7021,7 +7920,15 @@ function AdminView({
                           >
                             Save
                           </Button>
-                          <Button type="button" size="sm" variant="outline" onClick={() => onDismissQueuedProgress(item.id)} className="border border-ink/20 bg-white">Dismiss</Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => onDismissQueuedProgress(item.id)}
+                            className="border border-ink/20 bg-white"
+                          >
+                            Dismiss
+                          </Button>
                         </div>
                       </div>
                     ))}
@@ -7046,8 +7953,17 @@ function AdminView({
               dir="ltr"
             />
             <div className="mt-4 flex gap-2">
-              <Button type="button" onClick={onConfirmTokenAndSave}>Save</Button>
-              <Button type="button" variant="outline" onClick={onCloseTokenDialog} className="border border-ink/20 bg-white">Cancel</Button>
+              <Button type="button" onClick={onConfirmTokenAndSave}>
+                Save
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onCloseTokenDialog}
+                className="border border-ink/20 bg-white"
+              >
+                Cancel
+              </Button>
             </div>
           </section>
         </div>
@@ -7915,7 +8831,9 @@ function StatsView({
   const topMember = stats.leader;
   const nextDeadlineTask = [...activeTasks]
     .filter((task) => task.deadlineAt && new Date(task.deadlineAt).getTime() >= Date.now())
-    .sort((a, b) => new Date(a.deadlineAt ?? 0).getTime() - new Date(b.deadlineAt ?? 0).getTime())[0];
+    .sort(
+      (a, b) => new Date(a.deadlineAt ?? 0).getTime() - new Date(b.deadlineAt ?? 0).getTime(),
+    )[0];
   const now = Date.now();
 
   function activeTaskMembers(task: StudioTask) {
@@ -7929,7 +8847,11 @@ function StatsView({
 
   function memberHasOverdueMissingTask(item: MemberScore) {
     return activeTasks.some((task) => {
-      if (!task.deadlineAt || !taskIsForMember(task, item.member.id) || isTaskSkipped(data, task.id, item.member.id)) {
+      if (
+        !task.deadlineAt ||
+        !taskIsForMember(task, item.member.id) ||
+        isTaskSkipped(data, task.id, item.member.id)
+      ) {
         return false;
       }
       const deadlineMs = new Date(task.deadlineAt).getTime();
@@ -7956,7 +8878,8 @@ function StatsView({
 
   function memberTone(item: MemberScore) {
     const state = memberState(item);
-    if (state === "Critical") return "border-red-300 bg-red-50 shadow-[0_0_0_3px_rgba(239,68,68,0.16)]";
+    if (state === "Critical")
+      return "border-red-300 bg-red-50 shadow-[0_0_0_3px_rgba(239,68,68,0.16)]";
     if (state === "No active assignments") return "border-ink/10 bg-paper";
     return "border-emerald-200 bg-emerald-50";
   }
@@ -7976,11 +8899,15 @@ function StatsView({
     if (item.assignedTasks === 0) return "بدون تكليفات شغالة";
     if (item.assignedTasks > 0 && item.approved === item.assignedTasks) return "خلص كل التكليفات";
     if (item.pending > 0) return "فيه تسليمات قيد المراجعة";
-    if (item.avgHours !== null && item.avgHours <= 24 && item.submitted > 0) return "سرعة التسليم ممتازة";
+    if (item.avgHours !== null && item.avgHours <= 24 && item.submitted > 0)
+      return "سرعة التسليم ممتازة";
     return "الأداء مستقر";
   }
 
-  function statusSegments(total: number, counts: { approved: number; pending: number; rejected: number }) {
+  function statusSegments(
+    total: number,
+    counts: { approved: number; pending: number; rejected: number },
+  ) {
     const safeTotal = Math.max(0, total);
     if (safeTotal === 0) {
       return [{ key: "none", label: "No assignments", count: 1, className: "bg-zinc-200" }];
@@ -8029,9 +8956,15 @@ function StatsView({
       (task) => taskIsForMember(task, memberId) && !isTaskSkipped(data, task.id, memberId),
     );
     return statusSegments(assignedTasks.length, {
-      approved: assignedTasks.filter((task) => getResponse(data, task.id, memberId)?.status === "approved").length,
-      pending: assignedTasks.filter((task) => getResponse(data, task.id, memberId)?.status === "submitted").length,
-      rejected: assignedTasks.filter((task) => getResponse(data, task.id, memberId)?.status === "rejected").length,
+      approved: assignedTasks.filter(
+        (task) => getResponse(data, task.id, memberId)?.status === "approved",
+      ).length,
+      pending: assignedTasks.filter(
+        (task) => getResponse(data, task.id, memberId)?.status === "submitted",
+      ).length,
+      rejected: assignedTasks.filter(
+        (task) => getResponse(data, task.id, memberId)?.status === "rejected",
+      ).length,
     });
   }
 
@@ -8046,7 +8979,13 @@ function StatsView({
     };
   }
 
-  function SegmentedStatusBar({ segments, total }: { segments: ReturnType<typeof statusSegments>; total: number }) {
+  function SegmentedStatusBar({
+    segments,
+    total,
+  }: {
+    segments: ReturnType<typeof statusSegments>;
+    total: number;
+  }) {
     const safeTotal = Math.max(1, total);
     return (
       <div className="stats-segmented-bar">
@@ -8196,7 +9135,11 @@ function StatsView({
           </div>
 
           <div className="stats-hero-panel">
-            <AnimatedProgressRing value={completionRate} label="Team completion" caption="تسليمات التيم" />
+            <AnimatedProgressRing
+              value={completionRate}
+              label="Team completion"
+              caption="تسليمات التيم"
+            />
             <div className="stats-hero-metrics">
               <VisualMetric label="تم تسليمها" value={`${receivedTotal}/${expectedTotal}`} />
               <VisualMetric label="نسبة القبول" value={`${teamApprovalRate}%`} />
@@ -8214,7 +9157,9 @@ function StatsView({
             </div>
           </div>
           <div className="stats-attention-grid">
-            <div className={cn("stats-attention-card", stats.pendingTotal > 0 ? "is-hot" : "is-calm")}>
+            <div
+              className={cn("stats-attention-card", stats.pendingTotal > 0 ? "is-hot" : "is-calm")}
+            >
               <span>مراجعات مستنية</span>
               <strong>{stats.pendingTotal}</strong>
             </div>
@@ -8224,15 +9169,21 @@ function StatsView({
             </div>
             <div className="stats-attention-card is-soft">
               <span>أقل تقدم</span>
-              <strong>{lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "تمام"}</strong>
-              <small>{lowestProgressMember ? formatPercent(lowestProgressMember.responseRate) : "0%"}</small>
+              <strong>
+                {lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "تمام"}
+              </strong>
+              <small>
+                {lowestProgressMember ? formatPercent(lowestProgressMember.responseRate) : "0%"}
+              </small>
             </div>
             <div className="stats-attention-card is-soft">
               <span>أقرب Deadline</span>
               <strong dir={nextDeadlineTask ? textDirection(nextDeadlineTask.title) : "rtl"}>
                 {nextDeadlineTask?.title ?? "مفيش"}
               </strong>
-              {nextDeadlineTask?.deadlineAt && <small>{formatDateTime(nextDeadlineTask.deadlineAt)}</small>}
+              {nextDeadlineTask?.deadlineAt && (
+                <small>{formatDateTime(nextDeadlineTask.deadlineAt)}</small>
+              )}
             </div>
           </div>
         </section>
@@ -8257,7 +9208,8 @@ function StatsView({
             ) : (
               stats.taskMetrics.map((metric, index) => {
                 const segments = taskSegments(metric.task);
-                const taskRate = metric.expected > 0 ? Math.round((metric.received / metric.expected) * 100) : 0;
+                const taskRate =
+                  metric.expected > 0 ? Math.round((metric.received / metric.expected) * 100) : 0;
                 return (
                   <article
                     key={metric.task.id}
@@ -8266,15 +9218,21 @@ function StatsView({
                   >
                     <div className="stats-task-main">
                       <div className="min-w-0">
-                        <h3 dir={textDirection(metric.task.title)} className={textAlignClass(metric.task.title)}>
+                        <h3
+                          dir={textDirection(metric.task.title)}
+                          className={textAlignClass(metric.task.title)}
+                        >
                           {metric.task.title}
                         </h3>
                         <p>
-                          الموعد النهائي: {taskDeadlineLabel(metric.task)} • {formatTaskPointsLabel(metric.task.points || 1)}
+                          الموعد النهائي: {taskDeadlineLabel(metric.task)} •{" "}
+                          {formatTaskPointsLabel(metric.task.points || 1)}
                         </p>
                       </div>
                       <div className="stats-task-score">
-                        <strong>{metric.received}/{metric.expected}</strong>
+                        <strong>
+                          {metric.received}/{metric.expected}
+                        </strong>
                         <span>تسليم</span>
                       </div>
                     </div>
@@ -8295,10 +9253,18 @@ function StatsView({
           </div>
 
           <div className="stats-legend">
-            <span><i className="bg-emerald-500" /> مقبول</span>
-            <span><i className="bg-yellow-400" /> مراجعة</span>
-            <span><i className="bg-red-500" /> مرفوض</span>
-            <span><i className="bg-zinc-200" /> ناقص</span>
+            <span>
+              <i className="bg-emerald-500" /> مقبول
+            </span>
+            <span>
+              <i className="bg-yellow-400" /> مراجعة
+            </span>
+            <span>
+              <i className="bg-red-500" /> مرفوض
+            </span>
+            <span>
+              <i className="bg-zinc-200" /> ناقص
+            </span>
           </div>
         </section>
 
@@ -8309,14 +9275,20 @@ function StatsView({
             </div>
             <span>الأعلى دلوقتي</span>
             <strong>{topMember ? memberArabicName(topMember.member) : "N/A"}</strong>
-            <p>{topMember ? `${topMember.points} نقطة • قبول ${formatPercent(topMember.approvalRate)}` : "لسه مفيش بيانات"}</p>
+            <p>
+              {topMember
+                ? `${topMember.points} نقطة • قبول ${formatPercent(topMember.approvalRate)}`
+                : "لسه مفيش بيانات"}
+            </p>
           </div>
           <div className="stats-spotlight-card is-follow">
             <div className="stats-spotlight-icon">
               <Bell className="size-6" />
             </div>
             <span>حالة حرجة</span>
-            <strong>{lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "N/A"}</strong>
+            <strong>
+              {lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "N/A"}
+            </strong>
             <p>
               {lowestProgressMember
                 ? `${formatPercent(lowestProgressMember.responseRate)} تسليم • ${lowestProgressMember.pending} مراجعة`
@@ -8401,19 +9373,29 @@ function StatsView({
               </span>
             </div>
             <div className="stats-meeting-summary">
-              <AnimatedProgressRing value={meetingPulseRate} label="Meeting attendance" caption="حضور" />
+              <AnimatedProgressRing
+                value={meetingPulseRate}
+                label="Meeting attendance"
+                caption="حضور"
+              />
               <div className="stats-meeting-lines">
                 {stats.meetingMetrics.map((item) => {
-                  const attendanceRate = item.expected > 0 ? Math.round((item.attended / item.expected) * 100) : 0;
+                  const attendanceRate =
+                    item.expected > 0 ? Math.round((item.attended / item.expected) * 100) : 0;
                   return (
                     <div key={item.meeting.id} className="stats-meeting-row">
                       <div>
-                        <strong dir={textDirection(item.meeting.title)}>{item.meeting.title}</strong>
+                        <strong dir={textDirection(item.meeting.title)}>
+                          {item.meeting.title}
+                        </strong>
                         <span>
                           {item.attended}/{item.expected} حضور • {item.totalScore} نقطة
                         </span>
                       </div>
-                      <div className="stats-mini-meter" aria-label={`${attendanceRate}% attendance`}>
+                      <div
+                        className="stats-mini-meter"
+                        aria-label={`${attendanceRate}% attendance`}
+                      >
                         <span style={{ width: `${attendanceRate}%` }} />
                       </div>
                     </div>
@@ -8445,7 +9427,8 @@ function DeanStatsView({
   const completionRate = expectedTotal > 0 ? Math.round((receivedTotal / expectedTotal) * 100) : 0;
   const approvedTotal = visibleStats.reduce((sum, item) => sum + item.approved, 0);
   const reviewedTotal = visibleStats.reduce((sum, item) => sum + item.reviewed, 0);
-  const teamApprovalRate = reviewedTotal > 0 ? Math.round((approvedTotal / reviewedTotal) * 100) : 0;
+  const teamApprovalRate =
+    reviewedTotal > 0 ? Math.round((approvedTotal / reviewedTotal) * 100) : 0;
   const totalPoints = Math.round(stats.pointsTotal * 100) / 100;
   const missingTotal = Math.max(0, expectedTotal - receivedTotal);
   const activeMemberCount = visibleStats.length;
@@ -8460,7 +9443,10 @@ function DeanStatsView({
     );
   }
 
-  function statusSegments(total: number, counts: { approved: number; pending: number; rejected: number }) {
+  function statusSegments(
+    total: number,
+    counts: { approved: number; pending: number; rejected: number },
+  ) {
     const safeTotal = Math.max(0, total);
     if (safeTotal === 0) {
       return [{ key: "none", label: "No assignments", count: 1, className: "bg-zinc-200" }];
@@ -8492,9 +9478,15 @@ function DeanStatsView({
       (task) => taskIsForMember(task, memberId) && !isTaskSkipped(data, task.id, memberId),
     );
     return statusSegments(assignedTasks.length, {
-      approved: assignedTasks.filter((task) => getResponse(data, task.id, memberId)?.status === "approved").length,
-      pending: assignedTasks.filter((task) => getResponse(data, task.id, memberId)?.status === "submitted").length,
-      rejected: assignedTasks.filter((task) => rejectionCount(getResponse(data, task.id, memberId)) > 0).length,
+      approved: assignedTasks.filter(
+        (task) => getResponse(data, task.id, memberId)?.status === "approved",
+      ).length,
+      pending: assignedTasks.filter(
+        (task) => getResponse(data, task.id, memberId)?.status === "submitted",
+      ).length,
+      rejected: assignedTasks.filter(
+        (task) => rejectionCount(getResponse(data, task.id, memberId)) > 0,
+      ).length,
     });
   }
 
@@ -8511,7 +9503,11 @@ function DeanStatsView({
 
   function memberHasOverdueMissingTask(item: MemberScore) {
     return activeTasks.some((task) => {
-      if (!task.deadlineAt || !taskIsForMember(task, item.member.id) || isTaskSkipped(data, task.id, item.member.id)) {
+      if (
+        !task.deadlineAt ||
+        !taskIsForMember(task, item.member.id) ||
+        isTaskSkipped(data, task.id, item.member.id)
+      ) {
         return false;
       }
       const deadlineMs = new Date(task.deadlineAt).getTime();
@@ -8535,7 +9531,8 @@ function DeanStatsView({
   }
 
   function memberTone(item: MemberScore) {
-    if (isStrictCriticalMember(item)) return "border-red-300 bg-red-50 shadow-[0_0_0_3px_rgba(239,68,68,0.16)]";
+    if (isStrictCriticalMember(item))
+      return "border-red-300 bg-red-50 shadow-[0_0_0_3px_rgba(239,68,68,0.16)]";
     if (item.assignedTasks === 0) return "border-ink/10 bg-paper";
     return "border-emerald-200 bg-emerald-50";
   }
@@ -8552,7 +9549,13 @@ function DeanStatsView({
     return "الأداء مستقر";
   }
 
-  function SegmentedStatusBar({ segments, total }: { segments: ReturnType<typeof statusSegments>; total: number }) {
+  function SegmentedStatusBar({
+    segments,
+    total,
+  }: {
+    segments: ReturnType<typeof statusSegments>;
+    total: number;
+  }) {
     const safeTotal = Math.max(1, total);
     return (
       <div className="stats-segmented-bar">
@@ -8701,17 +9704,27 @@ function DeanStatsView({
           </div>
 
           <div className="stats-hero-panel">
-            <AnimatedProgressRing value={completionRate} label="Team completion" caption="تسليمات التيم" />
+            <AnimatedProgressRing
+              value={completionRate}
+              label="Team completion"
+              caption="تسليمات التيم"
+            />
             <div className="stats-hero-metrics">
               <VisualMetric label="أعضاء شغالين" value={activeMemberCount} />
               <VisualMetric label="تاسكات شغالة" value={activeTasks.length} />
               <VisualMetric label="التسليمات" value={`${receivedTotal}/${expectedTotal}`} />
-              <VisualMetric label="القبول / الدرجات" value={`${teamApprovalRate}% / ${totalPoints}`} />
+              <VisualMetric
+                label="القبول / الدرجات"
+                value={`${teamApprovalRate}% / ${totalPoints}`}
+              />
             </div>
           </div>
         </header>
 
-        <section className="stats-attention-strip stats-appear" aria-label="Important dean attention points">
+        <section
+          className="stats-attention-strip stats-appear"
+          aria-label="Important dean attention points"
+        >
           <div className="stats-attention-heading">
             <Bell className="size-5" />
             <div>
@@ -8722,8 +9735,12 @@ function DeanStatsView({
           <div className="stats-attention-grid">
             <div className="stats-attention-card is-calm">
               <span>أعلى تقدم</span>
-              <strong>{highestProgressMember ? memberArabicName(highestProgressMember.member) : "مفيش"}</strong>
-              <small>{highestProgressMember ? formatPercent(highestProgressMember.responseRate) : "0%"}</small>
+              <strong>
+                {highestProgressMember ? memberArabicName(highestProgressMember.member) : "مفيش"}
+              </strong>
+              <small>
+                {highestProgressMember ? formatPercent(highestProgressMember.responseRate) : "0%"}
+              </small>
             </div>
             <div className={cn("stats-attention-card", missingTotal > 0 ? "is-warn" : "is-calm")}>
               <span>تسليمات ناقصة</span>
@@ -8731,12 +9748,20 @@ function DeanStatsView({
             </div>
             <div className="stats-attention-card is-soft">
               <span>أقل تقدم</span>
-              <strong>{lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "تمام"}</strong>
-              <small>{lowestProgressMember ? formatPercent(lowestProgressMember.responseRate) : "0%"}</small>
+              <strong>
+                {lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "تمام"}
+              </strong>
+              <small>
+                {lowestProgressMember ? formatPercent(lowestProgressMember.responseRate) : "0%"}
+              </small>
             </div>
             <div className="stats-attention-card is-soft">
               <span>متوسط سرعة التسليم</span>
-              <strong>{teamAverageSubmissionHours === null ? "لسه" : formatHours(teamAverageSubmissionHours)}</strong>
+              <strong>
+                {teamAverageSubmissionHours === null
+                  ? "لسه"
+                  : formatHours(teamAverageSubmissionHours)}
+              </strong>
               <small>على مستوى التيم</small>
             </div>
           </div>
@@ -8757,7 +9782,11 @@ function DeanStatsView({
               </span>
             </div>
             <div className="stats-meeting-summary">
-              <AnimatedProgressRing value={meetingPulseRate} label="Meeting attendance" caption="حضور" />
+              <AnimatedProgressRing
+                value={meetingPulseRate}
+                label="Meeting attendance"
+                caption="حضور"
+              />
               <div className="stats-meeting-lines">
                 <div className="stats-meeting-row is-summary">
                   <div>
@@ -8771,16 +9800,22 @@ function DeanStatsView({
                   </div>
                 </div>
                 {stats.meetingMetrics.map((item) => {
-                  const attendanceRate = item.expected > 0 ? Math.round((item.attended / item.expected) * 100) : 0;
+                  const attendanceRate =
+                    item.expected > 0 ? Math.round((item.attended / item.expected) * 100) : 0;
                   return (
                     <div key={item.meeting.id} className="stats-meeting-row">
                       <div>
-                        <strong dir={textDirection(item.meeting.title)}>{item.meeting.title}</strong>
+                        <strong dir={textDirection(item.meeting.title)}>
+                          {item.meeting.title}
+                        </strong>
                         <span>
                           {item.attended}/{item.expected} حضور • {item.totalScore} درجات
                         </span>
                       </div>
-                      <div className="stats-mini-meter" aria-label={`${attendanceRate}% attendance`}>
+                      <div
+                        className="stats-mini-meter"
+                        aria-label={`${attendanceRate}% attendance`}
+                      >
                         <span style={{ width: `${attendanceRate}%` }} />
                       </div>
                     </div>
@@ -8811,7 +9846,8 @@ function DeanStatsView({
             ) : (
               stats.taskMetrics.map((metric, index) => {
                 const segments = taskSegments(metric.task);
-                const taskRate = metric.expected > 0 ? Math.round((metric.received / metric.expected) * 100) : 0;
+                const taskRate =
+                  metric.expected > 0 ? Math.round((metric.received / metric.expected) * 100) : 0;
                 const submissionDetails = taskSubmissionDetails(metric.task);
                 return (
                   <article
@@ -8821,15 +9857,21 @@ function DeanStatsView({
                   >
                     <div className="stats-task-main">
                       <div className="min-w-0">
-                        <h3 dir={textDirection(metric.task.title)} className={textAlignClass(metric.task.title)}>
+                        <h3
+                          dir={textDirection(metric.task.title)}
+                          className={textAlignClass(metric.task.title)}
+                        >
                           {metric.task.title}
                         </h3>
                         <p>
-                          deadline: {taskDeadlineLabel(metric.task)} • {formatTaskPointsLabel(metric.task.points || 1)}
+                          deadline: {taskDeadlineLabel(metric.task)} •{" "}
+                          {formatTaskPointsLabel(metric.task.points || 1)}
                         </p>
                       </div>
                       <div className="stats-task-score">
-                        <strong>{metric.received}/{metric.expected}</strong>
+                        <strong>
+                          {metric.received}/{metric.expected}
+                        </strong>
                         <span>تسليم</span>
                       </div>
                     </div>
@@ -8843,14 +9885,18 @@ function DeanStatsView({
                       {submissionDetails.rejectedNames.length > 0 ? (
                         <details className="stats-rejected-details">
                           <summary className="is-rejected">مرفوض {metric.rejected}</summary>
-                          <div className="stats-rejected-list">{submissionDetails.rejectedNames.join("، ")}</div>
+                          <div className="stats-rejected-list">
+                            {submissionDetails.rejectedNames.join("، ")}
+                          </div>
                         </details>
                       ) : (
                         <span className="is-rejected">مرفوض {metric.rejected}</span>
                       )}
                       <span>متابعات {metric.progressUpdates}</span>
                       {submissionDetails.singleSubmitter && (
-                        <span className="is-single-submitter">سلّم: {submissionDetails.singleSubmitter}</span>
+                        <span className="is-single-submitter">
+                          سلّم: {submissionDetails.singleSubmitter}
+                        </span>
                       )}
                     </div>
                   </article>
@@ -8860,10 +9906,18 @@ function DeanStatsView({
           </div>
 
           <div className="stats-legend">
-            <span><i className="bg-emerald-500" /> مقبول</span>
-            <span><i className="bg-yellow-400" /> مراجعة</span>
-            <span><i className="bg-red-500" /> مرفوض</span>
-            <span><i className="bg-zinc-200" /> ناقص</span>
+            <span>
+              <i className="bg-emerald-500" /> مقبول
+            </span>
+            <span>
+              <i className="bg-yellow-400" /> مراجعة
+            </span>
+            <span>
+              <i className="bg-red-500" /> مرفوض
+            </span>
+            <span>
+              <i className="bg-zinc-200" /> ناقص
+            </span>
           </div>
         </section>
 
@@ -8912,7 +9966,9 @@ function DeanStatsView({
                     <div className="stats-member-meta">
                       <span>{formatPercent(item.responseRate)} تسليم</span>
                       <span>{formatPercent(item.approvalRate)} قبول</span>
-                      <span>خلص {item.approved}/{item.assignedTasks}</span>
+                      <span>
+                        خلص {item.approved}/{item.assignedTasks}
+                      </span>
                       <span>{item.pending} مراجعة</span>
                     </div>
                   </summary>
@@ -8961,7 +10017,8 @@ function LegacyStatsView({
   const totalSubmitted = visibleStats.reduce((sum, item) => sum + item.submitted, 0);
   const totalReviewed = visibleStats.reduce((sum, item) => sum + item.reviewed, 0);
   const totalApproved = visibleStats.reduce((sum, item) => sum + item.approved, 0);
-  const totalApprovalRate = totalReviewed > 0 ? formatPercent((totalApproved / totalReviewed) * 100) : "0%";
+  const totalApprovalRate =
+    totalReviewed > 0 ? formatPercent((totalApproved / totalReviewed) * 100) : "0%";
 
   const insightCards = [
     {
@@ -8987,7 +10044,9 @@ function LegacyStatsView({
     {
       label: "أقل قبول",
       value: lowestApprovalRate?.member.name ?? "N/A",
-      detail: lowestApprovalRate ? `${formatPercent(lowestApprovalRate.approvalRate)} approval` : "مفيش مراجعات",
+      detail: lowestApprovalRate
+        ? `${formatPercent(lowestApprovalRate.approvalRate)} approval`
+        : "مفيش مراجعات",
     },
     {
       label: "أكثر Pending",
@@ -9210,6 +10269,10 @@ async function postProfileChangeRequest(item: MemberProfileRequestInput) {
   return sanitizeData(await postApi<StudioData>("/api/profile-requests", item));
 }
 
+async function postDocumentationSubmission(item: DocumentationUploadInput) {
+  return sanitizeData(await postApi<StudioData>("/api/documentation-submissions", item));
+}
+
 async function postInteraction(item: InteractionInput) {
   return sanitizeData(await postApi<StudioData>("/api/interactions", item));
 }
@@ -9219,7 +10282,9 @@ async function postAdminMutation(
   action: string,
   payload: Record<string, unknown>,
 ) {
-  return sanitizeData(await postApi<StudioData>("/api/admin/mutate", { action, payload }, adminPassword));
+  return sanitizeData(
+    await postApi<StudioData>("/api/admin/mutate", { action, payload }, adminPassword),
+  );
 }
 
 function normalizeBackendUrl(value?: string) {
@@ -9311,25 +10376,6 @@ function Index() {
       if (!mounted) return;
       setData(initialData);
       setGithubToken(window.localStorage.getItem(GITHUB_TOKEN_KEY) ?? "");
-
-      const hasAdminSession = window.localStorage.getItem(ADMIN_SESSION_KEY) === "true";
-      if (hasAdminSession) {
-        setAdminPassword(window.localStorage.getItem(ADMIN_AUTH_KEY) ?? "");
-        setActiveAdmin(true);
-        return;
-      }
-
-      const hasStatsSession = window.localStorage.getItem(STATS_SESSION_KEY) === "true";
-      if (hasStatsSession) {
-        setActiveStats(true);
-        return;
-      }
-
-      const activeMemberId = window.localStorage.getItem(ACTIVE_MEMBER_KEY);
-      const displayName = window.localStorage.getItem(ACTIVE_DISPLAY_NAME_KEY);
-      const savedMember = initialData.members.find((member) => member.id === activeMemberId);
-      if (savedMember)
-        setActiveMember({ member: savedMember, displayName: displayName || savedMember.name });
     }
 
     loadData().catch(() => {
@@ -9396,7 +10442,9 @@ function Index() {
       return true;
     } catch (error) {
       setSaveStatus(
-        error instanceof Error ? `فشل الحفظ: ${error.message}` : "فشل الحفظ، التغيير لم يتم اعتماده.",
+        error instanceof Error
+          ? `فشل الحفظ: ${error.message}`
+          : "فشل الحفظ، التغيير لم يتم اعتماده.",
       );
       return false;
     } finally {
@@ -9600,7 +10648,10 @@ function Index() {
     setIsSaving(true);
     setSaveStatus("Saving meeting update...");
     try {
-      const nextData = await postAdminMutation(adminPassword, "updateMeeting", { meetingId, updates });
+      const nextData = await postAdminMutation(adminPassword, "updateMeeting", {
+        meetingId,
+        updates,
+      });
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Meeting update saved.");
@@ -9678,9 +10729,13 @@ function Index() {
     setIsSaving(true);
     setSaveStatus("Recalculating meeting scores...");
     try {
-      const nextData = await postAdminMutation(adminPassword, "recalculateMeetingAttendanceScores", {
-        meetingId: meeting.id,
-      });
+      const nextData = await postAdminMutation(
+        adminPassword,
+        "recalculateMeetingAttendanceScores",
+        {
+          meetingId: meeting.id,
+        },
+      );
       setData(nextData);
       setIsDirty(false);
       setSaveStatus("Meeting scores recalculated.");
@@ -9740,7 +10795,11 @@ function Index() {
   async function submitFinalSubmission(task: StudioTask) {
     if (!activeMember) return false;
     const key = responseKey(task.id, activeMember.member.id);
-    const answer = (draftAnswers[key] ?? getResponse(data, task.id, activeMember.member.id)?.answer ?? "").trim();
+    const answer = (
+      draftAnswers[key] ??
+      getResponse(data, task.id, activeMember.member.id)?.answer ??
+      ""
+    ).trim();
     if (!answer) return false;
 
     const item: QueuedSubmission = {
@@ -9754,7 +10813,9 @@ function Index() {
 
     setIsSubmitting(true);
     try {
-      submittedResponseKeysThisSession.add(responsePendingKey(item.memberId, item.taskId, item.submittedAt));
+      submittedResponseKeysThisSession.add(
+        responsePendingKey(item.memberId, item.taskId, item.submittedAt),
+      );
       const nextData = await postSubmission(item);
       const repoUpdate = createRepoUpdateFromText({
         memberId: item.memberId,
@@ -9818,6 +10879,33 @@ function Index() {
       return true;
     } catch (error) {
       setRefreshStatus(error instanceof Error ? error.message : "Progress update failed.");
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function submitDocumentationUpload(request: DocumentationRequest, file: File) {
+    if (!activeMember) return false;
+    if (request.memberId !== activeMember.member.id) return false;
+    if (!isDocxFile(file)) {
+      setRefreshStatus("Only Word .docx files are accepted for documentation.");
+      return false;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const nextData = await postDocumentationSubmission({
+        id: request.id,
+        memberId: activeMember.member.id,
+        file: documentationFileMetadata(file),
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setRefreshStatus("Documentation uploaded and 1 point was awarded.");
+      return true;
+    } catch (error) {
+      setRefreshStatus(error instanceof Error ? error.message : "Documentation upload failed.");
       return false;
     } finally {
       setIsSubmitting(false);
@@ -9921,7 +11009,9 @@ function Index() {
       return true;
     } catch (error) {
       setSaveStatus(
-        error instanceof Error ? `Save failed: ${error.message}` : "Save failed. Nothing was approved.",
+        error instanceof Error
+          ? `Save failed: ${error.message}`
+          : "Save failed. Nothing was approved.",
       );
       return false;
     } finally {
@@ -9976,7 +11066,9 @@ function Index() {
       return true;
     } catch (error) {
       setSaveStatus(
-        error instanceof Error ? `Save failed: ${error.message}` : "Save failed. Nothing was approved.",
+        error instanceof Error
+          ? `Save failed: ${error.message}`
+          : "Save failed. Nothing was approved.",
       );
       return false;
     } finally {
@@ -10059,7 +11151,9 @@ function Index() {
       return true;
     } catch (error) {
       setSaveStatus(
-        error instanceof Error ? `Save failed: ${error.message}` : "Save failed. Nothing was approved.",
+        error instanceof Error
+          ? `Save failed: ${error.message}`
+          : "Save failed. Nothing was approved.",
       );
       return false;
     } finally {
@@ -10156,7 +11250,9 @@ function Index() {
       });
       setData(nextData);
       setIsDirty(false);
-      setSaveStatus(status === "approved" ? "Profile request approved." : "Profile request rejected.");
+      setSaveStatus(
+        status === "approved" ? "Profile request approved." : "Profile request rejected.",
+      );
       return true;
     } catch (error) {
       setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
@@ -10242,7 +11338,9 @@ function Index() {
       <div className="min-h-screen bg-background">
         <div className="sticky top-0 z-[90] border-b-[2px] border-ink bg-yellow-100 px-4 py-3 text-center font-bold text-yellow-950 shadow-sm">
           <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-center gap-3">
-            <span>Admin preview: أنت بتشوف حساب {memberArabicName(activeMember.member)} كأدمن.</span>
+            <span>
+              Admin preview: أنت بتشوف حساب {memberArabicName(activeMember.member)} كأدمن.
+            </span>
             <Button
               type="button"
               size="sm"
@@ -10271,6 +11369,7 @@ function Index() {
           }}
           onSubmitFinal={submitFinalSubmission}
           onSubmitProgress={submitProgressUpdate}
+          onSubmitDocumentation={submitDocumentationUpload}
           onRepoAttention={sendRepoAttention}
           onDriveAttention={sendDriveAttention}
           onProfileChangeRequest={submitProfileChangeRequest}
@@ -10353,6 +11452,7 @@ function Index() {
         }}
         onSubmitFinal={submitFinalSubmission}
         onSubmitProgress={submitProgressUpdate}
+        onSubmitDocumentation={submitDocumentationUpload}
         onRepoAttention={sendRepoAttention}
         onDriveAttention={sendDriveAttention}
         onProfileChangeRequest={submitProfileChangeRequest}

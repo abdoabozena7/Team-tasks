@@ -113,6 +113,26 @@ type BonusGrade = {
   createdAt: string;
 };
 
+type DocumentationFileMetadata = {
+  name: string;
+  size: number;
+  type: string;
+  lastModified: number;
+};
+
+type DocumentationRequest = {
+  id: string;
+  problemId: string;
+  memberId: string;
+  memberName: string;
+  sourceSubmittedAt: string;
+  requestedAt: string;
+  submittedAt?: string;
+  status: "requested" | "submitted";
+  awardedPoints: number;
+  file?: DocumentationFileMetadata;
+};
+
 type RepoUpdate = {
   id: string;
   memberId: string;
@@ -159,6 +179,7 @@ type StudioData = {
   bonusGrades?: BonusGrade[];
   repoUpdates?: RepoUpdate[];
   profileRequests?: MemberProfileRequest[];
+  documentationRequests?: DocumentationRequest[];
   meta?: { updatedAt: string };
 };
 
@@ -189,6 +210,8 @@ const jsonHeaders = (env: Env, status = 200) => ({
     "Cache-Control": "no-store",
   },
 });
+const DOCUMENTATION_POINTS = 1;
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 function json(env: Env, body: unknown, status = 200) {
   return new Response(JSON.stringify(body), jsonHeaders(env, status));
@@ -232,6 +255,83 @@ function interactionKey(memberId: string, targetType: InteractionTargetType, tar
   return `${memberId}:${targetType}:${targetId}`;
 }
 
+function documentationRequestKey(problemId: string, memberId: string, submittedAt: string) {
+  return `${problemId}:${memberId}:${submittedAt}`;
+}
+
+function documentationRequestId(problemId: string, memberId: string, submittedAt: string) {
+  const submittedTime = new Date(submittedAt).getTime();
+  return `documentation-${problemId}-${memberId}-${Number.isFinite(submittedTime) ? submittedTime : submittedAt}`;
+}
+
+function isDocxMetadata(file?: Partial<DocumentationFileMetadata>) {
+  const name = String(file?.name ?? "").toLowerCase();
+  const type = String(file?.type ?? "");
+  return name.endsWith(".docx") || type === DOCX_MIME;
+}
+
+function deriveDocumentationRequests(
+  data: StudioData,
+  tasks: StudioTask[],
+  members: Member[],
+): DocumentationRequest[] {
+  const taskIds = new Set(tasks.map((task) => task.id));
+  const memberMap = new Map(members.map((member) => [member.id, member]));
+  const byKey = new Map<string, DocumentationRequest>();
+
+  for (const request of data.documentationRequests ?? []) {
+    if (!taskIds.has(request.problemId) || !memberMap.has(request.memberId)) continue;
+    if (!request.sourceSubmittedAt || !request.requestedAt) continue;
+    const key = documentationRequestKey(
+      request.problemId,
+      request.memberId,
+      request.sourceSubmittedAt,
+    );
+    if (byKey.has(key)) continue;
+    const status = request.status === "submitted" && request.file ? "submitted" : "requested";
+    byKey.set(key, {
+      ...request,
+      id:
+        request.id ||
+        documentationRequestId(request.problemId, request.memberId, request.sourceSubmittedAt),
+      memberName: request.memberName || memberMap.get(request.memberId)?.name || request.memberId,
+      status,
+      awardedPoints: status === "submitted" ? DOCUMENTATION_POINTS : 0,
+      file: request.file
+        ? {
+            name: request.file.name,
+            size: nonNegativeNumber(request.file.size, 0),
+            type: request.file.type || DOCX_MIME,
+            lastModified: nonNegativeNumber(request.file.lastModified, 0),
+          }
+        : undefined,
+    });
+  }
+
+  for (const task of tasks.filter((task) => normalizedTaskType(task) === "problem")) {
+    for (const response of Object.values(data.responses[task.id] ?? {})) {
+      if (response.status !== "approved") continue;
+      if (!memberMap.has(response.memberId)) continue;
+      const key = documentationRequestKey(task.id, response.memberId, response.submittedAt);
+      if (byKey.has(key)) continue;
+      byKey.set(key, {
+        id: documentationRequestId(task.id, response.memberId, response.submittedAt),
+        problemId: task.id,
+        memberId: response.memberId,
+        memberName: memberMap.get(response.memberId)?.name || response.memberName,
+        sourceSubmittedAt: response.submittedAt,
+        requestedAt: response.reviewedAt || response.submittedAt,
+        status: "requested",
+        awardedPoints: 0,
+      });
+    }
+  }
+
+  return Array.from(byKey.values()).sort(
+    (a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime(),
+  );
+}
+
 function taskWindowDuration(task: StudioTask) {
   if (isTechnicalTask(task)) return null;
   if (!task.deadlineAt) return null;
@@ -249,9 +349,7 @@ function isSubmissionLate(task: StudioTask, response: Pick<TaskResponse, "submit
   const deadlineTime = new Date(task.deadlineAt).getTime();
   const submittedTime = new Date(response.submittedAt).getTime();
   return (
-    Number.isFinite(deadlineTime) &&
-    Number.isFinite(submittedTime) &&
-    submittedTime > deadlineTime
+    Number.isFinite(deadlineTime) && Number.isFinite(submittedTime) && submittedTime > deadlineTime
   );
 }
 
@@ -292,7 +390,8 @@ function withReviewEvent(
   const defaultPoints = calculateAwardedPoints(task, response, status);
   const awardedPoints =
     status === "approved" ? roundScore(nonNegativeNumber(awardedPointsInput, defaultPoints)) : 0;
-  const scoreOverride = status === "approved" && (overrideLocked || awardedPoints !== defaultPoints);
+  const scoreOverride =
+    status === "approved" && (overrideLocked || awardedPoints !== defaultPoints);
   const event: TaskReviewEvent = {
     id: `review-${Date.now()}`,
     status,
@@ -324,16 +423,15 @@ function normalizeData(data: StudioData): StudioData {
       taskType,
       scope,
       memberId:
-        scope === "member"
-          ? task.memberId ?? uniqueText(task.memberIds ?? [])[0]
-          : undefined,
+        scope === "member" ? (task.memberId ?? uniqueText(task.memberIds ?? [])[0]) : undefined,
       memberIds:
         scope === "member"
           ? uniqueText(task.memberIds ?? (task.memberId ? [task.memberId] : []))
           : [],
       startAt: task.startAt ?? task.createdAt,
-      deadlineAt: taskType === "technical" ? "" : task.deadlineAt ?? "",
-      status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
+      deadlineAt: taskType === "technical" ? "" : (task.deadlineAt ?? ""),
+      status:
+        task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
     };
   });
   const taskIds = new Set(tasks.map((task) => task.id));
@@ -387,7 +485,9 @@ function normalizeData(data: StudioData): StudioData {
     ),
     meetings,
     meetingAttendance: Object.fromEntries(
-      Object.entries(data.meetingAttendance ?? {}).filter(([meetingId]) => meetingIds.has(meetingId)),
+      Object.entries(data.meetingAttendance ?? {}).filter(([meetingId]) =>
+        meetingIds.has(meetingId),
+      ),
     ),
     interactions: Array.from(
       new Map(
@@ -418,7 +518,10 @@ function normalizeData(data: StudioData): StudioData {
               ...(interaction.taskId ? { taskId: interaction.taskId } : {}),
               seenAt: interaction.seenAt || new Date().toISOString(),
             };
-            return [interactionKey(clean.memberId, clean.targetType, clean.targetId), clean] as const;
+            return [
+              interactionKey(clean.memberId, clean.targetType, clean.targetId),
+              clean,
+            ] as const;
           }),
       ).values(),
     ).sort((a, b) => new Date(b.seenAt).getTime() - new Date(a.seenAt).getTime()),
@@ -433,6 +536,7 @@ function normalizeData(data: StudioData): StudioData {
       }))
       .filter((bonus) => bonus.points !== 0)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    documentationRequests: deriveDocumentationRequests(data, tasks, members),
     repoUpdates: (data.repoUpdates ?? []).filter(
       (update) => !update.taskId || taskIds.has(update.taskId),
     ),
@@ -569,11 +673,7 @@ async function githubPut(env: Env, path: string, sha: string, data: StudioData, 
   return true;
 }
 
-async function commitData(
-  env: Env,
-  message: string,
-  mutate: (current: StudioData) => StudioData,
-) {
+async function commitData(env: Env, message: string, mutate: (current: StudioData) => StudioData) {
   const sourcePath = env.GITHUB_DATA_PATH || "team-data.json";
   const mirrorPath = env.GITHUB_PUBLIC_DATA_PATH || "public/team-data.json";
 
@@ -688,7 +788,10 @@ function findDuplicateProblemAnswer(
 
 function mergeResponses(latest: StudioData, incoming: StudioData) {
   const allowedTaskIds = new Set(incoming.tasks.map((task) => task.id));
-  const taskIds = new Set([...Object.keys(latest.responses ?? {}), ...Object.keys(incoming.responses ?? {})]);
+  const taskIds = new Set([
+    ...Object.keys(latest.responses ?? {}),
+    ...Object.keys(incoming.responses ?? {}),
+  ]);
   const responses: StudioData["responses"] = {};
 
   for (const taskId of taskIds) {
@@ -801,7 +904,10 @@ function mergeMeetingAttendance(latest: StudioData, incoming: StudioData) {
 function mergeInteractions(latest: StudioData, incoming: StudioData) {
   const byKey = new Map<string, MemberInteraction>();
   for (const interaction of incoming.interactions ?? []) {
-    byKey.set(interactionKey(interaction.memberId, interaction.targetType, interaction.targetId), interaction);
+    byKey.set(
+      interactionKey(interaction.memberId, interaction.targetType, interaction.targetId),
+      interaction,
+    );
   }
   for (const interaction of latest.interactions ?? []) {
     const key = interactionKey(interaction.memberId, interaction.targetType, interaction.targetId);
@@ -821,6 +927,25 @@ function mergeBonusGrades(latest: StudioData, incoming: StudioData) {
   );
 }
 
+function mergeDocumentationRequests(latest: StudioData, incoming: StudioData) {
+  const byKey = new Map<string, DocumentationRequest>();
+  for (const request of incoming.documentationRequests ?? []) {
+    byKey.set(
+      documentationRequestKey(request.problemId, request.memberId, request.sourceSubmittedAt),
+      request,
+    );
+  }
+  for (const request of latest.documentationRequests ?? []) {
+    byKey.set(
+      documentationRequestKey(request.problemId, request.memberId, request.sourceSubmittedAt),
+      request,
+    );
+  }
+  return Array.from(byKey.values()).sort(
+    (a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime(),
+  );
+}
+
 function mergeAdminReplacement(latest: StudioData, incomingPayload: StudioData) {
   const incoming = normalizeData(incomingPayload);
   return {
@@ -832,6 +957,7 @@ function mergeAdminReplacement(latest: StudioData, incomingPayload: StudioData) 
     meetingAttendance: mergeMeetingAttendance(latest, incoming),
     interactions: mergeInteractions(latest, incoming),
     bonusGrades: mergeBonusGrades(latest, incoming),
+    documentationRequests: mergeDocumentationRequests(latest, incoming),
     repoUpdates: mergeRepoUpdates(latest, incoming),
     profileRequests: mergeProfileRequests(latest, incoming),
   };
@@ -870,11 +996,15 @@ export default {
             previous?.status === "rejected" &&
             normalizeProblemAnswer(previous.answer) === normalizeProblemAnswer(answer)
           ) {
-            throw new Error("This rejected problem solution was already tried. Write a new solution.");
+            throw new Error(
+              "This rejected problem solution was already tried. Write a new solution.",
+            );
           }
           const duplicate = findDuplicateProblemAnswer(data, task, member.id, answer);
           if (duplicate) {
-            throw new Error("Duplicate problem solution. Read previous submissions and write a different solution.");
+            throw new Error(
+              "Duplicate problem solution. Read previous submissions and write a different solution.",
+            );
           }
           const submittedAt = new Date().toISOString();
           const repoUpdate = repoUpdateFromText({
@@ -909,42 +1039,46 @@ export default {
 
       if (request.method === "POST" && url.pathname === "/api/progress-updates") {
         const item = (await request.json()) as TaskProgressUpdate;
-        const next = await commitData(env, `Progress ${item.taskId} by ${item.memberId}`, (data) => {
-          const task = getTask(data, item.taskId);
-          const member = getMember(data, item.memberId);
-          if (taskStatus(task) !== "active") {
-            throw new Error("This task is not active.");
-          }
-          if (!taskIsAssignedToMember(data, task, member.id)) {
-            throw new Error("This task is not assigned to this member.");
-          }
-          const note = String(item.note ?? "").trim();
-          if (!note) throw new Error("Progress note is required.");
-          const repoUpdate = attentionUpdate({
-            memberId: member.id,
-            taskId: task.id,
-            source: "progress",
-            text: note,
-          });
-          return {
-            ...data,
-            progressUpdates: {
-              ...(data.progressUpdates ?? {}),
-              [task.id]: [
-                {
-                  id: item.id || `progress-${Date.now()}`,
-                  taskId: task.id,
-                  memberId: member.id,
-                  memberName: member.name,
-                  note,
-                  createdAt: new Date().toISOString(),
-                },
-                ...((data.progressUpdates ?? {})[task.id] ?? []),
-              ],
-            },
-            repoUpdates: appendRepoUpdate(data, repoUpdate),
-          };
-        });
+        const next = await commitData(
+          env,
+          `Progress ${item.taskId} by ${item.memberId}`,
+          (data) => {
+            const task = getTask(data, item.taskId);
+            const member = getMember(data, item.memberId);
+            if (taskStatus(task) !== "active") {
+              throw new Error("This task is not active.");
+            }
+            if (!taskIsAssignedToMember(data, task, member.id)) {
+              throw new Error("This task is not assigned to this member.");
+            }
+            const note = String(item.note ?? "").trim();
+            if (!note) throw new Error("Progress note is required.");
+            const repoUpdate = attentionUpdate({
+              memberId: member.id,
+              taskId: task.id,
+              source: "progress",
+              text: note,
+            });
+            return {
+              ...data,
+              progressUpdates: {
+                ...(data.progressUpdates ?? {}),
+                [task.id]: [
+                  {
+                    id: item.id || `progress-${Date.now()}`,
+                    taskId: task.id,
+                    memberId: member.id,
+                    memberName: member.name,
+                    note,
+                    createdAt: new Date().toISOString(),
+                  },
+                  ...((data.progressUpdates ?? {})[task.id] ?? []),
+                ],
+              },
+              repoUpdates: appendRepoUpdate(data, repoUpdate),
+            };
+          },
+        );
         return json(env, next);
       }
 
@@ -988,59 +1122,74 @@ export default {
 
       if (request.method === "POST" && url.pathname === "/api/interactions") {
         const item = (await request.json()) as Partial<MemberInteraction>;
-        const next = await commitData(env, `Seen ${item.targetType ?? "target"} by ${item.memberId ?? "member"}`, (data) => {
-          const memberId = String(item.memberId ?? "");
-          const targetId = String(item.targetId ?? "");
-          const targetType =
-            item.targetType === "taskUpdate"
-              ? "taskUpdate"
-              : item.targetType === "meeting"
-                ? "meeting"
-                : item.targetType === "task"
-                  ? "task"
-                  : "";
-          if (!memberId || !targetId || !targetType) throw new Error("Seen target is required.");
-          getMember(data, memberId);
-          const taskId = item.taskId ? String(item.taskId) : undefined;
-          if (targetType === "task") {
-            const task = getTask(data, targetId);
-            if (taskStatus(task) !== "active") {
-              throw new Error("This task is not active.");
+        const next = await commitData(
+          env,
+          `Seen ${item.targetType ?? "target"} by ${item.memberId ?? "member"}`,
+          (data) => {
+            const memberId = String(item.memberId ?? "");
+            const targetId = String(item.targetId ?? "");
+            const targetType =
+              item.targetType === "taskUpdate"
+                ? "taskUpdate"
+                : item.targetType === "meeting"
+                  ? "meeting"
+                  : item.targetType === "task"
+                    ? "task"
+                    : "";
+            if (!memberId || !targetId || !targetType) throw new Error("Seen target is required.");
+            getMember(data, memberId);
+            const taskId = item.taskId ? String(item.taskId) : undefined;
+            if (targetType === "task") {
+              const task = getTask(data, targetId);
+              if (taskStatus(task) !== "active") {
+                throw new Error("This task is not active.");
+              }
+              if (!taskIsAssignedToMember(data, task, memberId)) {
+                throw new Error("This task is not assigned to this member.");
+              }
             }
-            if (!taskIsAssignedToMember(data, task, memberId)) {
-              throw new Error("This task is not assigned to this member.");
+            if (targetType === "taskUpdate") {
+              if (!taskId) throw new Error("Task update seen needs task id.");
+              const task = getTask(data, taskId);
+              if (taskStatus(task) !== "active") {
+                throw new Error("This task is not active.");
+              }
+              if (!taskIsAssignedToMember(data, task, memberId)) {
+                throw new Error("This task is not assigned to this member.");
+              }
+              const updateExists = (data.taskUpdates?.[taskId] ?? []).some(
+                (update) => update.id === targetId,
+              );
+              if (!updateExists) throw new Error("Task update not found.");
             }
-          }
-          if (targetType === "taskUpdate") {
-            if (!taskId) throw new Error("Task update seen needs task id.");
-            const task = getTask(data, taskId);
-            if (taskStatus(task) !== "active") {
-              throw new Error("This task is not active.");
+            if (targetType === "meeting") getMeeting(data, targetId);
+            const key = interactionKey(memberId, targetType, targetId);
+            if (
+              (data.interactions ?? []).some(
+                (interaction) =>
+                  interactionKey(
+                    interaction.memberId,
+                    interaction.targetType,
+                    interaction.targetId,
+                  ) === key,
+              )
+            ) {
+              return data;
             }
-            if (!taskIsAssignedToMember(data, task, memberId)) {
-              throw new Error("This task is not assigned to this member.");
-            }
-            const updateExists = (data.taskUpdates?.[taskId] ?? []).some((update) => update.id === targetId);
-            if (!updateExists) throw new Error("Task update not found.");
-          }
-          if (targetType === "meeting") getMeeting(data, targetId);
-          const key = interactionKey(memberId, targetType, targetId);
-          if ((data.interactions ?? []).some((interaction) => interactionKey(interaction.memberId, interaction.targetType, interaction.targetId) === key)) {
-            return data;
-          }
-          const interaction: MemberInteraction = {
-            id: key,
-            memberId,
-            targetType,
-            targetId,
-            ...(taskId ? { taskId } : {}),
-            seenAt: new Date().toISOString(),
-          };
-          return {
-            ...data,
-            interactions: [interaction, ...(data.interactions ?? [])],
-          };
-        });
+            const interaction: MemberInteraction = {
+              id: key,
+              memberId,
+              targetType,
+              targetId,
+              ...(taskId ? { taskId } : {}),
+              seenAt: new Date().toISOString(),
+            };
+            return {
+              ...data,
+              interactions: [interaction, ...(data.interactions ?? [])],
+            };
+          },
+        );
         return json(env, next);
       }
 
@@ -1083,6 +1232,68 @@ export default {
         return json(env, next);
       }
 
+      if (request.method === "POST" && url.pathname === "/api/documentation-submissions") {
+        const item = (await request.json()) as {
+          id?: string;
+          memberId?: string;
+          file?: Partial<DocumentationFileMetadata>;
+        };
+        const next = await commitData(
+          env,
+          `Documentation upload by ${item.memberId ?? "member"}`,
+          (data) => {
+            const requestId = String(item.id ?? "");
+            const memberId = String(item.memberId ?? "");
+            if (!requestId || !memberId)
+              throw new Error("Documentation request and member are required.");
+            getMember(data, memberId);
+            if (!isDocxMetadata(item.file))
+              throw new Error("Only Word .docx documentation files are accepted.");
+            const existing = (data.documentationRequests ?? []).find(
+              (request) => request.id === requestId,
+            );
+            if (!existing) throw new Error("Documentation request not found.");
+            if (existing.memberId !== memberId)
+              throw new Error("This documentation request belongs to another member.");
+            const problem = getTask(data, existing.problemId);
+            if (normalizedTaskType(problem) !== "problem")
+              throw new Error("Documentation must belong to a problem.");
+            const source = data.responses[problem.id]?.[memberId];
+            if (
+              !source ||
+              source.status !== "approved" ||
+              source.submittedAt !== existing.sourceSubmittedAt
+            ) {
+              throw new Error(
+                "Documentation can only be uploaded for the accepted source solution.",
+              );
+            }
+            const file: DocumentationFileMetadata = {
+              name: String(item.file?.name ?? "").trim(),
+              size: nonNegativeNumber(item.file?.size, 0),
+              type: String(item.file?.type ?? DOCX_MIME) || DOCX_MIME,
+              lastModified: nonNegativeNumber(item.file?.lastModified, 0),
+            };
+            const submittedAt = new Date().toISOString();
+            return {
+              ...data,
+              documentationRequests: (data.documentationRequests ?? []).map((request) =>
+                request.id === requestId
+                  ? {
+                      ...request,
+                      status: "submitted",
+                      submittedAt,
+                      awardedPoints: DOCUMENTATION_POINTS,
+                      file,
+                    }
+                  : request,
+              ),
+            };
+          },
+        );
+        return json(env, next);
+      }
+
       if (request.method === "POST" && url.pathname === "/api/admin/mutate") {
         const { action, payload } = (await request.json()) as {
           action: string;
@@ -1092,14 +1303,18 @@ export default {
         requireAdmin(env, request, current.data);
 
         const next = await commitData(env, `Admin ${action}`, (data) => {
-          if (action === "replaceData") return mergeAdminReplacement(data, payload.data as StudioData);
+          if (action === "replaceData")
+            return mergeAdminReplacement(data, payload.data as StudioData);
 
           if (action === "addTask") {
             const task = payload.task as Partial<StudioTask> | undefined;
-            if (!task?.title || !task.question) throw new Error("Task title and question are required.");
+            if (!task?.title || !task.question)
+              throw new Error("Task title and question are required.");
             const scope = task.scope === "member" ? "member" : "all";
-            const memberIds = scope === "member" ? checkedMemberIds(data, assignedMemberIds(task)) : [];
-            if (scope === "member" && memberIds.length === 0) throw new Error("Member task needs at least one member.");
+            const memberIds =
+              scope === "member" ? checkedMemberIds(data, assignedMemberIds(task)) : [];
+            if (scope === "member" && memberIds.length === 0)
+              throw new Error("Member task needs at least one member.");
             const points = positiveNumber(task.points, 1);
             const taskType = normalizedTaskType({ ...task, points });
             const nextTask: StudioTask = {
@@ -1114,7 +1329,12 @@ export default {
               createdAt: new Date().toISOString(),
               startAt: task.startAt || new Date().toISOString(),
               deadlineAt: taskType === "technical" ? "" : task.deadlineAt || "",
-              status: task.status === "archived" ? "archived" : task.status === "hidden" ? "hidden" : "active",
+              status:
+                task.status === "archived"
+                  ? "archived"
+                  : task.status === "hidden"
+                    ? "hidden"
+                    : "active",
             };
             return { ...data, tasks: [...data.tasks, nextTask] };
           }
@@ -1123,7 +1343,12 @@ export default {
             const taskId = String(payload.taskId ?? "");
             const existingTask = getTask(data, taskId);
             const updates = (payload.updates ?? {}) as Partial<StudioTask>;
-            const nextScope = updates.scope === "member" ? "member" : updates.scope === "all" ? "all" : existingTask.scope;
+            const nextScope =
+              updates.scope === "member"
+                ? "member"
+                : updates.scope === "all"
+                  ? "all"
+                  : existingTask.scope;
             const fallbackMemberIds = assignedMemberIds(existingTask);
             const incomingMemberIds =
               updates.memberIds !== undefined || updates.memberId !== undefined
@@ -1194,6 +1419,53 @@ export default {
             };
           }
 
+          if (action === "requestDocumentation") {
+            const problemId = String(payload.problemId ?? "");
+            const problem = getTask(data, problemId);
+            if (normalizedTaskType(problem) !== "problem") {
+              throw new Error("Documentation can only be requested for problem tasks.");
+            }
+            const accepted = Object.values(data.responses[problem.id] ?? {}).filter(
+              (response) => response.status === "approved",
+            );
+            if (accepted.length === 0) throw new Error("No accepted solutions to document yet.");
+            const existingKeys = new Set(
+              (data.documentationRequests ?? []).map((request) =>
+                documentationRequestKey(
+                  request.problemId,
+                  request.memberId,
+                  request.sourceSubmittedAt,
+                ),
+              ),
+            );
+            const requestedAt = new Date().toISOString();
+            const additions = accepted
+              .filter(
+                (response) =>
+                  !existingKeys.has(
+                    documentationRequestKey(problem.id, response.memberId, response.submittedAt),
+                  ),
+              )
+              .map((response) => {
+                const member = getMember(data, response.memberId);
+                return {
+                  id: `documentation-${problem.id}-${response.memberId}-${Date.now()}`,
+                  problemId: problem.id,
+                  memberId: response.memberId,
+                  memberName: member.name,
+                  sourceSubmittedAt: response.submittedAt,
+                  requestedAt,
+                  status: "requested" as const,
+                  awardedPoints: 0,
+                };
+              });
+            if (additions.length === 0) return data;
+            return {
+              ...data,
+              documentationRequests: [...additions, ...(data.documentationRequests ?? [])],
+            };
+          }
+
           if (action === "addMeeting") {
             const meeting = payload.meeting as Partial<Meeting> | undefined;
             const title = String(meeting?.title ?? "").trim();
@@ -1221,12 +1493,20 @@ export default {
                   ? {
                       ...meeting,
                       ...updates,
-                      title: updates.title === undefined ? meeting.title : String(updates.title).trim() || meeting.title,
+                      title:
+                        updates.title === undefined
+                          ? meeting.title
+                          : String(updates.title).trim() || meeting.title,
                       startsAt: updates.startsAt || meeting.startsAt,
                       durationMinutes:
                         updates.durationMinutes === undefined
                           ? meeting.durationMinutes
-                          : Math.floor(positiveNumber(updates.durationMinutes, meeting.durationMinutes || 60)),
+                          : Math.floor(
+                              positiveNumber(
+                                updates.durationMinutes,
+                                meeting.durationMinutes || 60,
+                              ),
+                            ),
                       points:
                         updates.points === undefined
                           ? meeting.points
@@ -1253,7 +1533,8 @@ export default {
               meetings: (data.meetings ?? []).filter((meeting) => meeting.id !== meetingId),
               meetingAttendance,
               interactions: (data.interactions ?? []).filter(
-                (interaction) => !(interaction.targetType === "meeting" && interaction.targetId === meetingId),
+                (interaction) =>
+                  !(interaction.targetType === "meeting" && interaction.targetId === meetingId),
               ),
             };
           }
@@ -1365,6 +1646,9 @@ export default {
                   ),
               ),
               repoUpdates: (data.repoUpdates ?? []).filter((update) => update.taskId !== taskId),
+              documentationRequests: (data.documentationRequests ?? []).filter(
+                (request) => request.problemId !== taskId,
+              ),
             };
           }
 
@@ -1402,9 +1686,12 @@ export default {
             const requestId = String(payload.requestId ?? "");
             const status: MemberProfileRequest["status"] =
               payload.status === "approved" ? "approved" : "rejected";
-            const profileRequest = (data.profileRequests ?? []).find((item) => item.id === requestId);
+            const profileRequest = (data.profileRequests ?? []).find(
+              (item) => item.id === requestId,
+            );
             if (!profileRequest) throw new Error("Profile request not found.");
-            if (profileRequest.status !== "pending") throw new Error("Profile request already reviewed.");
+            if (profileRequest.status !== "pending")
+              throw new Error("Profile request already reviewed.");
             const reviewedAt = new Date().toISOString();
             const nextRequests = (data.profileRequests ?? []).map((item) =>
               item.id === requestId ? { ...item, status, reviewedAt } : item,
@@ -1421,14 +1708,14 @@ export default {
                       ...item,
                       aliases: profileRequest.nickname
                         ? uniqueText([...(item.aliases ?? []), profileRequest.nickname])
-                        : item.aliases ?? [],
+                        : (item.aliases ?? []),
                       repoUrl:
                         profileRequest.repoUrl === undefined
-                          ? item.repoUrl ?? ""
+                          ? (item.repoUrl ?? "")
                           : profileRequest.repoUrl,
                       driveUrl:
                         profileRequest.driveUrl === undefined
-                          ? item.driveUrl ?? ""
+                          ? (item.driveUrl ?? "")
                           : profileRequest.driveUrl,
                     }
                   : item,
@@ -1453,7 +1740,14 @@ export default {
                 ...data.responses,
                 [taskId]: {
                   ...data.responses[taskId],
-                  [memberId]: withReviewEvent(task, response, status, note, awardedPoints, overrideLocked),
+                  [memberId]: withReviewEvent(
+                    task,
+                    response,
+                    status,
+                    note,
+                    awardedPoints,
+                    overrideLocked,
+                  ),
                 },
               },
             };
@@ -1487,7 +1781,14 @@ export default {
                     submittedAt: new Date().toISOString(),
                     reviewedAt: new Date().toISOString(),
                   },
-                  [memberId]: withReviewEvent(task, response, "approved", "", payload.awardedPoints, true),
+                  [memberId]: withReviewEvent(
+                    task,
+                    response,
+                    "approved",
+                    "",
+                    payload.awardedPoints,
+                    true,
+                  ),
                 },
               },
             };
