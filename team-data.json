@@ -1162,8 +1162,15 @@
       "memberName": "rodina",
       "sourceSubmittedAt": "2026-07-04T14:58:56.244Z",
       "requestedAt": "2026-07-04T15:02:48.561Z",
-      "status": "requested",
-      "awardedPoints": 0
+      "status": "submitted",
+      "awardedPoints": 1,
+      "file": {
+        "name": "goal_dna_design.docx",
+        "size": 48882,
+        "type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "lastModified": 1783311025468
+      },
+      "submittedAt": "2026-07-06T04:10:56.214Z"
     }
   ],
   "repoUpdates": [
@@ -1561,6 +1568,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-06T02:44:05.645Z"
+    "updatedAt": "2026-07-06T04:10:56.214Z"
   }
 }
