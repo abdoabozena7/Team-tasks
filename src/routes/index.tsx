@@ -395,6 +395,29 @@ const DOCUMENTATION_POINTS = 1;
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const HIVO_LOGO_SRC = `${import.meta.env.BASE_URL}hivo.png?v=3`;
 
+type StoredSession = {
+  mode: "admin" | "stats" | null;
+  adminPassword: string;
+};
+
+function readStoredSession(): StoredSession {
+  if (typeof window === "undefined") return { mode: null, adminPassword: "" };
+
+  try {
+    const adminPassword = window.localStorage.getItem(ADMIN_AUTH_KEY) ?? "";
+    if (window.localStorage.getItem(ADMIN_SESSION_KEY) === "true" && adminPassword) {
+      return { mode: "admin", adminPassword };
+    }
+    if (window.localStorage.getItem(STATS_SESSION_KEY) === "true") {
+      return { mode: "stats", adminPassword: "" };
+    }
+  } catch {
+    return { mode: null, adminPassword: "" };
+  }
+
+  return { mode: null, adminPassword: "" };
+}
+
 const DEFAULT_SETTINGS: StudioSettings = {
   adminPassword: DEFAULT_ADMIN_PASSWORD,
   statsPassword: DEFAULT_STATS_PASSWORD,
@@ -10337,15 +10360,16 @@ async function deleteQueuedItem(
 
 function Index() {
   const [data, setData] = useState<StudioData>(DEFAULT_DATA);
+  const [storedSession] = useState(readStoredSession);
   const [activeMember, setActiveMember] = useState<ActiveMember | null>(null);
-  const [activeAdmin, setActiveAdmin] = useState(false);
-  const [activeStats, setActiveStats] = useState(false);
+  const [activeAdmin, setActiveAdmin] = useState(storedSession.mode === "admin");
+  const [activeStats, setActiveStats] = useState(storedSession.mode === "stats");
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>(() =>
     readMemberDrafts(),
   );
   const [sentState, setSentState] = useState<Record<string, string>>(() => readMemberSentState());
   const [githubToken, setGithubToken] = useState("");
-  const [adminPassword, setAdminPassword] = useState("");
+  const [adminPassword, setAdminPassword] = useState(storedSession.adminPassword);
   const [saveStatus, setSaveStatus] = useState("");
   const [refreshStatus, setRefreshStatus] = useState("");
   const [queueStatus, setQueueStatus] = useState("");
@@ -10366,15 +10390,21 @@ function Index() {
       setData(initialData);
       setGithubToken(window.localStorage.getItem(GITHUB_TOKEN_KEY) ?? "");
       const savedAdminPassword = window.localStorage.getItem(ADMIN_AUTH_KEY) ?? "";
-      if (
-        window.localStorage.getItem(ADMIN_SESSION_KEY) === "true" &&
-        savedAdminPassword === (initialData.settings?.adminPassword ?? DEFAULT_ADMIN_PASSWORD)
-      ) {
-        setAdminPassword(savedAdminPassword);
-        setActiveAdmin(true);
-        setActiveStats(false);
-        setActiveMember(null);
-        return;
+      if (window.localStorage.getItem(ADMIN_SESSION_KEY) === "true") {
+        if (
+          savedAdminPassword === (initialData.settings?.adminPassword ?? DEFAULT_ADMIN_PASSWORD)
+        ) {
+          setAdminPassword(savedAdminPassword);
+          setActiveAdmin(true);
+          setActiveStats(false);
+          setActiveMember(null);
+          return;
+        }
+
+        window.localStorage.removeItem(ADMIN_SESSION_KEY);
+        window.localStorage.removeItem(ADMIN_AUTH_KEY);
+        setAdminPassword("");
+        setActiveAdmin(false);
       }
       if (window.localStorage.getItem(STATS_SESSION_KEY) === "true") {
         setActiveStats(true);
