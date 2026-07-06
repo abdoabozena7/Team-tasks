@@ -1152,8 +1152,15 @@
       "memberName": "marihan",
       "sourceSubmittedAt": "2026-07-04T15:01:06.405Z",
       "requestedAt": "2026-07-04T15:03:13.019Z",
-      "status": "requested",
-      "awardedPoints": 0
+      "status": "submitted",
+      "awardedPoints": 1,
+      "file": {
+        "name": "Verification Agent.docx",
+        "size": 16401,
+        "type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "lastModified": 1783344988686
+      },
+      "submittedAt": "2026-07-06T13:36:53.416Z"
     },
     {
       "id": "documentation-task-1783176442116-rodina-1783177136244",
@@ -1568,6 +1575,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-06T04:10:56.214Z"
+    "updatedAt": "2026-07-06T13:36:53.416Z"
   }
 }
