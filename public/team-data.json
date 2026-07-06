@@ -1089,8 +1089,15 @@
       "memberName": "renad",
       "sourceSubmittedAt": "2026-07-04T18:44:08.608Z",
       "requestedAt": "2026-07-04T18:44:21.787Z",
-      "status": "requested",
-      "awardedPoints": 0
+      "status": "submitted",
+      "awardedPoints": 1,
+      "file": {
+        "name": "Documentation_Task1_Final.docx",
+        "size": 37856,
+        "type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "lastModified": 1783298685000
+      },
+      "submittedAt": "2026-07-06T00:45:29.553Z"
     },
     {
       "id": "documentation-task-1783176442116-tasneem-1783184615988",
@@ -1519,6 +1526,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-06T00:11:58.033Z"
+    "updatedAt": "2026-07-06T00:45:29.553Z"
   }
 }
