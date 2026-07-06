@@ -978,6 +978,14 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "tasneem:task:task-1783008997895",
+      "memberId": "tasneem",
+      "targetType": "task",
+      "targetId": "task-1783008997895",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-06T16:26:26.583Z"
+    },
+    {
       "id": "tasneem:taskUpdate:task-update-task-1783008997895-1783090253482",
       "memberId": "tasneem",
       "targetType": "taskUpdate",
@@ -1583,6 +1591,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-06T16:26:24.446Z"
+    "updatedAt": "2026-07-06T16:26:26.583Z"
   }
 }
