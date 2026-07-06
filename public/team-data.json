@@ -1148,8 +1148,15 @@
       "memberName": "tasneem",
       "sourceSubmittedAt": "2026-07-04T17:03:35.988Z",
       "requestedAt": "2026-07-04T17:04:11.408Z",
-      "status": "requested",
-      "awardedPoints": 0
+      "status": "submitted",
+      "awardedPoints": 1,
+      "file": {
+        "name": "Dynamic_Routing_Goal_Drift.docx",
+        "size": 299249,
+        "type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "lastModified": 1783381141536
+      },
+      "submittedAt": "2026-07-06T23:38:46.434Z"
     },
     {
       "id": "documentation-task-1783176442116-abo-grir-1783179895078",
@@ -1591,6 +1598,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-06T16:26:26.583Z"
+    "updatedAt": "2026-07-06T23:38:46.434Z"
   }
 }
