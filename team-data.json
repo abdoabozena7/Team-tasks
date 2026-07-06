@@ -978,6 +978,14 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "tasneem:taskUpdate:task-update-task-1783008997895-1783090253482",
+      "memberId": "tasneem",
+      "targetType": "taskUpdate",
+      "targetId": "task-update-task-1783008997895-1783090253482",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-06T16:26:24.446Z"
+    },
+    {
       "id": "yossef-sharawy:task:task-1783008997895",
       "memberId": "yossef-sharawy",
       "targetType": "task",
@@ -1575,6 +1583,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-06T13:36:53.416Z"
+    "updatedAt": "2026-07-06T16:26:24.446Z"
   }
 }
