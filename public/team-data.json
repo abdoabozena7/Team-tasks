@@ -1333,6 +1333,26 @@
   ],
   "profileRequests": [
     {
+      "id": "profile-yossef-sharawy-1783386910868",
+      "memberId": "yossef-sharawy",
+      "memberName": "yossef sharawy",
+      "createdAt": "2026-07-07T01:15:10.868Z",
+      "status": "pending",
+      "repoUrl": "https://github.com/Valkyiri/Harness-Engineering-Continuing-on-a-simple-agent-",
+      "driveUrl": "",
+      "previousAliases": [
+        "yossef sharawy",
+        "youssef sharawy",
+        "youssef shaarawy",
+        "يوسف شعراوي",
+        "يوسف",
+        "youssef",
+        "Shaarawy"
+      ],
+      "previousRepoUrl": "",
+      "previousDriveUrl": ""
+    },
+    {
       "id": "profile-shoiab-1783273517660",
       "memberId": "shoiab",
       "memberName": "shoiab",
@@ -1598,6 +1618,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-06T23:38:46.434Z"
+    "updatedAt": "2026-07-07T01:15:10.868Z"
   }
 }
