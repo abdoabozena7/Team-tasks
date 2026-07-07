@@ -978,6 +978,14 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "abozena:task:task-1783008997895",
+      "memberId": "abozena",
+      "targetType": "task",
+      "targetId": "task-1783008997895",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-07T10:14:26.079Z"
+    },
+    {
       "id": "tasneem:task:task-1783008997895",
       "memberId": "tasneem",
       "targetType": "task",
@@ -1618,6 +1626,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-07T01:15:10.868Z"
+    "updatedAt": "2026-07-07T10:14:26.079Z"
   }
 }
