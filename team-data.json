@@ -978,6 +978,14 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "abozena:taskUpdate:task-update-task-1783008997895-1783090253482",
+      "memberId": "abozena",
+      "targetType": "taskUpdate",
+      "targetId": "task-update-task-1783008997895-1783090253482",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-07T10:14:28.874Z"
+    },
+    {
       "id": "abozena:task:task-1783008997895",
       "memberId": "abozena",
       "targetType": "task",
@@ -1626,6 +1634,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-07T10:14:26.079Z"
+    "updatedAt": "2026-07-07T10:14:28.874Z"
   }
 }
