@@ -818,11 +818,21 @@
         "memberId": "fatema",
         "memberName": "fatema",
         "answer": "أنا شايفة إن المشكلة مش إن الـ prompt بيتغير المشكلة إن كل node بتفهم الهدف بطريقتها فكل ما عدد الـ levels يزيد بيبدأ يحصل اختلاف بسيط في الفهم ولما يوصل لآخر node تلاقي الهدف بقى بعيد عن اللي اليوزر طلبه أصلا\nفأنا بدل ما أخلي كل node تعتمد على الـ prompt اللي جاي من اللي قبلها أخلي فيه Goal Contract أو Goal Object بيتعمل مرة واحدة من الأول ويكون ثابت ومحدش يقدر يعدله وكل node تشوف نفس الـ goal الأصلي وتاخد بس الـ task اللي مطلوب منها تنفذه ف كده حتى لو كل node شرحت المهمة بطريقة مختلفة فهي لسه راجعة لنفس الهدف الأصلي ومش هيحصل Goal Drift مع زيادة عدد الـ levelsوكمان أنا شايفة إن فيه ثغرة في الفلو الحالي لأن لو الـ Planner فهم الهدف غلط فالـ Context Builder والـ LLM هيكملوا على نفس الفهم الغلط والـ Reflection هيحاول يصلح التنفيذ لكن مش هيصلح الهدف نفسه فوجود Goal ثابت كل الـ nodes ترجعله هيمنع المشكلة من البداية بدل ما نحاول نكتشفها بعد ما تحصل.",
-        "status": "submitted",
+        "status": "approved",
         "submittedAt": "2026-07-04T09:48:07.565Z",
-        "awardedPoints": 0,
+        "awardedPoints": 3,
         "lateSubmission": false,
-        "reviewEvents": []
+        "reviewEvents": [
+          {
+            "id": "review-1783551260733",
+            "status": "approved",
+            "reviewedAt": "2026-07-08T22:54:20.733Z",
+            "awardedPoints": 3,
+            "scoreOverride": true
+          }
+        ],
+        "reviewedAt": "2026-07-08T22:54:20.733Z",
+        "scoreOverride": true
       },
       "rodina": {
         "memberId": "rodina",
@@ -1943,6 +1953,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T22:36:59.740Z"
+    "updatedAt": "2026-07-08T22:54:20.733Z"
   }
 }
