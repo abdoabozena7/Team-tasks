@@ -974,7 +974,17 @@
       }
     ]
   },
-  "meetings": [],
+  "meetings": [
+    {
+      "id": "meeting-1783530763244",
+      "title": "task 2",
+      "startsAt": "2026-07-08T19:30:00.000Z",
+      "durationMinutes": 60,
+      "points": 1,
+      "status": "active",
+      "createdAt": "2026-07-08T17:12:43.244Z"
+    }
+  ],
   "meetingAttendance": {},
   "interactions": [
     {
@@ -1643,6 +1653,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T14:49:33.915Z"
+    "updatedAt": "2026-07-08T17:12:43.244Z"
   }
 }
