@@ -988,6 +988,13 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "marihan:meeting:meeting-1783530763244",
+      "memberId": "marihan",
+      "targetType": "meeting",
+      "targetId": "meeting-1783530763244",
+      "seenAt": "2026-07-08T17:21:59.737Z"
+    },
+    {
       "id": "renad:meeting:meeting-1783530763244",
       "memberId": "renad",
       "targetType": "meeting",
@@ -1660,6 +1667,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T17:13:19.083Z"
+    "updatedAt": "2026-07-08T17:21:59.737Z"
   }
 }
