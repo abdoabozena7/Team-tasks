@@ -1329,6 +1329,13 @@
   ],
   "bonusGrades": [
     {
+      "id": "bonus-renad-1783542480827",
+      "memberId": "renad",
+      "points": 1,
+      "note": "plan",
+      "createdAt": "2026-07-08T20:28:00.827Z"
+    },
+    {
       "id": "bonus-renad-1783191387049",
       "memberId": "renad",
       "points": 1,
@@ -1832,6 +1839,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T20:20:31.368Z"
+    "updatedAt": "2026-07-08T20:28:00.827Z"
   }
 }
