@@ -993,6 +993,14 @@
         "checkedAt": "2026-07-08T19:31:53.808Z",
         "lateMinutes": 2,
         "score": 1
+      },
+      "shoiab": {
+        "memberId": "shoiab",
+        "memberName": "shoiab",
+        "checkedAt": "2026-07-08T19:32:08.639Z",
+        "lateMinutes": 0,
+        "score": 1,
+        "manual": true
       }
     }
   },
@@ -1677,6 +1685,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T19:31:53.808Z"
+    "updatedAt": "2026-07-08T19:32:08.639Z"
   }
 }
