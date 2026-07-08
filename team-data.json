@@ -1043,6 +1043,14 @@
         "checkedAt": "2026-07-08T19:33:42.396Z",
         "lateMinutes": 4,
         "score": 1
+      },
+      "kareem-adel": {
+        "memberId": "kareem-adel",
+        "memberName": "kareem adel",
+        "checkedAt": "2026-07-08T19:33:53.678Z",
+        "lateMinutes": 0,
+        "score": 0,
+        "manual": true
       }
     }
   },
@@ -1727,6 +1735,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T19:33:42.396Z"
+    "updatedAt": "2026-07-08T19:33:53.678Z"
   }
 }
