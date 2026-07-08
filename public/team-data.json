@@ -1062,6 +1062,14 @@
   },
   "interactions": [
     {
+      "id": "rodina:taskUpdate:task-update-task-1783008997895-1783539572313",
+      "memberId": "rodina",
+      "targetType": "taskUpdate",
+      "targetId": "task-update-task-1783008997895-1783539572313",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-08T19:39:50.712Z"
+    },
+    {
       "id": "rodina:meeting:meeting-1783530763244",
       "memberId": "rodina",
       "targetType": "meeting",
@@ -1748,6 +1756,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T19:39:48.366Z"
+    "updatedAt": "2026-07-08T19:39:50.712Z"
   }
 }
