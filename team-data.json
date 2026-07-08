@@ -1403,6 +1403,13 @@
   ],
   "bonusGrades": [
     {
+      "id": "bonus-renad-1783549683674",
+      "memberId": "renad",
+      "points": 1,
+      "note": "snake calc game",
+      "createdAt": "2026-07-08T22:28:03.674Z"
+    },
+    {
       "id": "bonus-rodina-1783547704722",
       "memberId": "rodina",
       "points": 1,
@@ -1920,6 +1927,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T22:17:12.913Z"
+    "updatedAt": "2026-07-08T22:28:03.674Z"
   }
 }
