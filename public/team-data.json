@@ -1394,6 +1394,13 @@
   ],
   "bonusGrades": [
     {
+      "id": "bonus-rodina-1783547704722",
+      "memberId": "rodina",
+      "points": 1,
+      "note": "snake calc task",
+      "createdAt": "2026-07-08T21:55:04.722Z"
+    },
+    {
       "id": "bonus-renad-1783542480827",
       "memberId": "renad",
       "points": 1,
@@ -1904,6 +1911,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T21:34:31.276Z"
+    "updatedAt": "2026-07-08T21:55:04.722Z"
   }
 }
