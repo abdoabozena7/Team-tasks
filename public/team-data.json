@@ -988,6 +988,13 @@
   "meetingAttendance": {},
   "interactions": [
     {
+      "id": "renad:meeting:meeting-1783530763244",
+      "memberId": "renad",
+      "targetType": "meeting",
+      "targetId": "meeting-1783530763244",
+      "seenAt": "2026-07-08T17:13:19.083Z"
+    },
+    {
       "id": "shoiab:task:task-1783008997895",
       "memberId": "shoiab",
       "targetType": "task",
@@ -1653,6 +1660,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T17:12:43.244Z"
+    "updatedAt": "2026-07-08T17:13:19.083Z"
   }
 }
