@@ -1008,6 +1008,13 @@
         "checkedAt": "2026-07-08T19:32:22.138Z",
         "lateMinutes": 2,
         "score": 1
+      },
+      "abo-grir": {
+        "memberId": "abo-grir",
+        "memberName": "Abo grir",
+        "checkedAt": "2026-07-08T19:32:29.029Z",
+        "lateMinutes": 2,
+        "score": 1
       }
     }
   },
@@ -1692,6 +1699,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T19:32:22.138Z"
+    "updatedAt": "2026-07-08T19:32:29.029Z"
   }
 }
