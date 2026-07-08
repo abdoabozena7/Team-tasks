@@ -1079,6 +1079,13 @@
         "lateMinutes": 0,
         "score": 0,
         "manual": true
+      },
+      "fatema": {
+        "memberId": "fatema",
+        "memberName": "fatema",
+        "checkedAt": "2026-07-08T20:20:31.368Z",
+        "lateMinutes": 51,
+        "score": 0.32
       }
     }
   },
@@ -1825,6 +1832,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T20:08:26.730Z"
+    "updatedAt": "2026-07-08T20:20:31.368Z"
   }
 }
