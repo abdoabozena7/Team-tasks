@@ -1429,6 +1429,13 @@
   ],
   "bonusGrades": [
     {
+      "id": "bonus-marihan-1783551634228",
+      "memberId": "marihan",
+      "points": 1,
+      "note": "snake calc",
+      "createdAt": "2026-07-08T23:00:34.228Z"
+    },
+    {
       "id": "bonus-renad-1783549683674",
       "memberId": "renad",
       "points": 1,
@@ -1953,6 +1960,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T22:54:20.733Z"
+    "updatedAt": "2026-07-08T23:00:34.228Z"
   }
 }
