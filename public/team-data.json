@@ -1062,6 +1062,13 @@
   },
   "interactions": [
     {
+      "id": "tasneem:meeting:meeting-1783530763244",
+      "memberId": "tasneem",
+      "targetType": "meeting",
+      "targetId": "meeting-1783530763244",
+      "seenAt": "2026-07-08T19:40:50.919Z"
+    },
+    {
       "id": "tasneem:taskUpdate:task-update-task-1783008997895-1783539572313",
       "memberId": "tasneem",
       "targetType": "taskUpdate",
@@ -1764,6 +1771,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T19:40:48.367Z"
+    "updatedAt": "2026-07-08T19:40:50.919Z"
   }
 }
