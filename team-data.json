@@ -819,11 +819,21 @@
         "memberId": "renad",
         "memberName": "renad",
         "answer": "رفعته ع ال github",
-        "status": "submitted",
+        "status": "approved",
         "submittedAt": "2026-07-04T22:32:30.287Z",
-        "awardedPoints": 0,
+        "awardedPoints": 10,
         "lateSubmission": false,
-        "reviewEvents": []
+        "reviewEvents": [
+          {
+            "id": "review-1783541306730",
+            "status": "approved",
+            "reviewedAt": "2026-07-08T20:08:26.730Z",
+            "awardedPoints": 10,
+            "scoreOverride": true
+          }
+        ],
+        "reviewedAt": "2026-07-08T20:08:26.730Z",
+        "scoreOverride": true
       },
       "yossef-sharawy": {
         "memberId": "yossef-sharawy",
@@ -1815,6 +1825,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T20:02:23.457Z"
+    "updatedAt": "2026-07-08T20:08:26.730Z"
   }
 }
