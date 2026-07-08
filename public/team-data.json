@@ -1166,6 +1166,14 @@
   },
   "interactions": [
     {
+      "id": "renad:taskUpdate:task-update-task-1783008997895-1783540802552",
+      "memberId": "renad",
+      "targetType": "taskUpdate",
+      "targetId": "task-update-task-1783008997895-1783540802552",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-08T23:06:13.588Z"
+    },
+    {
       "id": "renad:taskUpdate:task-update-task-1783008997895-1783539572313",
       "memberId": "renad",
       "targetType": "taskUpdate",
@@ -1975,6 +1983,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T23:06:10.544Z"
+    "updatedAt": "2026-07-08T23:06:13.588Z"
   }
 }
