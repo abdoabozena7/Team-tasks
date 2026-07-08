@@ -839,11 +839,20 @@
         "memberId": "yossef-sharawy",
         "memberName": "yossef sharawy",
         "answer": "https://github.com/Valkyiri/Harness-Engineering-Continuing-on-a-simple-agent-",
-        "status": "submitted",
+        "status": "approved",
         "submittedAt": "2026-07-06T02:44:05.645Z",
-        "awardedPoints": 0,
+        "awardedPoints": 5,
         "lateSubmission": false,
-        "reviewEvents": []
+        "reviewEvents": [
+          {
+            "id": "review-1783543030283",
+            "status": "approved",
+            "reviewedAt": "2026-07-08T20:37:10.283Z",
+            "awardedPoints": 5
+          }
+        ],
+        "reviewedAt": "2026-07-08T20:37:10.283Z",
+        "scoreOverride": false
       }
     },
     "task-1783176442116": {
@@ -1839,6 +1848,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T20:28:00.827Z"
+    "updatedAt": "2026-07-08T20:37:10.283Z"
   }
 }
