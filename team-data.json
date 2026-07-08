@@ -1149,6 +1149,14 @@
   },
   "interactions": [
     {
+      "id": "tasneem:taskUpdate:task-update-task-1783008997895-1783540577503",
+      "memberId": "tasneem",
+      "targetType": "taskUpdate",
+      "targetId": "task-update-task-1783008997895-1783540577503",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-08T22:36:59.740Z"
+    },
+    {
       "id": "tasneem:taskUpdate:task-update-task-1783008997895-1783540802552",
       "memberId": "tasneem",
       "targetType": "taskUpdate",
@@ -1935,6 +1943,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T22:36:58.441Z"
+    "updatedAt": "2026-07-08T22:36:59.740Z"
   }
 }
