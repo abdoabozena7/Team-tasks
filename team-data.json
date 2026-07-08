@@ -985,7 +985,17 @@
       "createdAt": "2026-07-08T17:12:43.244Z"
     }
   ],
-  "meetingAttendance": {},
+  "meetingAttendance": {
+    "meeting-1783530763244": {
+      "abozena": {
+        "memberId": "abozena",
+        "memberName": "Abozena",
+        "checkedAt": "2026-07-08T19:31:53.808Z",
+        "lateMinutes": 2,
+        "score": 1
+      }
+    }
+  },
   "interactions": [
     {
       "id": "marihan:meeting:meeting-1783530763244",
@@ -1667,6 +1677,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T17:21:59.737Z"
+    "updatedAt": "2026-07-08T19:31:53.808Z"
   }
 }
