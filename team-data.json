@@ -1062,6 +1062,13 @@
   },
   "interactions": [
     {
+      "id": "rodina:meeting:meeting-1783530763244",
+      "memberId": "rodina",
+      "targetType": "meeting",
+      "targetId": "meeting-1783530763244",
+      "seenAt": "2026-07-08T19:39:48.366Z"
+    },
+    {
       "id": "marihan:meeting:meeting-1783530763244",
       "memberId": "marihan",
       "targetType": "meeting",
@@ -1741,6 +1748,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T19:39:32.313Z"
+    "updatedAt": "2026-07-08T19:39:48.366Z"
   }
 }
