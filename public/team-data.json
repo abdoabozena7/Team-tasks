@@ -799,11 +799,20 @@
         "memberId": "marihan",
         "memberName": "ماريهان",
         "answer": "github",
-        "status": "submitted",
+        "status": "approved",
         "submittedAt": "2026-07-04T00:09:21.790Z",
-        "awardedPoints": 0,
+        "awardedPoints": 5,
         "lateSubmission": false,
-        "reviewEvents": []
+        "reviewEvents": [
+          {
+            "id": "review-1783548678280",
+            "status": "approved",
+            "reviewedAt": "2026-07-08T22:11:18.280Z",
+            "awardedPoints": 5
+          }
+        ],
+        "reviewedAt": "2026-07-08T22:11:18.280Z",
+        "scoreOverride": false
       },
       "fatema": {
         "memberId": "fatema",
@@ -1911,6 +1920,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T21:55:04.722Z"
+    "updatedAt": "2026-07-08T22:11:18.280Z"
   }
 }
