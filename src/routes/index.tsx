@@ -325,6 +325,7 @@ type MemberScore = {
   bonusCount: number;
   meetingPoints: number;
   points: number;
+  recentPoints: number;
   privateTasks: number;
   avgHours: number | null;
   avgFastHours: number | null;
@@ -345,6 +346,23 @@ type MemberScore = {
   interactionScore: number;
   meetingScore: number;
   effortScore: number;
+  achievementScore: number;
+  momentumScore: number;
+  responsivenessScore: number;
+  competitionScore: number;
+};
+
+type GradeLedgerEntry = {
+  id: string;
+  memberId: string;
+  source: "task" | "bonus" | "documentation" | "meeting" | "legacy";
+  title: string;
+  points: number;
+  maxPoints?: number;
+  date?: string;
+  detail: string;
+  note?: string;
+  meta?: string[];
 };
 
 type TaskMetric = {
@@ -987,6 +1005,135 @@ function documentationAwardedPoints(request: DocumentationRequest) {
     : 0;
 }
 
+function dateTimeValue(value?: string) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function responseScoreDate(response: TaskResponse) {
+  return response.reviewedAt || response.submittedAt;
+}
+
+function scoreWithinRecentWindow(points: number, date: string | undefined, cutoffTime: number) {
+  const time = dateTimeValue(date);
+  return time !== null && time >= cutoffTime ? points : 0;
+}
+
+function buildMemberGradeLedger(data: StudioData, memberId: string): GradeLedgerEntry[] {
+  const entries: GradeLedgerEntry[] = [];
+  const member = data.members.find((item) => item.id === memberId);
+
+  const basePoints = sanitizeNumber(member?.basePoints);
+  if (basePoints !== 0) {
+    entries.push({
+      id: `legacy-base-${memberId}`,
+      memberId,
+      source: "legacy",
+      title: "Legacy manual adjustment",
+      points: basePoints,
+      detail: "Older manual points without a saved note.",
+    });
+  }
+
+  for (const task of data.tasks.filter((item) => !isHiddenTask(item))) {
+    if (!taskIsForMember(task, memberId)) continue;
+    if (isTaskSkipped(data, task.id, memberId)) continue;
+    const response = getResponse(data, task.id, memberId);
+    if (!response || response.status !== "approved") continue;
+
+    const points = responseAwardedPoints(task, response);
+    if (points === 0) continue;
+    const maxPoints = sanitizePositiveNumber(task.points, 1);
+    const note = latestReviewNote(response);
+    const detail = response.scoreOverride
+      ? "Manual task score"
+      : responseIsLate(task, response)
+        ? "Approved late submission"
+        : "Approved task score";
+    const reviewCount = response.reviewEvents?.length ?? 0;
+
+    entries.push({
+      id: `task-score-${task.id}-${memberId}`,
+      memberId,
+      source: "task",
+      title: task.title,
+      points,
+      maxPoints,
+      date: responseScoreDate(response),
+      detail,
+      note: note || undefined,
+      meta: [
+        `Status: ${response.status}`,
+        reviewCount > 1 ? `${reviewCount} review events` : "",
+        responseIsLate(task, response) ? "Late rule applied" : "",
+      ].filter(Boolean),
+    });
+  }
+
+  for (const bonus of data.bonusGrades ?? []) {
+    if (bonus.memberId !== memberId) continue;
+    const points = sanitizeNumber(bonus.points);
+    if (points === 0) continue;
+    entries.push({
+      id: bonus.id,
+      memberId,
+      source: "bonus",
+      title: "Bonus grade",
+      points,
+      date: bonus.createdAt,
+      detail: "Admin bonus",
+      note: bonus.note,
+    });
+  }
+
+  for (const request of data.documentationRequests ?? []) {
+    if (request.memberId !== memberId) continue;
+    const points = documentationAwardedPoints(request);
+    if (points === 0) continue;
+    const problem = data.tasks.find((task) => task.id === request.problemId);
+    entries.push({
+      id: `documentation-score-${request.id}`,
+      memberId,
+      source: "documentation",
+      title: problem?.title ?? "Problem documentation",
+      points,
+      maxPoints: DOCUMENTATION_POINTS,
+      date: request.submittedAt,
+      detail: "Documentation upload",
+      note: request.file?.name,
+    });
+  }
+
+  for (const meeting of data.meetings ?? []) {
+    const attendance = data.meetingAttendance?.[meeting.id]?.[memberId];
+    if (!attendance) continue;
+    const points = sanitizeNumber(attendance.score);
+    if (points === 0) continue;
+    entries.push({
+      id: `meeting-score-${meeting.id}-${memberId}`,
+      memberId,
+      source: "meeting",
+      title: meeting.title,
+      points,
+      maxPoints: sanitizePositiveNumber(meeting.points, 1),
+      date: attendance.checkedAt,
+      detail: attendance.manual ? "Manual meeting score" : "Meeting attendance score",
+      meta: [
+        attendance.lateMinutes > 0 ? `${attendance.lateMinutes}m late` : "On time",
+        meetingStatus(meeting),
+      ],
+    });
+  }
+
+  return entries.sort((a, b) => {
+    const bTime = dateTimeValue(b.date) ?? 0;
+    const aTime = dateTimeValue(a.date) ?? 0;
+    if (bTime !== aTime) return bTime - aTime;
+    return b.points - a.points;
+  });
+}
+
 function documentationRequestKey(problemId: string, memberId: string, submittedAt: string) {
   return `${problemId}:${memberId}:${submittedAt}`;
 }
@@ -1008,6 +1155,7 @@ function documentationForSolution(data: StudioData, problemId: string, response:
 function memberDocumentationRequests(data: StudioData, memberId: string) {
   return (data.documentationRequests ?? [])
     .filter((request) => request.memberId === memberId)
+    .filter((request) => request.status !== "submitted" || !request.file)
     .filter((request) => {
       const task = data.tasks.find((item) => item.id === request.problemId);
       return Boolean(task && !isHiddenTask(task));
@@ -1162,6 +1310,8 @@ function createStats(data: StudioData) {
   const scoreTasks = data.tasks.filter((task) => !isHiddenTask(task));
   const activeMeetings = (data.meetings ?? []).filter(isActiveMeeting);
   const scoreMeetings = data.meetings ?? [];
+  const referenceTime = dateTimeValue(data.meta?.updatedAt) ?? Date.now();
+  const recentCutoffTime = referenceTime - 7 * 24 * 60 * 60 * 1000;
   const accountableMeetings = scoreMeetings.filter((meeting) => {
     if (meetingStatus(meeting) === "archived") return true;
     const phase = meetingPhase(meeting);
@@ -1180,6 +1330,16 @@ function createStats(data: StudioData) {
     const approvedTasks = responses.filter((item) => item.response.status === "approved");
     const taskPoints = approvedTasks.reduce(
       (sum, item) => sum + responseAwardedPoints(item.task, item.response),
+      0,
+    );
+    const recentTaskPoints = approvedTasks.reduce(
+      (sum, item) =>
+        sum +
+        scoreWithinRecentWindow(
+          responseAwardedPoints(item.task, item.response),
+          responseScoreDate(item.response),
+          recentCutoffTime,
+        ),
       0,
     );
     const speedSamples = responses
@@ -1220,9 +1380,27 @@ function createStats(data: StudioData) {
       (sum, bonus) => sum + sanitizeNumber(bonus.points),
       0,
     );
+    const recentBonusPoints = memberBonusGrades.reduce(
+      (sum, bonus) =>
+        sum +
+        scoreWithinRecentWindow(sanitizeNumber(bonus.points), bonus.createdAt, recentCutoffTime),
+      0,
+    );
     const documentationPoints = (data.documentationRequests ?? [])
       .filter((request) => request.memberId === member.id)
       .reduce((sum, request) => sum + documentationAwardedPoints(request), 0);
+    const recentDocumentationPoints = (data.documentationRequests ?? [])
+      .filter((request) => request.memberId === member.id)
+      .reduce(
+        (sum, request) =>
+          sum +
+          scoreWithinRecentWindow(
+            documentationAwardedPoints(request),
+            request.submittedAt,
+            recentCutoffTime,
+          ),
+        0,
+      );
     const privateTasks = scoreTasks.filter(
       (task) => privateTaskMemberId(task) === member.id && !isTaskSkipped(data, task.id, member.id),
     ).length;
@@ -1230,6 +1408,17 @@ function createStats(data: StudioData) {
       (sum, meeting) => sum + (data.meetingAttendance?.[meeting.id]?.[member.id]?.score ?? 0),
       0,
     );
+    const recentMeetingPoints = scoreMeetings.reduce((sum, meeting) => {
+      const attendance = data.meetingAttendance?.[meeting.id]?.[member.id];
+      return (
+        sum +
+        scoreWithinRecentWindow(
+          sanitizeNumber(attendance?.score),
+          attendance?.checkedAt,
+          recentCutoffTime,
+        )
+      );
+    }, 0);
     const approved = approvedTasks.length;
     const rejected = responses.reduce((sum, item) => sum + rejectionCount(item.response), 0);
     const pending = responses.filter((item) => item.response.status === "submitted").length;
@@ -1239,6 +1428,21 @@ function createStats(data: StudioData) {
     const responseRate =
       assignedTasks.length > 0 ? (responses.length / assignedTasks.length) * 100 : 0;
     const approvalRate = reviewed > 0 ? (approved / reviewed) * 100 : 0;
+    const reviewedResponses = responses.filter(
+      (item) => item.response.status === "approved" || item.response.status === "rejected",
+    );
+    const awardedQualityAverage =
+      reviewedResponses.length > 0
+        ? reviewedResponses.reduce((sum, item) => {
+            if (item.response.status !== "approved") return sum;
+            const taskPointsValue = sanitizePositiveNumber(item.task.points, 1);
+            return (
+              sum +
+              clampScore((responseAwardedPoints(item.task, item.response) / taskPointsValue) * 100)
+            );
+          }, 0) / reviewedResponses.length
+        : 0;
+    const awardQualityScore = clampScore(awardedQualityAverage - rejectionRate * 0.25);
     const meetingAttendances = accountableMeetings
       .map((meeting) => data.meetingAttendance?.[meeting.id]?.[member.id])
       .filter((attendance): attendance is MeetingAttendance => Boolean(attendance));
@@ -1315,6 +1519,9 @@ function createStats(data: StudioData) {
         Math.round(
           (basePoints + bonusPoints + documentationPoints + taskPoints + meetingPoints) * 100,
         ) / 100,
+      recentPoints: roundScore(
+        recentTaskPoints + recentBonusPoints + recentDocumentationPoints + recentMeetingPoints,
+      ),
       privateTasks,
       avgHours,
       avgFastHours,
@@ -1330,14 +1537,20 @@ function createStats(data: StudioData) {
       avgSeenHours,
       submissionScore: 0,
       completionScore: 0,
-      qualityScore: 0,
+      qualityScore: awardQualityScore,
       timingScore: 0,
       interactionScore: 0,
       meetingScore: 0,
       effortScore: 0,
+      achievementScore: 0,
+      momentumScore: 0,
+      responsivenessScore: 0,
+      competitionScore: 0,
     };
   });
   const visibleRawStats = rawMemberStats.filter((item) => !item.member.hidden);
+  const maxPoints = Math.max(0, ...visibleRawStats.map((item) => item.points));
+  const maxRecentPoints = Math.max(0, ...visibleRawStats.map((item) => item.recentPoints));
   const maxSubmitted = Math.max(0, ...visibleRawStats.map((item) => item.submitted));
   const avgFastHourValues = visibleRawStats
     .map((item) => item.avgFastHours)
@@ -1350,9 +1563,11 @@ function createStats(data: StudioData) {
   const minSeenHours = seenHourValues.length > 0 ? Math.min(...seenHourValues) : null;
   const maxSeenHours = seenHourValues.length > 0 ? Math.max(...seenHourValues) : null;
   const memberStats = rawMemberStats.map((item) => {
+    const achievementScore = maxPoints > 0 ? (item.points / maxPoints) * 100 : 0;
+    const momentumScore = maxRecentPoints > 0 ? (item.recentPoints / maxRecentPoints) * 100 : 0;
     const submissionScore = maxSubmitted > 0 ? (item.submitted / maxSubmitted) * 100 : 0;
     const completionScore = item.responseRate;
-    const qualityScore = clampScore(item.approvalRate - item.rejectionRate * 0.7);
+    const qualityScore = item.qualityScore;
     const fastTimingScore = normalizedInverseScore(
       item.avgFastHours,
       minAvgFastHours,
@@ -1371,6 +1586,9 @@ function createStats(data: StudioData) {
     const seenSpeedScore = normalizedInverseScore(item.avgSeenHours, minSeenHours, maxSeenHours);
     const interactionScore =
       item.expectedSeenTargets > 0 ? seenRate * 0.65 + seenSpeedScore * 0.35 : 100;
+    const responsivenessScore = clampScore(
+      completionScore * 0.3 + timingScore * 0.35 + interactionScore * 0.35,
+    );
     const punctualityScore =
       item.avgMeetingLateMinutes === null
         ? 100
@@ -1387,9 +1605,16 @@ function createStats(data: StudioData) {
         interactionScore * 0.1 +
         meetingScore * 0.05,
     );
+    const competitionScore = clampScore(
+      achievementScore * 0.55 +
+        qualityScore * 0.2 +
+        momentumScore * 0.15 +
+        responsivenessScore * 0.1,
+    );
 
     return {
       ...item,
+      achievementScore,
       submissionScore,
       completionScore,
       qualityScore,
@@ -1397,15 +1622,22 @@ function createStats(data: StudioData) {
       interactionScore,
       meetingScore,
       effortScore,
+      momentumScore,
+      responsivenessScore,
+      competitionScore,
     };
   });
   const visibleStats = memberStats.filter((item) => !item.member.hidden);
   const rankedMembers = [...visibleStats].sort((a, b) => {
-    if (b.effortScore !== a.effortScore) return b.effortScore - a.effortScore;
+    if (b.competitionScore !== a.competitionScore) return b.competitionScore - a.competitionScore;
+    if (b.points !== a.points) return b.points - a.points;
+    if (b.recentPoints !== a.recentPoints) return b.recentPoints - a.recentPoints;
+    if (b.qualityScore !== a.qualityScore) return b.qualityScore - a.qualityScore;
+    if (b.responsivenessScore !== a.responsivenessScore) {
+      return b.responsivenessScore - a.responsivenessScore;
+    }
     if (b.submitted !== a.submitted) return b.submitted - a.submitted;
     if (b.responseRate !== a.responseRate) return b.responseRate - a.responseRate;
-    if (a.rejectionRate !== b.rejectionRate) return a.rejectionRate - b.rejectionRate;
-    if (b.approvalRate !== a.approvalRate) return b.approvalRate - a.approvalRate;
     if (b.timingScore !== a.timingScore) {
       return b.timingScore - a.timingScore;
     }
@@ -1420,7 +1652,6 @@ function createStats(data: StudioData) {
     if (b.interactionScore !== a.interactionScore) return b.interactionScore - a.interactionScore;
     if (b.meetingScore !== a.meetingScore) return b.meetingScore - a.meetingScore;
     if (b.completed !== a.completed) return b.completed - a.completed;
-    if (b.points !== a.points) return b.points - a.points;
     if (b.assignedTasks !== a.assignedTasks) return b.assignedTasks - a.assignedTasks;
     return (memberOrder.get(a.member.id) ?? 0) - (memberOrder.get(b.member.id) ?? 0);
   });
@@ -1617,11 +1848,14 @@ function MemberDetails({ item }: { item: MemberScore }) {
       <span>
         بونص: {item.bonusPoints} ({item.bonusCount})
       </span>
-      <span>Effort: {formatPercent(item.effortScore)}</span>
+      <span>Competition score: {formatPercent(item.competitionScore)}</span>
+      <span>Quality: {formatPercent(item.qualityScore)}</span>
+      <span>Momentum: {formatPercent(item.momentumScore)}</span>
+      <span>Recent points: {item.recentPoints}</span>
       <span>
         Seen: {item.seenTargets}/{item.expectedSeenTargets}
       </span>
-      <span>Interaction: {formatPercent(item.interactionScore)}</span>
+      <span>Responsiveness: {formatPercent(item.responsivenessScore)}</span>
     </div>
   );
 }
@@ -1633,7 +1867,8 @@ function StatsMemberDetails({ item }: { item: MemberScore }) {
       <span>Submitted: {item.submitted}</span>
       <span>Pending review: {item.pending}</span>
       <span>Approved: {item.approved}</span>
-      <span>Points: {item.points}</span>
+      <span>Total points: {item.points}</span>
+      <span>Competition score: {formatPercent(item.competitionScore)}</span>
       <span>Counted tasks: {item.completed}</span>
       <span>Submission rate: {formatPercent(item.responseRate)}</span>
       <span>Approval rate: {formatPercent(item.approvalRate)}</span>
@@ -1644,16 +1879,30 @@ function StatsMemberDetails({ item }: { item: MemberScore }) {
       <span>
         Bonus: {item.bonusPoints} ({item.bonusCount})
       </span>
-      <span>Effort: {formatPercent(item.effortScore)}</span>
+      <span>Quality: {formatPercent(item.qualityScore)}</span>
+      <span>Momentum: {formatPercent(item.momentumScore)}</span>
+      <span>Recent points: {item.recentPoints}</span>
       <span>
         Seen: {item.seenTargets}/{item.expectedSeenTargets}
       </span>
-      <span>Interaction: {formatPercent(item.interactionScore)}</span>
+      <span>Responsiveness: {formatPercent(item.responsivenessScore)}</span>
     </div>
   );
 }
 
 function leadershipReason(leader: MemberScore, runner?: MemberScore) {
+  if (!runner) {
+    return `Competition ${formatPercent(leader.competitionScore)} | ${leader.points} total points`;
+  }
+  if (leader.points > runner.points) {
+    return `${leader.points} total points vs ${runner.points}`;
+  }
+  if (leader.competitionScore > runner.competitionScore) {
+    return `Competition score ${formatPercent(leader.competitionScore)}`;
+  }
+  if (leader.recentPoints > runner.recentPoints) {
+    return `${leader.recentPoints} recent points this week`;
+  }
   if (!runner) {
     if (leader.submitted > 0) {
       return `سلم ${leader.submitted} مرة وقبوله ${formatPercent(leader.approvalRate)}`;
@@ -1847,11 +2096,11 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
                 options.featured ? "text-lg" : "text-sm",
               )}
             >
-              {item.points} نقطة
+              {formatPercent(item.competitionScore)}
             </span>
             <span className="leaderboard-podium-review">
               <span>
-                <strong>{formatPercent(item.approvalRate)}</strong>
+                Total points <strong>{item.points}</strong>
               </span>
             </span>
           </div>
@@ -1906,26 +2155,24 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
           </div>
 
           <div className="flex items-center justify-between gap-3" dir="rtl">
-            <span className="text-sm font-bold text-foreground/70">{item.points} نقطة</span>
-            <span className="leaderboard-acceptance-rate">{formatPercent(item.approvalRate)}</span>
+            <span className="text-sm font-bold text-foreground/70">Total points {item.points}</span>
+            <span className="leaderboard-acceptance-rate">
+              {formatPercent(item.competitionScore)}
+            </span>
           </div>
 
           <span className="grid grid-cols-4 gap-2" dir="ltr">
-            <LeaderboardStatPill label="درجات" value={item.points} />
+            <LeaderboardStatPill label="Score" value={formatPercent(item.competitionScore)} />
+            <LeaderboardStatPill label="Points" value={item.points} />
             <LeaderboardStatPill
-              label="مقبول"
-              value={item.approved}
+              label="Quality"
+              value={formatPercent(item.qualityScore)}
               className="bg-emerald-100/70"
             />
             <LeaderboardStatPill
-              label="Assigned"
-              value={item.assignedTasks}
+              label="Momentum"
+              value={formatPercent(item.momentumScore)}
               className="bg-sky-100/70"
-            />
-            <LeaderboardStatPill
-              label=""
-              value={formatPercent(item.approvalRate)}
-              className="leaderboard-percent-pill bg-emerald-50"
             />
           </span>
 
@@ -2090,6 +2337,10 @@ function MemberView({
   const activeMemberScore = useMemo(
     () => stats.allMemberStats.find((item) => item.member.id === activeMember.member.id),
     [activeMember.member.id, stats.allMemberStats],
+  );
+  const gradeLedger = useMemo(
+    () => buildMemberGradeLedger(data, activeMember.member.id),
+    [activeMember.member.id, data],
   );
   const hasProfileChange =
     repoDraft.trim() !== (activeMember.member.repoUrl ?? "") ||
@@ -2518,6 +2769,74 @@ function MemberView({
     );
   }
 
+  function renderGradeLedger() {
+    const totalLedgerPoints = roundScore(
+      gradeLedger.reduce((sum, entry) => sum + sanitizeNumber(entry.points), 0),
+    );
+
+    return (
+      <section className="mb-7 grid gap-3">
+        <div
+          className="border-[2.5px] border-ink bg-card p-4 doodle-shadow-sm"
+          style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-bold">Grade ledger</h2>
+              <p className="mt-1 text-sm text-foreground/60">
+                Every counted point with its source and reason.
+              </p>
+            </div>
+            <span className="rounded-full border-[2px] border-ink bg-accent px-3 py-1 text-sm font-bold">
+              {totalLedgerPoints} total points
+            </span>
+          </div>
+        </div>
+
+        {gradeLedger.length === 0 ? (
+          <div
+            className="border-[2.5px] border-ink bg-card p-6 text-center doodle-shadow-sm"
+            style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
+          >
+            <p className="font-bold">No counted grades yet.</p>
+          </div>
+        ) : (
+          gradeLedger.map((entry) => (
+            <article
+              key={entry.id}
+              className="border-[2px] border-ink bg-paper p-3 doodle-shadow-sm"
+              style={{ borderRadius: "16px 18px 14px 20px / 18px 14px 20px 16px" }}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-wide text-foreground/45">
+                    {entry.source}
+                  </p>
+                  <h3 className="break-words text-lg font-bold">{entry.title}</h3>
+                  <p className="mt-1 text-sm font-bold text-foreground/65">{entry.detail}</p>
+                </div>
+                <span className="rounded-full border-[2px] border-ink bg-white px-3 py-1 text-sm font-bold">
+                  {entry.points > 0 ? "+" : ""}
+                  {entry.points}
+                  {entry.maxPoints !== undefined ? ` / ${entry.maxPoints}` : ""}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
+                {entry.date && <span>{formatDateTime(entry.date)}</span>}
+                {entry.meta?.map((item) => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+              {entry.note && (
+                <p className="mt-2 border-t border-ink/15 pt-2 text-sm leading-6">{entry.note}</p>
+              )}
+            </article>
+          ))
+        )}
+      </section>
+    );
+  }
+
   function renderMemberTaskLog() {
     const logResponses = memberLogTasks
       .map((task) => getResponse(data, task.id, activeMember.member.id))
@@ -2932,8 +3251,9 @@ function MemberView({
           </p>
           <div className="mt-4 font-bold">
             <span className="highlight-blue">
-              درجاتك: {activeMemberScore?.points ?? 0} | التاسكات عليك: {memberTasks.length} |
-              تاسكات محسوبة: {activeMemberScore?.completed ?? 0}
+              Total points: {activeMemberScore?.points ?? 0} | Competition:{" "}
+              {formatPercent(activeMemberScore?.competitionScore ?? 0)} | Tasks:{" "}
+              {memberTasks.length} | Counted: {activeMemberScore?.completed ?? 0}
               {documentationTasks.length > 0
                 ? ` | documentation: ${documentationTasks.length}`
                 : ""}
@@ -3079,7 +3399,10 @@ function MemberView({
         </div>
 
         {memberTab === "log" ? (
-          renderMemberTaskLog()
+          <>
+            {renderGradeLedger()}
+            {renderMemberTaskLog()}
+          </>
         ) : (
           <section className="mb-7 flex flex-col gap-5">
             {renderDocumentationTasks()}
