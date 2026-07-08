@@ -83,6 +83,7 @@ type StudioTask = {
   question: string;
   points: number;
   taskType?: TaskType | "task";
+  htmlSubmissionMode?: HtmlSubmissionMode;
   scope: "all" | "member";
   memberId?: string;
   memberIds?: string[];
@@ -93,11 +94,21 @@ type StudioTask = {
 };
 
 type TaskType = "technical" | "nonTechnical" | "problem";
+type HtmlSubmissionMode = "off" | "optional" | "required";
+
+type HtmlSubmissionFile = {
+  name: string;
+  size: number;
+  type: string;
+  lastModified: number;
+  content: string;
+};
 
 type TaskResponse = {
   memberId: string;
   memberName: string;
   answer: string;
+  htmlFile?: HtmlSubmissionFile;
   status: "submitted" | "approved" | "rejected";
   submittedAt: string;
   reviewedAt?: string;
@@ -209,6 +220,7 @@ type QueuedSubmission = {
   memberId: string;
   memberName: string;
   answer: string;
+  htmlFile?: HtmlSubmissionFile;
   submittedAt: string;
 };
 
@@ -411,6 +423,8 @@ const HIVO_API_URL = (import.meta.env.VITE_HIVO_API_URL || DEFAULT_HIVO_API_URL)
 const HIVO_QUEUE_URL = `${HIVO_API_URL}/api`;
 const DOCUMENTATION_POINTS = 1;
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const HTML_FILE_MAX_BYTES = 500 * 1024;
+const HTML_FILE_TYPE = "text/html";
 const HIVO_LOGO_SRC = `${import.meta.env.BASE_URL}hivo.png?v=3`;
 
 type StoredSession = {
@@ -648,6 +662,61 @@ function normalizedTaskType(task: Pick<StudioTask, "taskType" | "points">): Task
   return Number(task.points) === 5 ? "technical" : "nonTechnical";
 }
 
+function htmlSubmissionMode(task: Pick<StudioTask, "htmlSubmissionMode">): HtmlSubmissionMode {
+  if (task.htmlSubmissionMode === "required") return "required";
+  if (task.htmlSubmissionMode === "optional") return "optional";
+  return "off";
+}
+
+function htmlSubmissionModeLabel(mode: HtmlSubmissionMode) {
+  if (mode === "required") return "HTML required";
+  if (mode === "optional") return "HTML optional";
+  return "HTML off";
+}
+
+function htmlContentByteLength(value: string) {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function isHtmlFileName(name: string) {
+  const lowerName = name.trim().toLowerCase();
+  return lowerName.endsWith(".html") || lowerName.endsWith(".htm");
+}
+
+function isHtmlMime(type?: string) {
+  return !type || type === HTML_FILE_TYPE;
+}
+
+function validateHtmlFileShape(file: Pick<File, "name" | "size" | "type">) {
+  if (!isHtmlFileName(file.name)) return "Only one .html or .htm file is accepted.";
+  if (!isHtmlMime(file.type)) return "The HTML preview must be a text/html file.";
+  if (file.size > HTML_FILE_MAX_BYTES) return "HTML file must be 500 KB or smaller.";
+  return "";
+}
+
+function validateHtmlContent(content: string) {
+  if (!content.trim()) return "HTML file is empty.";
+  if (htmlContentByteLength(content) > HTML_FILE_MAX_BYTES) {
+    return "HTML file must be 500 KB or smaller.";
+  }
+  return "";
+}
+
+function sanitizeHtmlSubmissionFile(file?: Partial<HtmlSubmissionFile>) {
+  if (!file) return undefined;
+  const name = String(file.name ?? "").trim();
+  const content = String(file.content ?? "");
+  const type = String(file.type ?? HTML_FILE_TYPE);
+  if (!isHtmlFileName(name) || !isHtmlMime(type) || validateHtmlContent(content)) return undefined;
+  return {
+    name,
+    size: sanitizeNumber(file.size) || htmlContentByteLength(content),
+    type: type || HTML_FILE_TYPE,
+    lastModified: sanitizeNumber(file.lastModified),
+    content,
+  };
+}
+
 function taskTypeLabel(task: Pick<StudioTask, "taskType" | "points">) {
   const type = normalizedTaskType(task);
   return taskTypeOptionLabel(type);
@@ -667,6 +736,7 @@ function sanitizeData(data: StudioData): StudioData {
       ...task,
       points,
       taskType,
+      htmlSubmissionMode: htmlSubmissionMode(task),
       scope: task.scope === "member" ? "member" : "all",
       memberId:
         task.scope === "member"
@@ -708,6 +778,34 @@ function sanitizeData(data: StudioData): StudioData {
   }));
   const memberIds = new Set(members.map((member) => member.id));
   const interactionKeys = new Set<string>();
+  const responses: StudioData["responses"] = Object.fromEntries(
+    Object.entries(data.responses ?? {})
+      .filter(([taskId]) => taskIds.has(taskId))
+      .map(([taskId, taskResponses]) => [
+        taskId,
+        Object.fromEntries(
+          Object.entries(taskResponses ?? {}).map(([memberId, response]) => {
+            const htmlFile = sanitizeHtmlSubmissionFile(response.htmlFile);
+            const responseFields = { ...response };
+            delete responseFields.htmlFile;
+            return [
+              memberId,
+              {
+                ...responseFields,
+                memberId: response.memberId || memberId,
+                memberName: response.memberName || memberId,
+                answer: String(response.answer ?? ""),
+                status:
+                  response.status === "approved" || response.status === "rejected"
+                    ? response.status
+                    : "submitted",
+                ...(htmlFile ? { htmlFile } : {}),
+              },
+            ];
+          }),
+        ),
+      ]),
+  );
 
   return {
     ...DEFAULT_DATA,
@@ -720,7 +818,7 @@ function sanitizeData(data: StudioData): StudioData {
     },
     members,
     tasks,
-    responses: data.responses ?? {},
+    responses,
     taskSkips: data.taskSkips ?? {},
     progressUpdates: data.progressUpdates ?? {},
     taskUpdates: Object.fromEntries(
@@ -2220,14 +2318,98 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
   );
 }
 
+function HtmlSubmissionPreview({
+  file,
+  className,
+  compact = false,
+}: {
+  file?: HtmlSubmissionFile;
+  className?: string;
+  compact?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!file) return null;
+
+  const renderIframe = (titleSuffix: string) => (
+    <iframe
+      title={`HTML preview ${titleSuffix}: ${file.name}`}
+      srcDoc={file.content}
+      sandbox="allow-scripts"
+      referrerPolicy="no-referrer"
+      className="h-full w-full bg-white"
+    />
+  );
+
+  return (
+    <>
+      <section
+        className={cn("rounded-lg border-[2px] border-ink/20 bg-white p-3 text-start", className)}
+      >
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-bold">HTML preview</p>
+            <p className="truncate text-xs font-bold text-foreground/50">
+              {file.name} - {Math.max(1, Math.round(file.size / 1024))} KB
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setExpanded(true)}
+            className="border border-ink/20 bg-paper"
+          >
+            <Eye data-icon="inline-start" />
+            Open
+          </Button>
+        </div>
+        <div
+          className={cn(
+            "overflow-hidden rounded-md border border-ink/10 bg-white",
+            compact ? "h-44" : "h-72",
+          )}
+        >
+          {renderIframe("inline")}
+        </div>
+      </section>
+
+      {expanded && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-ink/75 p-3 sm:p-5" dir="ltr">
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-ink bg-white px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold">{file.name}</p>
+              <p className="text-xs text-foreground/55">Sandboxed HTML preview</p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setExpanded(false)}
+              className="border border-ink/20 bg-paper"
+            >
+              <X data-icon="inline-start" />
+              Close
+            </Button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden rounded-lg border-[2px] border-ink bg-white">
+            {renderIframe("expanded")}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function MemberView({
   data,
   activeMember,
   stats,
   draftAnswers,
+  draftHtmlFiles,
   sentState,
   refreshStatus,
   onDraftChange,
+  onDraftHtmlFileChange,
   isSubmitting,
   onSubmitFinal,
   onSubmitProgress,
@@ -2244,9 +2426,11 @@ function MemberView({
   activeMember: ActiveMember;
   stats: ReturnType<typeof createStats>;
   draftAnswers: Record<string, string>;
+  draftHtmlFiles: Record<string, HtmlSubmissionFile | undefined>;
   sentState: Record<string, string>;
   refreshStatus: string;
   onDraftChange: (key: string, value: string) => void;
+  onDraftHtmlFileChange: (key: string, file?: HtmlSubmissionFile) => void;
   isSubmitting: boolean;
   onSubmitFinal: (task: StudioTask) => boolean | Promise<boolean>;
   onSubmitProgress: (task: StudioTask) => boolean | Promise<boolean>;
@@ -2270,6 +2454,7 @@ function MemberView({
   );
   const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
   const [documentationErrors, setDocumentationErrors] = useState<Record<string, string>>({});
+  const [htmlUploadErrors, setHtmlUploadErrors] = useState<Record<string, string>>({});
   const [seenMeetingIds, setSeenMeetingIds] = useState(() =>
     readSeenMeetingIds(activeMember.member.id),
   );
@@ -2633,6 +2818,54 @@ function MemberView({
     return ok;
   }
 
+  async function handleHtmlSubmissionFile(key: string, file?: File) {
+    if (!file) {
+      setHtmlUploadErrors((current) => ({ ...current, [key]: "Choose one HTML file first." }));
+      return;
+    }
+
+    const shapeError = validateHtmlFileShape(file);
+    if (shapeError) {
+      setHtmlUploadErrors((current) => ({ ...current, [key]: shapeError }));
+      onDraftHtmlFileChange(key, undefined);
+      return;
+    }
+
+    try {
+      const content = await file.text();
+      const contentError = validateHtmlContent(content);
+      if (contentError) {
+        setHtmlUploadErrors((current) => ({ ...current, [key]: contentError }));
+        onDraftHtmlFileChange(key, undefined);
+        return;
+      }
+      onDraftHtmlFileChange(key, {
+        name: file.name,
+        size: htmlContentByteLength(content),
+        type: file.type || HTML_FILE_TYPE,
+        lastModified: file.lastModified,
+        content,
+      });
+      setHtmlUploadErrors((current) => ({ ...current, [key]: "" }));
+    } catch {
+      setHtmlUploadErrors((current) => ({ ...current, [key]: "Could not read this HTML file." }));
+      onDraftHtmlFileChange(key, undefined);
+    }
+  }
+
+  function handleHtmlDrop(key: string, event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    if (event.dataTransfer.files.length > 1) {
+      setHtmlUploadErrors((current) => ({
+        ...current,
+        [key]: "Upload exactly one HTML file.",
+      }));
+      onDraftHtmlFileChange(key, undefined);
+      return;
+    }
+    void handleHtmlSubmissionFile(key, event.dataTransfer.files[0]);
+  }
+
   function documentationActionKey(request: DocumentationRequest) {
     return `documentation:${request.id}`;
   }
@@ -2680,6 +2913,66 @@ function MemberView({
   ) {
     event.preventDefault();
     handleDocumentationFile(request, event.dataTransfer.files?.[0]);
+  }
+
+  function renderHtmlSubmissionUpload(task: StudioTask, responseKeyValue: string) {
+    const mode = htmlSubmissionMode(task);
+    if (mode === "off") return null;
+    const draftFile = draftHtmlFiles[responseKeyValue];
+    const error = htmlUploadErrors[responseKeyValue];
+
+    return (
+      <div className="mt-3 rounded-xl border-[2px] border-sky-200 bg-sky-50 p-3 text-sky-950">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <strong className="text-sm">HTML preview file</strong>
+          <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-xs font-bold">
+            {htmlSubmissionModeLabel(mode)}
+          </span>
+        </div>
+        <label
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => handleHtmlDrop(responseKeyValue, event)}
+          className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-[2px] border-dashed border-sky-300 bg-white p-4 text-center text-sm font-bold"
+        >
+          <Upload className="size-5" />
+          <span>Drop one .html file here, or choose one</span>
+          <span className="text-xs font-normal text-foreground/55">
+            Inline CSS/JavaScript is okay. CDN links are okay. Max 500 KB.
+          </span>
+          <input
+            type="file"
+            accept=".html,.htm,text/html"
+            className="hidden"
+            onChange={(event) => {
+              void handleHtmlSubmissionFile(responseKeyValue, event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
+        </label>
+        {draftFile && (
+          <div className="mt-3 grid gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-bold">
+              <span className="min-w-0 truncate">{draftFile.name}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  onDraftHtmlFileChange(responseKeyValue, undefined);
+                  setHtmlUploadErrors((current) => ({ ...current, [responseKeyValue]: "" }));
+                }}
+                className="h-8 border border-red-100 bg-red-50 text-red-700"
+              >
+                <X data-icon="inline-start" />
+                Remove
+              </Button>
+            </div>
+            <HtmlSubmissionPreview file={draftFile} compact />
+          </div>
+        )}
+        {error && <p className="mt-2 text-sm font-bold text-red-700">{error}</p>}
+      </div>
+    );
   }
 
   function renderDocumentationTasks() {
@@ -2926,6 +3219,9 @@ function MemberView({
                     text={response.answer}
                     className="mt-3 border-t-[2px] border-ink/15 pt-3"
                   />
+                )}
+                {response?.htmlFile && (
+                  <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" compact />
                 )}
                 {progress.length > 0 && (
                   <div className="mt-3 grid gap-2">
@@ -3180,12 +3476,17 @@ function MemberView({
                       <p className="mb-2 text-xs font-bold text-foreground/50">
                         {formatDateTime(response.submittedAt)}
                       </p>
-                      <div
-                        className={cn("text-sm", textAlignClass(response.answer))}
-                        dir={textDirection(response.answer)}
-                      >
-                        <StructuredTextBlock text={response.answer} compact memberFacing />
-                      </div>
+                      {response.answer && (
+                        <div
+                          className={cn("text-sm", textAlignClass(response.answer))}
+                          dir={textDirection(response.answer)}
+                        >
+                          <StructuredTextBlock text={response.answer} compact memberFacing />
+                        </div>
+                      )}
+                      {response.htmlFile && (
+                        <HtmlSubmissionPreview file={response.htmlFile} className="mt-2" compact />
+                      )}
                       {adminPreview && (
                         <Button
                           type="button"
@@ -3430,6 +3731,8 @@ function MemberView({
                   existing?.status === "rejected" ? "" : (existing?.answer ?? "");
                 const sharedDraft =
                   draftAnswers[key] ?? draftAnswers[taskProgressKey] ?? existingDraftAnswer;
+                const htmlMode = htmlSubmissionMode(task);
+                const draftHtmlFile = draftHtmlFiles[key];
                 const reviewNote = latestReviewNote(existing);
                 const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
                   (update) => update.memberId === activeMember.member.id,
@@ -3484,6 +3787,14 @@ function MemberView({
                               <span className="mx-1.5">•</span>
                               <span className="rounded-full border border-red-700 bg-red-50 px-2 py-0.5 text-red-700">
                                 Problem
+                              </span>
+                            </>
+                          )}
+                          {htmlMode !== "off" && (
+                            <>
+                              <span className="mx-1.5">HTML</span>
+                              <span className="rounded-full border border-sky-700 bg-sky-50 px-2 py-0.5 text-sky-700">
+                                {htmlSubmissionModeLabel(htmlMode)}
                               </span>
                             </>
                           )}
@@ -3727,7 +4038,11 @@ function MemberView({
                             الباست محظور في problem. اكتب الحل بإيدك.
                           </div>
                         )}
+                        {renderHtmlSubmissionUpload(task, key)}
                       </>
+                    )}
+                    {existing?.htmlFile && (
+                      <HtmlSubmissionPreview file={existing.htmlFile} className="mt-3" />
                     )}
                     {existing?.status !== "approved" && (
                       <div className="mt-3 flex flex-wrap gap-2">
@@ -3735,8 +4050,12 @@ function MemberView({
                           type="button"
                           data-testid={`submit-final-${task.id}`}
                           onClick={() => {
-                            if (!sharedDraft.trim()) {
+                            if (problemTask && !sharedDraft.trim()) {
                               blockMemberAction(key, ["answer"]);
+                              return;
+                            }
+                            if (htmlMode === "required" && !draftHtmlFile) {
+                              blockMemberAction(key, ["HTML file"]);
                               return;
                             }
                             markTaskSeen(task.id);
@@ -4599,6 +4918,7 @@ function AdminView({
   const [taskScope, setTaskScope] = useState<"all" | "member">("all");
   const [taskMemberIds, setTaskMemberIds] = useState<string[]>([]);
   const [taskType, setTaskType] = useState<TaskType>("technical");
+  const [taskHtmlSubmissionMode, setTaskHtmlSubmissionMode] = useState<HtmlSubmissionMode>("off");
   const [taskStatusDraft, setTaskStatusDraft] = useState<"active" | "hidden">("active");
   const [taskStartAt, setTaskStartAt] = useState("");
   const [taskDeadlineAt, setTaskDeadlineAt] = useState("");
@@ -4627,6 +4947,7 @@ function AdminView({
         question: string;
         points: string;
         taskType: TaskType;
+        htmlSubmissionMode: HtmlSubmissionMode;
         status: "active" | "hidden" | "archived";
         scope: "all" | "member";
         memberIds: string[];
@@ -4676,6 +4997,7 @@ function AdminView({
             memberId: response.memberId,
             memberName: response.memberName,
             answer: response.answer,
+            htmlFile: response.htmlFile,
             submittedAt: response.submittedAt,
           })),
   );
@@ -4817,6 +5139,7 @@ function AdminView({
           question: taskQuestion.trim(),
           points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
           taskType,
+          htmlSubmissionMode: taskHtmlSubmissionMode,
           scope: effectiveScope,
           memberId: effectiveScope === "member" ? cleanMemberIds[0] : undefined,
           memberIds: effectiveScope === "member" ? cleanMemberIds : [],
@@ -4834,6 +5157,7 @@ function AdminView({
     setTaskScope("all");
     setTaskMemberIds([]);
     setTaskType("technical");
+    setTaskHtmlSubmissionMode("off");
     setTaskStatusDraft("active");
     setTaskStartAt("");
     setTaskDeadlineAt("");
@@ -4963,6 +5287,7 @@ function AdminView({
         question: task.question,
         points: String(sanitizePositiveNumber(task.points, 1)),
         taskType: normalizedTaskType(task),
+        htmlSubmissionMode: htmlSubmissionMode(task),
         status: taskStatus(task),
         scope: task.scope,
         memberIds: task.scope === "member" ? selectedMemberIdsForTask(task) : [],
@@ -5504,12 +5829,21 @@ function AdminView({
                     </span>
                   </div>
 
-                  <StructuredTextBlock
-                    text={response.answer}
-                    compact
-                    forceCollapse
-                    className="mt-3 rounded-md border border-ink/10 bg-white p-2"
-                  />
+                  {response.answer ? (
+                    <StructuredTextBlock
+                      text={response.answer}
+                      compact
+                      forceCollapse
+                      className="mt-3 rounded-md border border-ink/10 bg-white p-2"
+                    />
+                  ) : (
+                    <p className="mt-3 rounded-md border border-ink/10 bg-white p-2 text-sm font-bold text-foreground/45">
+                      No written answer.
+                    </p>
+                  )}
+                  {response.htmlFile && (
+                    <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" compact />
+                  )}
 
                   {response.status === "approved" && (
                     <div className="mt-3 rounded-md border border-sky-100 bg-white p-2 text-xs font-bold text-sky-950">
@@ -5663,6 +5997,7 @@ function AdminView({
               <span>Start: {formatDateTime(task.startAt)}</span>
               <span>Deadline: {taskDeadlineLabel(task)}</span>
               <span>{task.points || 1} points</span>
+              <span>{htmlSubmissionModeLabel(htmlSubmissionMode(task))}</span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -5794,6 +6129,26 @@ function AdminView({
                 </button>
               ))}
             </div>
+            <div className="grid gap-1 text-xs font-bold text-foreground/65">
+              HTML preview
+              <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
+                {(["off", "optional", "required"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => updateTaskEditDraft(task, { htmlSubmissionMode: mode })}
+                    className={cn(
+                      "flex-1 rounded-md px-3 py-2 transition",
+                      editDraft.htmlSubmissionMode === mode
+                        ? "bg-ink text-white"
+                        : "text-foreground/65 hover:bg-paper",
+                    )}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
               {(["active", "hidden", "archived"] as const).map((status) => (
                 <button
@@ -5874,6 +6229,7 @@ function AdminView({
                           sanitizePositiveNumber(task.points, 1),
                         ),
                         taskType: editDraft.taskType,
+                        htmlSubmissionMode: editDraft.htmlSubmissionMode,
                         deadlineAt: editDraft.taskType === "technical" ? "" : task.deadlineAt,
                         status: editDraft.status,
                         scope: effectiveScope,
@@ -6271,7 +6627,14 @@ function AdminView({
                 </div>
                 {response && (
                   <div className="mt-3 rounded-md border border-ink/10 bg-paper p-3">
-                    <StructuredTextBlock text={response.answer} forceCollapse />
+                    {response.answer ? (
+                      <StructuredTextBlock text={response.answer} forceCollapse />
+                    ) : (
+                      <p className="text-sm font-bold text-foreground/45">No written answer.</p>
+                    )}
+                    {response.htmlFile && (
+                      <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" compact />
+                    )}
                     <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
                       <span className="rounded-full border border-ink/10 bg-white px-2 py-1">
                         Score {awarded}/{sanitizePositiveNumber(task.points, 1)}
@@ -6870,12 +7233,19 @@ function AdminView({
                 </p>
               )}
               {response && (
-                <StructuredTextBlock
-                  text={response.answer}
-                  compact
-                  forceCollapse
-                  className="mt-2 text-sm"
-                />
+                <>
+                  {response.answer && (
+                    <StructuredTextBlock
+                      text={response.answer}
+                      compact
+                      forceCollapse
+                      className="mt-2 text-sm"
+                    />
+                  )}
+                  {response?.htmlFile && (
+                    <HtmlSubmissionPreview file={response.htmlFile} className="mt-2" compact />
+                  )}
+                </>
               )}
               {progress.length > 0 && (
                 <p className="mt-2 text-xs font-bold text-yellow-800">
@@ -6950,12 +7320,21 @@ function AdminView({
                     {renderMemberLinkButtons(member)}
                   </div>
 
-                  <StructuredTextBlock
-                    text={response.answer}
-                    compact
-                    forceCollapse
-                    className="mt-3 text-sm"
-                  />
+                  {response.answer ? (
+                    <StructuredTextBlock
+                      text={response.answer}
+                      compact
+                      forceCollapse
+                      className="mt-3 text-sm"
+                    />
+                  ) : (
+                    <p className="mt-3 rounded-md border border-ink/10 bg-white p-2 text-sm font-bold text-foreground/45">
+                      No written answer.
+                    </p>
+                  )}
+                  {response.htmlFile && (
+                    <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" compact />
+                  )}
 
                   <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_120px_auto_auto]">
                     <Input
@@ -7609,6 +7988,26 @@ function AdminView({
                           {taskTypeOptionLabel(type)}
                         </button>
                       ))}
+                    </div>
+                    <div className="grid gap-1 text-xs font-bold text-foreground/65">
+                      HTML preview
+                      <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
+                        {(["off", "optional", "required"] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setTaskHtmlSubmissionMode(mode)}
+                            className={cn(
+                              "flex-1 rounded-md px-3 py-2 transition",
+                              taskHtmlSubmissionMode === mode
+                                ? "bg-ink text-white"
+                                : "text-foreground/65 hover:bg-paper",
+                            )}
+                          >
+                            {mode}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                     <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
                       {(["active", "hidden"] as const).map((status) => (
@@ -8389,6 +8788,7 @@ function LegacyAdminView({
           memberId: response.memberId,
           memberName: response.memberName,
           answer: response.answer,
+          htmlFile: response.htmlFile,
           submittedAt: response.submittedAt,
         })),
     ),
@@ -8404,6 +8804,7 @@ function LegacyAdminView({
       title: taskTitle.trim(),
       question: taskQuestion.trim(),
       points: Math.max(1, Number.isFinite(taskPoints) ? taskPoints : 1),
+      htmlSubmissionMode: "off",
       scope: taskScope,
       memberId: taskScope === "member" ? taskMemberId : undefined,
     });
@@ -8495,7 +8896,16 @@ function LegacyAdminView({
                         <p className="text-sm font-bold text-foreground/65">
                           {task?.title ?? item.taskId}
                         </p>
-                        <StructuredTextBlock text={item.answer} forceCollapse className="mt-2" />
+                        {item.answer ? (
+                          <StructuredTextBlock text={item.answer} forceCollapse className="mt-2" />
+                        ) : (
+                          <p className="mt-2 text-sm font-bold text-foreground/45">
+                            No written answer.
+                          </p>
+                        )}
+                        {item.htmlFile && (
+                          <HtmlSubmissionPreview file={item.htmlFile} className="mt-3" compact />
+                        )}
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button
                             type="button"
@@ -8903,7 +9313,20 @@ function LegacyAdminView({
                             <strong>{response.memberName}</strong>
                             <span className="text-sm text-foreground/60">{response.status}</span>
                           </div>
-                          <StructuredTextBlock text={response.answer} forceCollapse />
+                          {response.answer ? (
+                            <StructuredTextBlock text={response.answer} forceCollapse />
+                          ) : (
+                            <p className="text-sm font-bold text-foreground/45">
+                              No written answer.
+                            </p>
+                          )}
+                          {response.htmlFile && (
+                            <HtmlSubmissionPreview
+                              file={response.htmlFile}
+                              className="mt-3"
+                              compact
+                            />
+                          )}
                           <div className="mt-3 flex flex-wrap gap-2">
                             <Button
                               type="button"
@@ -10690,6 +11113,9 @@ function Index() {
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>(() =>
     readMemberDrafts(),
   );
+  const [draftHtmlFiles, setDraftHtmlFiles] = useState<
+    Record<string, HtmlSubmissionFile | undefined>
+  >({});
   const [sentState, setSentState] = useState<Record<string, string>>(() => readMemberSentState());
   const [githubToken, setGithubToken] = useState("");
   const [adminPassword, setAdminPassword] = useState(storedSession.adminPassword);
@@ -11185,7 +11611,9 @@ function Index() {
       getResponse(data, task.id, activeMember.member.id)?.answer ??
       ""
     ).trim();
-    if (!answer) return false;
+    const htmlFile = draftHtmlFiles[key];
+    if (isProblemTask(task) && !answer) return false;
+    if (htmlSubmissionMode(task) === "required" && !htmlFile) return false;
 
     const item: QueuedSubmission = {
       id: `submission-${Date.now()}`,
@@ -11193,6 +11621,7 @@ function Index() {
       memberId: activeMember.member.id,
       memberName: activeMember.displayName,
       answer,
+      ...(htmlFile ? { htmlFile } : {}),
       submittedAt: new Date().toISOString(),
     };
 
@@ -11206,11 +11635,16 @@ function Index() {
         memberId: item.memberId,
         taskId: item.taskId,
         source: "submission",
-        text: item.answer,
+        text: item.answer || item.htmlFile?.name || "Submitted without a written answer.",
       });
       setData(appendRepoUpdateIfMissing(nextData, repoUpdate));
       setIsDirty(false);
       writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
+      setDraftHtmlFiles((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
       setSentState((current) => {
         const next = { ...current, [key]: "pending" };
         writeMemberSentState(next);
@@ -11226,6 +11660,10 @@ function Index() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function updateDraftHtmlFile(key: string, file?: HtmlSubmissionFile) {
+    setDraftHtmlFiles((current) => ({ ...current, [key]: file }));
   }
 
   async function submitProgressUpdate(task: StudioTask) {
@@ -11742,6 +12180,7 @@ function Index() {
           activeMember={activeMember}
           stats={stats}
           draftAnswers={draftAnswers}
+          draftHtmlFiles={draftHtmlFiles}
           sentState={sentState}
           refreshStatus={refreshStatus}
           isSubmitting={isSubmitting}
@@ -11752,6 +12191,7 @@ function Index() {
               return next;
             });
           }}
+          onDraftHtmlFileChange={updateDraftHtmlFile}
           onSubmitFinal={submitFinalSubmission}
           onSubmitProgress={submitProgressUpdate}
           onSubmitDocumentation={submitDocumentationUpload}
@@ -11825,6 +12265,7 @@ function Index() {
         activeMember={activeMember}
         stats={stats}
         draftAnswers={draftAnswers}
+        draftHtmlFiles={draftHtmlFiles}
         sentState={sentState}
         refreshStatus={refreshStatus}
         isSubmitting={isSubmitting}
@@ -11835,6 +12276,7 @@ function Index() {
             return next;
           });
         }}
+        onDraftHtmlFileChange={updateDraftHtmlFile}
         onSubmitFinal={submitFinalSubmission}
         onSubmitProgress={submitProgressUpdate}
         onSubmitDocumentation={submitDocumentationUpload}

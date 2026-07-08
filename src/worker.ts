@@ -19,6 +19,7 @@ type StudioTask = {
   question: string;
   points: number;
   taskType?: TaskType | "task";
+  htmlSubmissionMode?: HtmlSubmissionMode;
   scope: "all" | "member";
   memberId?: string;
   memberIds?: string[];
@@ -29,11 +30,21 @@ type StudioTask = {
 };
 
 type TaskType = "technical" | "nonTechnical" | "problem";
+type HtmlSubmissionMode = "off" | "optional" | "required";
+
+type HtmlSubmissionFile = {
+  name: string;
+  size: number;
+  type: string;
+  lastModified: number;
+  content: string;
+};
 
 type TaskResponse = {
   memberId: string;
   memberName: string;
   answer: string;
+  htmlFile?: HtmlSubmissionFile;
   status: "submitted" | "approved" | "rejected";
   submittedAt: string;
   reviewedAt?: string;
@@ -212,6 +223,8 @@ const jsonHeaders = (env: Env, status = 200) => ({
 });
 const DOCUMENTATION_POINTS = 1;
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const HTML_FILE_MAX_BYTES = 500 * 1024;
+const HTML_FILE_TYPE = "text/html";
 
 function json(env: Env, body: unknown, status = 200) {
   return new Response(JSON.stringify(body), jsonHeaders(env, status));
@@ -245,6 +258,44 @@ function normalizedTaskType(task: Pick<StudioTask, "taskType" | "points">): Task
   if (task.taskType === "technical") return "technical";
   if (task.taskType === "nonTechnical") return "nonTechnical";
   return Number(task.points) === 5 ? "technical" : "nonTechnical";
+}
+
+function htmlSubmissionMode(task: Pick<StudioTask, "htmlSubmissionMode">): HtmlSubmissionMode {
+  if (task.htmlSubmissionMode === "required") return "required";
+  if (task.htmlSubmissionMode === "optional") return "optional";
+  return "off";
+}
+
+function htmlContentByteLength(value: string) {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function isHtmlFileName(name: string) {
+  const lowerName = name.trim().toLowerCase();
+  return lowerName.endsWith(".html") || lowerName.endsWith(".htm");
+}
+
+function isHtmlMime(type?: string) {
+  return !type || type === HTML_FILE_TYPE;
+}
+
+function cleanHtmlSubmissionFile(file?: Partial<HtmlSubmissionFile>) {
+  if (!file) return undefined;
+  const name = String(file.name ?? "").trim();
+  const type = String(file.type ?? HTML_FILE_TYPE);
+  const content = String(file.content ?? "");
+  if (!isHtmlFileName(name)) throw new Error("Only one .html or .htm file is accepted.");
+  if (!isHtmlMime(type)) throw new Error("The HTML preview must be a text/html file.");
+  if (!content.trim()) throw new Error("HTML file is empty.");
+  const size = htmlContentByteLength(content);
+  if (size > HTML_FILE_MAX_BYTES) throw new Error("HTML file must be 500 KB or smaller.");
+  return {
+    name,
+    size,
+    type: type || HTML_FILE_TYPE,
+    lastModified: nonNegativeNumber(file.lastModified, 0),
+    content,
+  };
 }
 
 function isTechnicalTask(task: StudioTask) {
@@ -421,6 +472,7 @@ function normalizeData(data: StudioData): StudioData {
       ...task,
       points,
       taskType,
+      htmlSubmissionMode: htmlSubmissionMode(task),
       scope,
       memberId:
         scope === "member" ? (task.memberId ?? uniqueText(task.memberIds ?? [])[0]) : undefined,
@@ -453,6 +505,39 @@ function normalizeData(data: StudioData): StudioData {
     repoUrl: member.repoUrl ?? "",
   }));
   const memberIds = new Set(members.map((member) => member.id));
+  const responses: StudioData["responses"] = Object.fromEntries(
+    Object.entries(data.responses ?? {})
+      .filter(([taskId]) => taskIds.has(taskId))
+      .map(([taskId, taskResponses]) => [
+        taskId,
+        Object.fromEntries(
+          Object.entries(taskResponses ?? {}).map(([memberId, response]) => {
+            const responseFields = { ...response };
+            delete responseFields.htmlFile;
+            let htmlFile: HtmlSubmissionFile | undefined;
+            try {
+              htmlFile = cleanHtmlSubmissionFile(response.htmlFile);
+            } catch {
+              htmlFile = undefined;
+            }
+            return [
+              memberId,
+              {
+                ...responseFields,
+                memberId: response.memberId || memberId,
+                memberName: response.memberName || memberId,
+                answer: String(response.answer ?? ""),
+                status:
+                  response.status === "approved" || response.status === "rejected"
+                    ? response.status
+                    : "submitted",
+                ...(htmlFile ? { htmlFile } : {}),
+              },
+            ];
+          }),
+        ),
+      ]),
+  );
 
   return {
     projectName: data.projectName || "Hivo Studio",
@@ -464,7 +549,7 @@ function normalizeData(data: StudioData): StudioData {
     },
     members,
     tasks,
-    responses: data.responses ?? {},
+    responses,
     taskSkips: data.taskSkips ?? {},
     progressUpdates: data.progressUpdates ?? {},
     taskUpdates: Object.fromEntries(
@@ -986,13 +1071,22 @@ export default {
             throw new Error("This task is not assigned to this member.");
           }
           const answer = String(item.answer ?? "").trim();
-          if (!answer) throw new Error("Submission answer is required.");
+          const taskType = normalizedTaskType(task);
+          const htmlMode = htmlSubmissionMode(task);
+          if (taskType === "problem" && !answer) throw new Error("Problem answer is required.");
+          if (htmlMode === "off" && item.htmlFile) {
+            throw new Error("This task does not accept HTML preview files.");
+          }
+          const htmlFile = htmlMode === "off" ? undefined : cleanHtmlSubmissionFile(item.htmlFile);
+          if (htmlMode === "required" && !htmlFile) {
+            throw new Error("HTML preview file is required for this task.");
+          }
           const previous = data.responses[task.id]?.[member.id];
           if (previous && previous.status !== "rejected") {
             throw new Error("This member already submitted this task.");
           }
           if (
-            normalizedTaskType(task) === "problem" &&
+            taskType === "problem" &&
             previous?.status === "rejected" &&
             normalizeProblemAnswer(previous.answer) === normalizeProblemAnswer(answer)
           ) {
@@ -1023,6 +1117,7 @@ export default {
                   memberId: member.id,
                   memberName: member.name,
                   answer,
+                  ...(htmlFile ? { htmlFile } : {}),
                   status: "submitted",
                   submittedAt,
                   awardedPoints: 0,
@@ -1323,6 +1418,7 @@ export default {
               question: String(task.question),
               points,
               taskType,
+              htmlSubmissionMode: htmlSubmissionMode(task),
               scope,
               memberId: scope === "member" ? memberIds[0] : undefined,
               memberIds,
@@ -1379,6 +1475,10 @@ export default {
                       memberIds: nextMemberIds,
                       points: nextPoints,
                       taskType: nextTaskType,
+                      htmlSubmissionMode:
+                        updates.htmlSubmissionMode === undefined
+                          ? htmlSubmissionMode(task)
+                          : htmlSubmissionMode(updates),
                       deadlineAt:
                         nextTaskType === "technical"
                           ? ""
