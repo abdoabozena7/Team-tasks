@@ -1015,6 +1015,13 @@
         "checkedAt": "2026-07-08T19:32:29.029Z",
         "lateMinutes": 2,
         "score": 1
+      },
+      "yossef-sharawy": {
+        "memberId": "yossef-sharawy",
+        "memberName": "yossef sharawy",
+        "checkedAt": "2026-07-08T19:32:39.248Z",
+        "lateMinutes": 3,
+        "score": 1
       }
     }
   },
@@ -1699,6 +1706,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T19:32:29.029Z"
+    "updatedAt": "2026-07-08T19:32:39.248Z"
   }
 }
