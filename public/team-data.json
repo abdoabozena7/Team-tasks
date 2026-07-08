@@ -1022,6 +1022,13 @@
         "checkedAt": "2026-07-08T19:32:39.248Z",
         "lateMinutes": 3,
         "score": 1
+      },
+      "rodina": {
+        "memberId": "rodina",
+        "memberName": "rodina",
+        "checkedAt": "2026-07-08T19:32:50.864Z",
+        "lateMinutes": 3,
+        "score": 1
       }
     }
   },
@@ -1706,6 +1713,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T19:32:39.248Z"
+    "updatedAt": "2026-07-08T19:32:50.864Z"
   }
 }
