@@ -1100,6 +1100,14 @@
   },
   "interactions": [
     {
+      "id": "abo-grir:task:task-1783008997895",
+      "memberId": "abo-grir",
+      "targetType": "task",
+      "targetId": "task-1783008997895",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-08T20:49:49.607Z"
+    },
+    {
       "id": "marihan:taskUpdate:task-update-task-1783008997895-1783540802552",
       "memberId": "marihan",
       "targetType": "taskUpdate",
@@ -1856,6 +1864,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T20:38:56.598Z"
+    "updatedAt": "2026-07-08T20:49:49.607Z"
   }
 }
