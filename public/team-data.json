@@ -1036,6 +1036,13 @@
         "checkedAt": "2026-07-08T19:32:59.169Z",
         "lateMinutes": 3,
         "score": 1
+      },
+      "tasneem": {
+        "memberId": "tasneem",
+        "memberName": "tasneem",
+        "checkedAt": "2026-07-08T19:33:42.396Z",
+        "lateMinutes": 4,
+        "score": 1
       }
     }
   },
@@ -1720,6 +1727,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T19:32:59.169Z"
+    "updatedAt": "2026-07-08T19:33:42.396Z"
   }
 }
