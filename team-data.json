@@ -277,7 +277,7 @@
       "createdAt": "2026-07-02T16:16:37.895Z",
       "startAt": "2026-07-02T16:15:00.000Z",
       "deadlineAt": "",
-      "status": "active",
+      "status": "archived",
       "taskType": "technical",
       "htmlSubmissionMode": "off"
     },
@@ -2021,6 +2021,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-09T00:44:28.998Z"
+    "updatedAt": "2026-07-09T00:44:35.954Z"
   }
 }
