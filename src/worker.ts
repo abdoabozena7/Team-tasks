@@ -65,6 +65,29 @@ type TaskReviewEvent = {
   scoreOverride?: boolean;
 };
 
+type TaskClarificationRequest = {
+  id: string;
+  taskId: string;
+  title: string;
+  description: string;
+  memberIds: string[];
+  createdAt: string;
+  status?: "active" | "archived";
+};
+
+type TaskClarificationResponse = {
+  requestId: string;
+  taskId: string;
+  memberId: string;
+  memberName: string;
+  answer: string;
+  htmlFile?: HtmlSubmissionFile;
+  status: "submitted" | "approved" | "rejected";
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewEvents?: TaskReviewEvent[];
+};
+
 type TaskSkip = {
   memberId: string;
   memberName: string;
@@ -183,6 +206,8 @@ type StudioData = {
   members: Member[];
   tasks: StudioTask[];
   responses: Record<string, Record<string, TaskResponse>>;
+  clarificationRequests?: TaskClarificationRequest[];
+  clarificationResponses?: Record<string, Record<string, TaskClarificationResponse>>;
   taskSkips?: Record<string, Record<string, TaskSkip>>;
   progressUpdates?: Record<string, TaskProgressUpdate[]>;
   taskUpdates?: Record<string, TaskAnnouncement[]>;
@@ -342,6 +367,114 @@ function cleanHtmlSubmissionFile(file?: Partial<HtmlSubmissionFile>) {
     content,
     kind,
   };
+}
+
+function clarificationRequestStatus(request: Pick<TaskClarificationRequest, "status">) {
+  return request.status === "archived" ? "archived" : "active";
+}
+
+function clarificationTargetMemberIds(data: StudioData, task: StudioTask) {
+  return data.members
+    .filter((member) => taskIsAssignedToMember(data, task, member.id))
+    .filter((member) => !data.taskSkips?.[task.id]?.[member.id])
+    .map((member) => member.id);
+}
+
+function cleanClarificationRequests(
+  data: StudioData,
+  tasks: StudioTask[],
+  members: Member[],
+): TaskClarificationRequest[] {
+  const taskMap = new Map(tasks.map((task) => [task.id, task]));
+  const memberIds = new Set(members.map((member) => member.id));
+  const normalizedData = { ...data, tasks, members };
+  const byId = new Map<string, TaskClarificationRequest>();
+
+  for (const request of data.clarificationRequests ?? []) {
+    const task = taskMap.get(request.taskId);
+    if (!task) continue;
+    const requestedMemberIds = uniqueText(request.memberIds ?? []).filter((memberId) =>
+      memberIds.has(memberId),
+    );
+    const fallbackMemberIds = clarificationTargetMemberIds(normalizedData, task);
+    const targetMemberIds = requestedMemberIds.length > 0 ? requestedMemberIds : fallbackMemberIds;
+    if (targetMemberIds.length === 0) continue;
+    const title = String(request.title ?? "").trim() || "طلب توضيح";
+    const createdAt = request.createdAt || new Date().toISOString();
+    const id = request.id || `clarification-${request.taskId}-${createdAt}`;
+    if (byId.has(id)) continue;
+    byId.set(id, {
+      id,
+      taskId: task.id,
+      title,
+      description: String(request.description ?? "").trim(),
+      memberIds: targetMemberIds,
+      createdAt,
+      status: clarificationRequestStatus(request),
+    });
+  }
+
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
+
+function cleanClarificationResponses(
+  data: StudioData,
+  requests: TaskClarificationRequest[],
+  members: Member[],
+): StudioData["clarificationResponses"] {
+  const requestMap = new Map(requests.map((request) => [request.id, request]));
+  const memberIds = new Set(members.map((member) => member.id));
+
+  return Object.fromEntries(
+    Object.entries(data.clarificationResponses ?? {})
+      .filter(([requestId]) => requestMap.has(requestId))
+      .map(([requestId, responses]) => {
+        const request = requestMap.get(requestId);
+        return [
+          requestId,
+          Object.fromEntries(
+            Object.entries(responses ?? {})
+              .filter(([memberId]) => {
+                return Boolean(
+                  request &&
+                  clarificationRequestStatus(request) === "active" &&
+                  memberIds.has(memberId) &&
+                  request.memberIds.includes(memberId),
+                );
+              })
+              .map(([memberId, response]) => {
+                const responseFields = { ...response };
+                delete responseFields.htmlFile;
+                let htmlFile: HtmlSubmissionFile | undefined;
+                try {
+                  htmlFile = cleanHtmlSubmissionFile(response.htmlFile);
+                } catch {
+                  htmlFile = undefined;
+                }
+                return [
+                  memberId,
+                  {
+                    ...responseFields,
+                    requestId,
+                    taskId: request?.taskId ?? response.taskId,
+                    memberId: response.memberId || memberId,
+                    memberName: response.memberName || memberId,
+                    answer: String(response.answer ?? ""),
+                    status:
+                      response.status === "approved" || response.status === "rejected"
+                        ? response.status
+                        : "submitted",
+                    submittedAt: response.submittedAt || new Date().toISOString(),
+                    ...(htmlFile ? { htmlFile } : {}),
+                  },
+                ];
+              }),
+          ),
+        ];
+      }),
+  );
 }
 
 function isTechnicalTask(task: StudioTask) {
@@ -584,6 +717,8 @@ function normalizeData(data: StudioData): StudioData {
         ),
       ]),
   );
+  const clarificationRequests = cleanClarificationRequests(data, tasks, members);
+  const clarificationResponses = cleanClarificationResponses(data, clarificationRequests, members);
 
   return {
     projectName: data.projectName || "Hivo Studio",
@@ -596,6 +731,8 @@ function normalizeData(data: StudioData): StudioData {
     members,
     tasks,
     responses,
+    clarificationRequests,
+    clarificationResponses,
     taskSkips: data.taskSkips ?? {},
     progressUpdates: data.progressUpdates ?? {},
     taskUpdates: Object.fromEntries(
@@ -886,6 +1023,49 @@ function taskIsAssignedToMember(data: StudioData, task: StudioTask, memberId: st
   return assignedMemberIds(task).includes(memberId);
 }
 
+function getClarificationRequest(data: StudioData, requestId: string) {
+  const request = (data.clarificationRequests ?? []).find((item) => item.id === requestId);
+  if (!request) throw new Error("Clarification request not found.");
+  return request;
+}
+
+function getClarificationResponse(data: StudioData, requestId: string, memberId: string) {
+  return data.clarificationResponses?.[requestId]?.[memberId];
+}
+
+function activeClarificationRequestsForMember(data: StudioData, taskId: string, memberId: string) {
+  return (data.clarificationRequests ?? [])
+    .filter((request) => request.taskId === taskId)
+    .filter((request) => clarificationRequestStatus(request) === "active")
+    .filter((request) => request.memberIds.includes(memberId));
+}
+
+function memberClarificationsApproved(data: StudioData, task: StudioTask, memberId: string) {
+  return activeClarificationRequestsForMember(data, task.id, memberId).every(
+    (request) => getClarificationResponse(data, request.id, memberId)?.status === "approved",
+  );
+}
+
+function withClarificationReviewEvent(
+  response: TaskClarificationResponse,
+  status: "approved" | "rejected",
+  note: string,
+): TaskClarificationResponse {
+  const reviewedAt = new Date().toISOString();
+  const event: TaskReviewEvent = {
+    id: `clarification-review-${Date.now()}`,
+    status,
+    reviewedAt,
+    ...(note ? { note } : {}),
+  };
+  return {
+    ...response,
+    status,
+    reviewedAt,
+    reviewEvents: [event, ...(response.reviewEvents ?? [])],
+  };
+}
+
 function checkedMemberIds(data: StudioData, memberIds: string[]) {
   const cleanIds = uniqueText(memberIds);
   for (const memberId of cleanIds) getMember(data, memberId);
@@ -1077,11 +1257,37 @@ function mergeDocumentationRequests(latest: StudioData, incoming: StudioData) {
   );
 }
 
+function mergeClarificationRequests(latest: StudioData, incoming: StudioData) {
+  const byId = new Map<string, TaskClarificationRequest>();
+  for (const request of incoming.clarificationRequests ?? []) byId.set(request.id, request);
+  for (const request of latest.clarificationRequests ?? []) byId.set(request.id, request);
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
+
+function mergeClarificationResponses(latest: StudioData, incoming: StudioData) {
+  const requestIds = new Set([
+    ...Object.keys(latest.clarificationResponses ?? {}),
+    ...Object.keys(incoming.clarificationResponses ?? {}),
+  ]);
+  const responses: NonNullable<StudioData["clarificationResponses"]> = {};
+  for (const requestId of requestIds) {
+    responses[requestId] = {
+      ...(latest.clarificationResponses?.[requestId] ?? {}),
+      ...(incoming.clarificationResponses?.[requestId] ?? {}),
+    };
+  }
+  return responses;
+}
+
 function mergeAdminReplacement(latest: StudioData, incomingPayload: StudioData) {
   const incoming = normalizeData(incomingPayload);
   return {
     ...incoming,
     responses: mergeResponses(latest, incoming),
+    clarificationRequests: mergeClarificationRequests(latest, incoming),
+    clarificationResponses: mergeClarificationResponses(latest, incoming),
     taskSkips: mergeTaskSkips(latest, incoming),
     progressUpdates: mergeProgressUpdates(latest, incoming),
     taskUpdates: mergeTaskUpdates(latest, incoming),
@@ -1115,6 +1321,9 @@ export default {
           }
           if (!taskIsAssignedToMember(data, task, member.id)) {
             throw new Error("This task is not assigned to this member.");
+          }
+          if (!memberClarificationsApproved(data, task, member.id)) {
+            throw new Error("All clarification requests must be approved before final submission.");
           }
           const answer = String(item.answer ?? "").trim();
           const taskType = normalizedTaskType(task);
@@ -1175,6 +1384,72 @@ export default {
             repoUpdates: appendRepoUpdate(data, repoUpdate),
           };
         });
+        return json(env, next);
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/clarification-submissions") {
+        const item = (await request.json()) as TaskClarificationResponse & { id?: string };
+        const next = await commitData(
+          env,
+          `Clarification ${item.requestId} by ${item.memberId}`,
+          (data) => {
+            const clarificationRequest = getClarificationRequest(
+              data,
+              String(item.requestId ?? ""),
+            );
+            const task = getTask(data, clarificationRequest.taskId);
+            const member = getMember(data, String(item.memberId ?? ""));
+            if (taskStatus(task) !== "active") {
+              throw new Error("This task is not active.");
+            }
+            if (clarificationRequestStatus(clarificationRequest) !== "active") {
+              throw new Error("This clarification request is not active.");
+            }
+            if (!clarificationRequest.memberIds.includes(member.id)) {
+              throw new Error("This clarification request is not assigned to this member.");
+            }
+            if (!taskIsAssignedToMember(data, task, member.id)) {
+              throw new Error("This task is not assigned to this member.");
+            }
+            const answer = String(item.answer ?? "").trim();
+            const htmlFile = item.htmlFile ? cleanHtmlSubmissionFile(item.htmlFile) : undefined;
+            if (!answer && !htmlFile) {
+              throw new Error("Clarification needs written text or a visual submission.");
+            }
+            const previous = data.clarificationResponses?.[clarificationRequest.id]?.[member.id];
+            if (previous && previous.status !== "rejected") {
+              throw new Error("This clarification is already submitted.");
+            }
+            const submittedAt = new Date().toISOString();
+            const repoUpdate = repoUpdateFromText({
+              memberId: member.id,
+              taskId: task.id,
+              source: "progress",
+              text: answer || htmlFile?.name || "توضيح بصري",
+            });
+            return {
+              ...data,
+              clarificationResponses: {
+                ...(data.clarificationResponses ?? {}),
+                [clarificationRequest.id]: {
+                  ...((data.clarificationResponses ?? {})[clarificationRequest.id] ?? {}),
+                  [member.id]: {
+                    requestId: clarificationRequest.id,
+                    taskId: task.id,
+                    memberId: member.id,
+                    memberName: member.name,
+                    answer,
+                    ...(htmlFile ? { htmlFile } : {}),
+                    status: "submitted",
+                    submittedAt,
+                    reviewEvents: previous?.reviewEvents ?? [],
+                  },
+                },
+              },
+              repoUpdates: appendRepoUpdate(data, repoUpdate),
+            };
+          },
+        );
         return json(env, next);
       }
 
@@ -1565,6 +1840,34 @@ export default {
             };
           }
 
+          if (action === "createClarificationRequest") {
+            const taskId = String(payload.taskId ?? "");
+            const task = getTask(data, taskId);
+            if (taskStatus(task) !== "active") {
+              throw new Error("Clarification requests can only be added to active tasks.");
+            }
+            const title = String(payload.title ?? "").trim() || "طلب توضيح";
+            const description = String(payload.description ?? "").trim();
+            const memberIds = clarificationTargetMemberIds(data, task);
+            if (memberIds.length === 0) {
+              throw new Error("No assigned members available for this clarification.");
+            }
+            const createdAt = new Date().toISOString();
+            const clarificationRequest: TaskClarificationRequest = {
+              id: `clarification-${task.id}-${Date.now()}`,
+              taskId: task.id,
+              title,
+              description,
+              memberIds,
+              createdAt,
+              status: "active",
+            };
+            return {
+              ...data,
+              clarificationRequests: [...(data.clarificationRequests ?? []), clarificationRequest],
+            };
+          }
+
           if (action === "requestDocumentation") {
             const problemId = String(payload.problemId ?? "");
             const problem = getTask(data, problemId);
@@ -1773,6 +2076,14 @@ export default {
             const progressUpdates = { ...(data.progressUpdates ?? {}) };
             const taskSkips = { ...(data.taskSkips ?? {}) };
             const taskUpdates = { ...(data.taskUpdates ?? {}) };
+            const removedClarificationIds = new Set(
+              (data.clarificationRequests ?? [])
+                .filter((request) => request.taskId === taskId)
+                .map((request) => request.id),
+            );
+            const clarificationResponses = { ...(data.clarificationResponses ?? {}) };
+            for (const requestId of removedClarificationIds)
+              delete clarificationResponses[requestId];
             delete responses[taskId];
             delete progressUpdates[taskId];
             delete taskSkips[taskId];
@@ -1781,6 +2092,10 @@ export default {
               ...data,
               tasks: data.tasks.filter((task) => task.id !== taskId),
               responses,
+              clarificationRequests: (data.clarificationRequests ?? []).filter(
+                (request) => request.taskId !== taskId,
+              ),
+              clarificationResponses,
               progressUpdates,
               taskSkips,
               taskUpdates,
@@ -1870,6 +2185,35 @@ export default {
             };
           }
 
+          if (action === "reviewClarificationResponse") {
+            const requestId = String(payload.requestId ?? "");
+            const memberId = String(payload.memberId ?? "");
+            const status = payload.status === "approved" ? "approved" : "rejected";
+            const note = String(payload.note ?? "").trim();
+            const clarificationRequest = getClarificationRequest(data, requestId);
+            const task = getTask(data, clarificationRequest.taskId);
+            getMember(data, memberId);
+            if (!clarificationRequest.memberIds.includes(memberId)) {
+              throw new Error("This clarification is not assigned to this member.");
+            }
+            const response = getClarificationResponse(data, requestId, memberId);
+            if (!response) throw new Error("Clarification response not found.");
+            return {
+              ...data,
+              clarificationResponses: {
+                ...(data.clarificationResponses ?? {}),
+                [requestId]: {
+                  ...((data.clarificationResponses ?? {})[requestId] ?? {}),
+                  [memberId]: withClarificationReviewEvent(
+                    { ...response, taskId: task.id },
+                    status,
+                    note,
+                  ),
+                },
+              },
+            };
+          }
+
           if (action === "reviewAnswer") {
             const taskId = String(payload.taskId ?? "");
             const memberId = String(payload.memberId ?? "");
@@ -1880,6 +2224,9 @@ export default {
             const task = getTask(data, taskId);
             const response = data.responses[taskId]?.[memberId];
             if (!response) throw new Error("Response not found.");
+            if (status === "approved" && !memberClarificationsApproved(data, task, memberId)) {
+              throw new Error("Clarifications must be approved before final approval.");
+            }
             return {
               ...data,
               responses: {
@@ -1904,6 +2251,9 @@ export default {
             const memberId = String(payload.memberId ?? "");
             const task = getTask(data, taskId);
             const member = getMember(data, memberId);
+            if (!memberClarificationsApproved(data, task, memberId)) {
+              throw new Error("Clarifications must be approved before manual approval.");
+            }
             const submittedAt = new Date().toISOString();
             const response: TaskResponse = {
               memberId,

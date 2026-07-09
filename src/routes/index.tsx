@@ -131,6 +131,29 @@ type TaskReviewEvent = {
   scoreOverride?: boolean;
 };
 
+type TaskClarificationRequest = {
+  id: string;
+  taskId: string;
+  title: string;
+  description: string;
+  memberIds: string[];
+  createdAt: string;
+  status?: "active" | "archived";
+};
+
+type TaskClarificationResponse = {
+  requestId: string;
+  taskId: string;
+  memberId: string;
+  memberName: string;
+  answer: string;
+  htmlFile?: HtmlSubmissionFile;
+  status: "submitted" | "approved" | "rejected";
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewEvents?: TaskReviewEvent[];
+};
+
 type TaskSkip = {
   memberId: string;
   memberName: string;
@@ -228,6 +251,17 @@ type QueuedSubmission = {
   submittedAt: string;
 };
 
+type QueuedClarificationSubmission = {
+  id: string;
+  requestId: string;
+  taskId: string;
+  memberId: string;
+  memberName: string;
+  answer: string;
+  htmlFile?: HtmlSubmissionFile;
+  submittedAt: string;
+};
+
 type QueuedProgressUpdate = {
   id: string;
   taskId: string;
@@ -303,6 +337,8 @@ type StudioData = {
   members: Member[];
   tasks: StudioTask[];
   responses: Record<string, Record<string, TaskResponse>>;
+  clarificationRequests?: TaskClarificationRequest[];
+  clarificationResponses?: Record<string, Record<string, TaskClarificationResponse>>;
   taskSkips?: Record<string, Record<string, TaskSkip>>;
   progressUpdates?: Record<string, TaskProgressUpdate[]>;
   taskUpdates?: Record<string, TaskAnnouncement[]>;
@@ -764,6 +800,109 @@ function sanitizeHtmlSubmissionFile(file?: Partial<HtmlSubmissionFile>) {
   };
 }
 
+function clarificationRequestStatus(request: Pick<TaskClarificationRequest, "status">) {
+  return request.status === "archived" ? "archived" : "active";
+}
+
+function clarificationTargetMembers(data: StudioData, task: StudioTask) {
+  return data.members
+    .filter((member) => taskIsForMember(task, member.id))
+    .filter((member) => !isTaskSkipped(data, task.id, member.id));
+}
+
+function sanitizeClarificationRequests(
+  data: StudioData,
+  tasks: StudioTask[],
+  members: Member[],
+): TaskClarificationRequest[] {
+  const taskMap = new Map(tasks.map((task) => [task.id, task]));
+  const memberIds = new Set(members.map((member) => member.id));
+  const byId = new Map<string, TaskClarificationRequest>();
+
+  for (const request of data.clarificationRequests ?? []) {
+    const task = taskMap.get(request.taskId);
+    if (!task) continue;
+    const requestedMembers = uniqueText(request.memberIds ?? []).filter((memberId) =>
+      memberIds.has(memberId),
+    );
+    const fallbackMembers = clarificationTargetMembers({ ...data, tasks, members }, task).map(
+      (member) => member.id,
+    );
+    const targetMemberIds = requestedMembers.length > 0 ? requestedMembers : fallbackMembers;
+    if (targetMemberIds.length === 0) continue;
+    const title = String(request.title ?? "").trim() || "طلب توضيح";
+    const createdAt = request.createdAt || new Date().toISOString();
+    const id = request.id || `clarification-${request.taskId}-${createdAt}`;
+    if (byId.has(id)) continue;
+    byId.set(id, {
+      id,
+      taskId: task.id,
+      title,
+      description: String(request.description ?? "").trim(),
+      memberIds: targetMemberIds,
+      createdAt,
+      status: clarificationRequestStatus(request),
+    });
+  }
+
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
+
+function sanitizeClarificationResponses(
+  data: StudioData,
+  requests: TaskClarificationRequest[],
+  members: Member[],
+): StudioData["clarificationResponses"] {
+  const requestMap = new Map(requests.map((request) => [request.id, request]));
+  const memberIds = new Set(members.map((member) => member.id));
+
+  return Object.fromEntries(
+    Object.entries(data.clarificationResponses ?? {})
+      .filter(([requestId]) => requestMap.has(requestId))
+      .map(([requestId, responses]) => {
+        const request = requestMap.get(requestId);
+        return [
+          requestId,
+          Object.fromEntries(
+            Object.entries(responses ?? {})
+              .filter(([memberId]) => {
+                return Boolean(
+                  request &&
+                  memberIds.has(memberId) &&
+                  clarificationRequestStatus(request) === "active" &&
+                  request.memberIds.includes(memberId),
+                );
+              })
+              .map(([memberId, response]) => {
+                const responseFields = { ...response };
+                const htmlFile = sanitizeHtmlSubmissionFile(response.htmlFile);
+                delete responseFields.htmlFile;
+                return [
+                  memberId,
+                  {
+                    ...responseFields,
+                    requestId,
+                    taskId: request?.taskId ?? response.taskId,
+                    memberId: response.memberId || memberId,
+                    memberName: response.memberName || memberId,
+                    answer: String(response.answer ?? ""),
+                    status:
+                      response.status === "approved" || response.status === "rejected"
+                        ? response.status
+                        : "submitted",
+                    submittedAt: response.submittedAt || new Date().toISOString(),
+                    ...(htmlFile ? { htmlFile } : {}),
+                  },
+                ];
+              }),
+          ),
+        ];
+      }),
+  );
+}
+
 function taskTypeLabel(task: Pick<StudioTask, "taskType" | "points">) {
   const type = normalizedTaskType(task);
   return taskTypeOptionLabel(type);
@@ -853,6 +992,12 @@ function sanitizeData(data: StudioData): StudioData {
         ),
       ]),
   );
+  const clarificationRequests = sanitizeClarificationRequests(data, tasks, members);
+  const clarificationResponses = sanitizeClarificationResponses(
+    data,
+    clarificationRequests,
+    members,
+  );
 
   return {
     ...DEFAULT_DATA,
@@ -866,6 +1011,8 @@ function sanitizeData(data: StudioData): StudioData {
     members,
     tasks,
     responses,
+    clarificationRequests,
+    clarificationResponses,
     taskSkips: data.taskSkips ?? {},
     progressUpdates: data.progressUpdates ?? {},
     taskUpdates: Object.fromEntries(
@@ -993,6 +1140,10 @@ function progressKey(taskId: string, memberId: string) {
   return `progress:${taskId}:${memberId}`;
 }
 
+function clarificationKey(requestId: string, memberId: string) {
+  return `clarification:${requestId}:${memberId}`;
+}
+
 function readMemberDrafts() {
   if (typeof window === "undefined") return {};
 
@@ -1094,6 +1245,61 @@ function isTaskSkipped(data: StudioData, taskId: string, memberId: string) {
   return Boolean(getTaskSkip(data, taskId, memberId));
 }
 
+function clarificationResponse(data: StudioData, requestId: string, memberId: string) {
+  return data.clarificationResponses?.[requestId]?.[memberId];
+}
+
+function activeClarificationRequestsForMember(data: StudioData, taskId: string, memberId: string) {
+  return (data.clarificationRequests ?? [])
+    .filter((request) => request.taskId === taskId)
+    .filter((request) => clarificationRequestStatus(request) === "active")
+    .filter((request) => request.memberIds.includes(memberId))
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+function activeClarificationRequestsForTask(data: StudioData, taskId: string) {
+  return (data.clarificationRequests ?? [])
+    .filter((request) => request.taskId === taskId)
+    .filter((request) => clarificationRequestStatus(request) === "active")
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+function taskScorePartCount(data: StudioData, task: StudioTask, memberId: string) {
+  return activeClarificationRequestsForMember(data, task.id, memberId).length + 1;
+}
+
+function taskScorePartValue(data: StudioData, task: StudioTask, memberId: string) {
+  const total = sanitizePositiveNumber(task.points, 1);
+  return roundScore(total / taskScorePartCount(data, task, memberId));
+}
+
+function hasClarificationSplit(data: StudioData, task: StudioTask, memberId: string) {
+  return activeClarificationRequestsForMember(data, task.id, memberId).length > 0;
+}
+
+function clarificationAwardedPoints(
+  data: StudioData,
+  request: TaskClarificationRequest,
+  response?: TaskClarificationResponse,
+) {
+  if (!response || response.status !== "approved") return 0;
+  const task = data.tasks.find((item) => item.id === request.taskId);
+  if (!task) return 0;
+  return taskScorePartValue(data, task, response.memberId);
+}
+
+function memberClarificationsApproved(data: StudioData, task: StudioTask, memberId: string) {
+  return activeClarificationRequestsForMember(data, task.id, memberId).every(
+    (request) => clarificationResponse(data, request.id, memberId)?.status === "approved",
+  );
+}
+
+function missingClarificationCount(data: StudioData, task: StudioTask, memberId: string) {
+  return activeClarificationRequestsForMember(data, task.id, memberId).filter(
+    (request) => clarificationResponse(data, request.id, memberId)?.status !== "approved",
+  ).length;
+}
+
 function roundScore(value: number) {
   return Math.round(value * 100) / 100;
 }
@@ -1144,9 +1350,19 @@ function calculateAwardedPoints(
   return roundScore(isSubmissionLate(task, response) ? points / 2 : points);
 }
 
-function responseAwardedPoints(task: StudioTask, response?: TaskResponse) {
+function responseAwardedPoints(task: StudioTask, response?: TaskResponse, data?: StudioData) {
   if (!response || response.status !== "approved") return 0;
+  if (data && hasClarificationSplit(data, task, response.memberId)) {
+    return taskScorePartValue(data, task, response.memberId);
+  }
   return response.awardedPoints ?? calculateAwardedPoints(task, response, response.status);
+}
+
+function defaultReviewAwardedPoints(task: StudioTask, response: TaskResponse, data: StudioData) {
+  if (hasClarificationSplit(data, task, response.memberId)) {
+    return taskScorePartValue(data, task, response.memberId);
+  }
+  return calculateAwardedPoints(task, response, "approved");
 }
 
 function documentationAwardedPoints(request: DocumentationRequest) {
@@ -1189,12 +1405,36 @@ function buildMemberGradeLedger(data: StudioData, memberId: string): GradeLedger
   for (const task of data.tasks.filter((item) => !isHiddenTask(item))) {
     if (!taskIsForMember(task, memberId)) continue;
     if (isTaskSkipped(data, task.id, memberId)) continue;
+    const maxPoints = sanitizePositiveNumber(task.points, 1);
+
+    for (const request of activeClarificationRequestsForMember(data, task.id, memberId)) {
+      const clarification = clarificationResponse(data, request.id, memberId);
+      if (!clarification || clarification.status !== "approved") continue;
+      const clarificationPoints = clarificationAwardedPoints(data, request, clarification);
+      if (clarificationPoints === 0) continue;
+      const clarificationNote = latestReviewNote(clarification);
+      entries.push({
+        id: `clarification-score-${request.id}-${memberId}`,
+        memberId,
+        source: "task",
+        title: `${task.title} - ${request.title}`,
+        points: clarificationPoints,
+        maxPoints,
+        date: clarification.reviewedAt || clarification.submittedAt,
+        detail: "درجة توضيح مقبول",
+        note: clarificationNote || clarification.htmlFile?.name || request.description || undefined,
+        meta: [
+          `جزء من ${taskScorePartCount(data, task, memberId)} أجزاء`,
+          clarification.htmlFile ? `عرض بصري: ${clarification.htmlFile.name}` : "",
+        ].filter(Boolean),
+      });
+    }
+
     const response = getResponse(data, task.id, memberId);
     if (!response || response.status !== "approved") continue;
 
-    const points = responseAwardedPoints(task, response);
+    const points = responseAwardedPoints(task, response, data);
     if (points === 0) continue;
-    const maxPoints = sanitizePositiveNumber(task.points, 1);
     const note = latestReviewNote(response);
     const detail = response.scoreOverride
       ? "Manual task score"
@@ -1400,7 +1640,7 @@ function rejectionCount(response?: TaskResponse) {
   return response.status === "rejected" ? 1 : 0;
 }
 
-function latestReviewNote(response?: TaskResponse) {
+function latestReviewNote(response?: { reviewEvents?: TaskReviewEvent[] }) {
   return response?.reviewEvents?.find((event) => event.note?.trim())?.note?.trim() ?? "";
 }
 
@@ -1477,21 +1717,57 @@ function createStats(data: StudioData) {
       .filter((item): item is { task: StudioTask; response: TaskResponse } =>
         Boolean(item.response),
       );
+    const clarificationItems = assignedTasks.flatMap((task) =>
+      activeClarificationRequestsForMember(data, task.id, member.id)
+        .map((request) => ({
+          task,
+          request,
+          response: clarificationResponse(data, request.id, member.id),
+        }))
+        .filter(
+          (
+            item,
+          ): item is {
+            task: StudioTask;
+            request: TaskClarificationRequest;
+            response: TaskClarificationResponse;
+          } => Boolean(item.response),
+        ),
+    );
     const approvedTasks = responses.filter((item) => item.response.status === "approved");
-    const taskPoints = approvedTasks.reduce(
-      (sum, item) => sum + responseAwardedPoints(item.task, item.response),
+    const approvedClarifications = clarificationItems.filter(
+      (item) => item.response.status === "approved",
+    );
+    const finalTaskPoints = approvedTasks.reduce(
+      (sum, item) => sum + responseAwardedPoints(item.task, item.response, data),
       0,
     );
-    const recentTaskPoints = approvedTasks.reduce(
+    const clarificationPoints = approvedClarifications.reduce(
+      (sum, item) => sum + clarificationAwardedPoints(data, item.request, item.response),
+      0,
+    );
+    const taskPoints = finalTaskPoints + clarificationPoints;
+    const recentFinalTaskPoints = approvedTasks.reduce(
       (sum, item) =>
         sum +
         scoreWithinRecentWindow(
-          responseAwardedPoints(item.task, item.response),
+          responseAwardedPoints(item.task, item.response, data),
           responseScoreDate(item.response),
           recentCutoffTime,
         ),
       0,
     );
+    const recentClarificationPoints = approvedClarifications.reduce(
+      (sum, item) =>
+        sum +
+        scoreWithinRecentWindow(
+          clarificationAwardedPoints(data, item.request, item.response),
+          item.response.reviewedAt || item.response.submittedAt,
+          recentCutoffTime,
+        ),
+      0,
+    );
+    const recentTaskPoints = recentFinalTaskPoints + recentClarificationPoints;
     const speedSamples = responses
       .map((item) =>
         hoursBetween(item.task.startAt || item.task.createdAt, item.response.submittedAt),
@@ -1569,28 +1845,58 @@ function createStats(data: StudioData) {
         )
       );
     }, 0);
-    const approved = approvedTasks.length;
-    const rejected = responses.reduce((sum, item) => sum + rejectionCount(item.response), 0);
-    const pending = responses.filter((item) => item.response.status === "submitted").length;
-    const submitted = responses.length;
+    const approved = approvedTasks.length + approvedClarifications.length;
+    const rejected =
+      responses.reduce((sum, item) => sum + rejectionCount(item.response), 0) +
+      clarificationItems.reduce((sum, item) => sum + rejectionCount(item.response), 0);
+    const pending =
+      responses.filter((item) => item.response.status === "submitted").length +
+      clarificationItems.filter((item) => item.response.status === "submitted").length;
+    const submitted = responses.length + clarificationItems.length;
     const reviewed = approved + rejected;
     const rejectionRate = reviewed > 0 ? (rejected / reviewed) * 100 : 0;
-    const responseRate =
-      assignedTasks.length > 0 ? (responses.length / assignedTasks.length) * 100 : 0;
+    const expectedSubmissions =
+      assignedTasks.length +
+      assignedTasks.reduce(
+        (sum, task) => sum + activeClarificationRequestsForMember(data, task.id, member.id).length,
+        0,
+      );
+    const responseRate = expectedSubmissions > 0 ? (submitted / expectedSubmissions) * 100 : 0;
     const approvalRate = reviewed > 0 ? (approved / reviewed) * 100 : 0;
     const reviewedResponses = responses.filter(
       (item) => item.response.status === "approved" || item.response.status === "rejected",
     );
+    const reviewedClarifications = clarificationItems.filter(
+      (item) => item.response.status === "approved" || item.response.status === "rejected",
+    );
     const awardedQualityAverage =
-      reviewedResponses.length > 0
-        ? reviewedResponses.reduce((sum, item) => {
+      reviewedResponses.length + reviewedClarifications.length > 0
+        ? (reviewedResponses.reduce((sum, item) => {
             if (item.response.status !== "approved") return sum;
-            const taskPointsValue = sanitizePositiveNumber(item.task.points, 1);
+            const maxPart = hasClarificationSplit(data, item.task, item.response.memberId)
+              ? taskScorePartValue(data, item.task, item.response.memberId)
+              : sanitizePositiveNumber(item.task.points, 1);
             return (
               sum +
-              clampScore((responseAwardedPoints(item.task, item.response) / taskPointsValue) * 100)
+              clampScore(
+                (responseAwardedPoints(item.task, item.response, data) / Math.max(maxPart, 1)) *
+                  100,
+              )
             );
-          }, 0) / reviewedResponses.length
+          }, 0) +
+            reviewedClarifications.reduce((sum, item) => {
+              if (item.response.status !== "approved") return sum;
+              const maxPart = taskScorePartValue(data, item.task, item.response.memberId);
+              return (
+                sum +
+                clampScore(
+                  (clarificationAwardedPoints(data, item.request, item.response) /
+                    Math.max(maxPart, 1)) *
+                    100,
+                )
+              );
+            }, 0)) /
+          (reviewedResponses.length + reviewedClarifications.length)
         : 0;
     const awardQualityScore = clampScore(awardedQualityAverage - rejectionRate * 0.25);
     const meetingAttendances = accountableMeetings
@@ -2578,6 +2884,7 @@ function MemberView({
   onDraftHtmlFileChange,
   isSubmitting,
   onSubmitFinal,
+  onSubmitClarification,
   onSubmitProgress,
   onSubmitDocumentation,
   onRepoAttention,
@@ -2599,6 +2906,10 @@ function MemberView({
   onDraftHtmlFileChange: (key: string, file?: HtmlSubmissionFile) => void;
   isSubmitting: boolean;
   onSubmitFinal: (task: StudioTask) => boolean | Promise<boolean>;
+  onSubmitClarification: (
+    request: TaskClarificationRequest,
+    answer: string,
+  ) => boolean | Promise<boolean>;
   onSubmitProgress: (task: StudioTask) => boolean | Promise<boolean>;
   onSubmitDocumentation: (request: DocumentationRequest, file: File) => boolean | Promise<boolean>;
   onRepoAttention: (task: StudioTask) => boolean | Promise<boolean>;
@@ -3111,8 +3422,9 @@ function MemberView({
     task: StudioTask,
     responseKeyValue: string,
     submittedFile?: HtmlSubmissionFile,
+    modeOverride?: HtmlSubmissionMode,
   ) {
-    const mode = htmlSubmissionMode(task);
+    const mode = modeOverride ?? htmlSubmissionMode(task);
     if (mode === "off" && !submittedFile) return null;
     const draftFile = draftHtmlFiles[responseKeyValue];
     const error = htmlUploadErrors[responseKeyValue];
@@ -3229,6 +3541,143 @@ function MemberView({
           </div>
         )}
         {error && <p className="mt-2 text-sm font-bold text-red-700">{error}</p>}
+      </div>
+    );
+  }
+
+  function renderTaskClarifications(task: StudioTask) {
+    const requests = activeClarificationRequestsForMember(data, task.id, activeMember.member.id);
+    if (requests.length === 0) return null;
+    const partValue = taskScorePartValue(data, task, activeMember.member.id);
+
+    return (
+      <div className="mb-4 grid gap-2 rounded-xl border-[2px] border-amber-200 bg-amber-50 p-3 text-amber-950">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <strong className="text-base">توضيحات مطلوبة قبل التسليم النهائي</strong>
+          <span className="rounded-full border border-amber-300 bg-white px-2 py-1 text-xs font-bold">
+            كل توضيح = {partValue} درجة
+          </span>
+        </div>
+
+        {requests.map((request, index) => {
+          const response = clarificationResponse(data, request.id, activeMember.member.id);
+          const key = clarificationKey(request.id, activeMember.member.id);
+          const feedback = actionFeedback[key];
+          const draftAnswer =
+            draftAnswers[key] ?? (response?.status === "rejected" ? "" : (response?.answer ?? ""));
+          const canSubmit = !response || response.status === "rejected";
+          const reviewNote = latestReviewNote(response);
+
+          return (
+            <article
+              key={request.id}
+              className={cn(
+                "rounded-lg border p-3",
+                response?.status === "approved"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+                  : response?.status === "submitted"
+                    ? "border-yellow-200 bg-yellow-50 text-yellow-950"
+                    : response?.status === "rejected"
+                      ? "border-red-200 bg-red-50 text-red-950"
+                      : "border-amber-200 bg-white",
+              )}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-foreground/50">توضيح {index + 1}</p>
+                  <strong className="break-words">{request.title}</strong>
+                  {request.description && (
+                    <p className="mt-1 text-sm font-semibold leading-6 text-foreground/70">
+                      {request.description}
+                    </p>
+                  )}
+                </div>
+                <span
+                  className={cn(
+                    "rounded-full border px-2 py-1 text-xs font-bold",
+                    statusTone(response?.status),
+                  )}
+                >
+                  {response?.status === "approved"
+                    ? "مقبول"
+                    : response?.status === "submitted"
+                      ? "مستني المراجعة"
+                      : response?.status === "rejected"
+                        ? "اترفض - ابعته تاني"
+                        : "مطلوب"}
+                </span>
+              </div>
+
+              {response?.status === "approved" ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-bold">
+                  <span>اتقبل واتحسبت {partValue} درجة.</span>
+                  {response.htmlFile && <HtmlSubmissionPreview file={response.htmlFile} compact />}
+                </div>
+              ) : response?.status === "submitted" ? (
+                <div className="mt-2 grid gap-2 text-sm font-bold">
+                  <span>التوضيح مستني مراجعة الأدمن.</span>
+                  {response.answer && (
+                    <StructuredTextBlock
+                      text={response.answer}
+                      compact
+                      forceCollapse
+                      className="rounded-md border border-ink/10 bg-white p-2"
+                    />
+                  )}
+                  {response.htmlFile && <HtmlSubmissionPreview file={response.htmlFile} compact />}
+                </div>
+              ) : (
+                <div className="mt-3 grid gap-2">
+                  {response?.status === "rejected" && reviewNote && (
+                    <div className="rounded-md border border-red-200 bg-white p-2 text-sm font-bold text-red-800">
+                      <span className="block text-xs text-red-700/70">سبب الرفض</span>
+                      <StructuredTextBlock text={reviewNote} compact memberFacing />
+                    </div>
+                  )}
+                  <Textarea
+                    value={draftAnswer}
+                    onChange={(event) => onDraftChange(key, event.target.value)}
+                    placeholder="اكتب شرح الحل أو ارفع flow بصري..."
+                    className="min-h-20 border-[2px] border-amber-300 bg-white px-3 py-2 text-sm leading-6"
+                  />
+                  {renderHtmlSubmissionUpload(task, key, response?.htmlFile, "optional")}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        const hasVisual = Boolean(draftHtmlFiles[key]);
+                        if (!draftAnswer.trim() && !hasVisual) {
+                          blockMemberAction(key, ["توضيح مكتوب أو عرض بصري"]);
+                          return;
+                        }
+                        markTaskSeen(task.id);
+                        void runMemberAction(
+                          key,
+                          () => onSubmitClarification(request, draftAnswer),
+                          "تم إرسال التوضيح. مستني مراجعة الأدمن.",
+                          "تعذر إرسال التوضيح. حاول تاني.",
+                        );
+                      }}
+                      disabled={!canSubmit || isSubmitting}
+                      className={actionButtonClass(
+                        "border-[2px] border-ink bg-amber-200 text-amber-950 hover:bg-amber-300",
+                        feedback,
+                      )}
+                    >
+                      <Save data-icon="inline-start" />
+                      إرسال التوضيح
+                    </Button>
+                    <span className="text-xs font-bold text-foreground/55">
+                      التوضيح لازم يتقبل قبل التسليم النهائي.
+                    </span>
+                  </div>
+                  <ActionFeedbackLine feedback={feedback} />
+                </div>
+              )}
+            </article>
+          );
+        })}
       </div>
     );
   }
@@ -3423,7 +3872,7 @@ function MemberView({
               (update) => update.memberId === activeMember.member.id,
             );
             const rejects = rejectionCount(response);
-            const awarded = responseAwardedPoints(task, response);
+            const awarded = responseAwardedPoints(task, response, data);
             const late = responseIsLate(task, response);
             const note = latestReviewNote(response);
 
@@ -3994,6 +4443,12 @@ function MemberView({
                   (update) => update.memberId === activeMember.member.id,
                 );
                 const canAnswer = !existing || existing.status === "rejected";
+                const openClarificationCount = missingClarificationCount(
+                  data,
+                  task,
+                  activeMember.member.id,
+                );
+                const finalLockedByClarifications = openClarificationCount > 0;
                 const taskTitleDir = textDirection(task.title);
                 const taskQuestionDir = textDirection(task.question);
                 const taskQuestionLooksLight =
@@ -4236,6 +4691,7 @@ function MemberView({
                         <StructuredTextBlock text={reviewNote} compact memberFacing />
                       </div>
                     )}
+                    {renderTaskClarifications(task)}
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                       <strong className="text-base">
                         {problemTask ? "اكتب الحل" : "اكتب الرد أو التحديث"}
@@ -4296,10 +4752,23 @@ function MemberView({
                       renderHtmlSubmissionUpload(task, key, existing.htmlFile)}
                     {existing?.status !== "approved" && (
                       <div className="mt-3 flex flex-wrap gap-2">
+                        {finalLockedByClarifications && (
+                          <p className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">
+                            التسليم النهائي مقفول لحد ما يتقبل{" "}
+                            {openClarificationCount === 1
+                              ? "طلب التوضيح"
+                              : `${openClarificationCount} توضيحات`}
+                            .
+                          </p>
+                        )}
                         <Button
                           type="button"
                           data-testid={`submit-final-${task.id}`}
                           onClick={() => {
+                            if (finalLockedByClarifications) {
+                              blockMemberAction(key, ["توضيحات مقبولة"]);
+                              return;
+                            }
                             if (problemTask && !sharedDraft.trim()) {
                               blockMemberAction(key, ["answer"]);
                               return;
@@ -4318,7 +4787,7 @@ function MemberView({
                               "Submission failed. Try again.",
                             );
                           }}
-                          disabled={!canAnswer || isSubmitting}
+                          disabled={!canAnswer || isSubmitting || finalLockedByClarifications}
                           className={actionButtonClass(
                             "border-[2px] border-ink doodle-shadow-sm",
                             finalFeedback,
@@ -5090,6 +5559,8 @@ function AdminView({
   onRemoveMeeting,
   onRemoveTask,
   onManualApprove,
+  onCreateClarificationRequest,
+  onReviewClarificationResponse,
   onSkipTaskMember,
   onUnskipTaskMember,
   onApproveQueuedSubmission,
@@ -5131,6 +5602,17 @@ function AdminView({
   onRemoveMeeting: (meetingId: string) => ActionResult;
   onRemoveTask: (taskId: string) => ActionResult;
   onManualApprove: (task: StudioTask, memberId: string, awardedPoints?: number) => ActionResult;
+  onCreateClarificationRequest: (
+    task: StudioTask,
+    title: string,
+    description: string,
+  ) => ActionResult;
+  onReviewClarificationResponse: (
+    requestId: string,
+    memberId: string,
+    status: "approved" | "rejected",
+    note?: string,
+  ) => ActionResult;
   onSkipTaskMember: (task: StudioTask, memberId: string, note?: string) => ActionResult;
   onUnskipTaskMember: (task: StudioTask, memberId: string) => ActionResult;
   onApproveQueuedSubmission: (item: QueuedSubmission) => ActionResult;
@@ -5181,6 +5663,10 @@ function AdminView({
   const [manualApproveScores, setManualApproveScores] = useState<Record<string, string>>({});
   const [progressMembers, setProgressMembers] = useState<Record<string, string>>({});
   const [progressNotes, setProgressNotes] = useState<Record<string, string>>({});
+  const [clarificationTitles, setClarificationTitles] = useState<Record<string, string>>({});
+  const [clarificationDescriptions, setClarificationDescriptions] = useState<
+    Record<string, string>
+  >({});
   const [bonusPointsDrafts, setBonusPointsDrafts] = useState<Record<string, string>>({});
   const [bonusNoteDrafts, setBonusNoteDrafts] = useState<Record<string, string>>({});
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
@@ -5850,7 +6336,11 @@ function AdminView({
     const restoreTaskKey = `admin:problem-restore:${task.id}`;
     const deleteTaskKey = `admin:problem-delete:${task.id}`;
     const taskUpdateKey = `admin:problem-update:${task.id}`;
+    const createClarificationKey = `admin:problem-create-clarification:${task.id}`;
     const taskUpdateDraft = taskUpdateDrafts[task.id] ?? "";
+    const clarificationTitle = clarificationTitles[task.id] ?? "";
+    const clarificationDescription = clarificationDescriptions[task.id] ?? "";
+    const clarificationRequests = activeClarificationRequestsForTask(data, task.id);
     const taskUpdates = data.taskUpdates?.[task.id] ?? [];
     const taskCanSendNotification = !isHiddenTask(task);
     const taskUpdateActionLabel = isActiveTask(task) ? "Send notification" : "Save admin note";
@@ -6023,6 +6513,222 @@ function AdminView({
           )}
         </div>
 
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 font-bold text-amber-950">
+              <ListChecks className="size-4" />
+              طلب توضيح
+            </div>
+            <span className="rounded-full border border-amber-300 bg-white px-2 py-1 text-xs font-bold">
+              {clarificationRequests.length} مطلوب
+            </span>
+          </div>
+          <div className="grid gap-2 lg:grid-cols-[220px_minmax(0,1fr)_auto]">
+            <Input
+              value={clarificationTitle}
+              onChange={(event) =>
+                setClarificationTitles((current) => ({ ...current, [task.id]: event.target.value }))
+              }
+              placeholder="عنوان التوضيح"
+              className="border border-amber-200 bg-white"
+            />
+            <Input
+              value={clarificationDescription}
+              onChange={(event) =>
+                setClarificationDescriptions((current) => ({
+                  ...current,
+                  [task.id]: event.target.value,
+                }))
+              }
+              placeholder="اكتب المطلوب يتوضح قبل الحل النهائي..."
+              className="border border-amber-200 bg-white"
+            />
+            <Button
+              type="button"
+              data-testid={`admin-create-problem-clarification-${task.id}`}
+              onClick={() => {
+                if (!clarificationTitle.trim() && !clarificationDescription.trim()) {
+                  blockAdminAction(createClarificationKey, ["عنوان أو وصف التوضيح"]);
+                  return;
+                }
+                void runAdminAction(
+                  createClarificationKey,
+                  () =>
+                    onCreateClarificationRequest(
+                      task,
+                      clarificationTitle,
+                      clarificationDescription,
+                    ),
+                  "Clarification request added.",
+                  "Clarification request failed.",
+                ).then((ok) => {
+                  if (ok) {
+                    setClarificationTitles((current) => ({ ...current, [task.id]: "" }));
+                    setClarificationDescriptions((current) => ({ ...current, [task.id]: "" }));
+                  }
+                });
+              }}
+              disabled={!isActiveTask(task)}
+              className={actionButtonClass(
+                "bg-amber-200 text-amber-950 hover:bg-amber-300",
+                actionFeedback[createClarificationKey],
+              )}
+            >
+              <Plus data-icon="inline-start" />
+              طلب توضيح
+            </Button>
+          </div>
+          <ActionFeedbackLine feedback={actionFeedback[createClarificationKey]} />
+
+          {clarificationRequests.length > 0 && (
+            <div className="mt-3 grid gap-2 border-t border-amber-200 pt-3">
+              {clarificationRequests.map((request, requestIndex) => (
+                <div key={request.id} className="rounded-lg border border-amber-200 bg-white p-3">
+                  <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-foreground/45">
+                        توضيح {requestIndex + 1}
+                      </p>
+                      <strong className="break-words">{request.title}</strong>
+                      {request.description && (
+                        <p className="mt-1 text-sm text-foreground/65">{request.description}</p>
+                      )}
+                    </div>
+                    <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
+                      {request.memberIds.length} عضو
+                    </span>
+                  </div>
+                  <div className="grid gap-2">
+                    {request.memberIds.map((memberId) => {
+                      const member = data.members.find((item) => item.id === memberId);
+                      const response = clarificationResponse(data, request.id, memberId);
+                      const noteKey = `clarification-review:${request.id}:${memberId}`;
+                      const note = reviewNotes[noteKey] ?? "";
+                      const approveKey = `admin:problem-clarification-approve:${request.id}:${memberId}`;
+                      const rejectKey = `admin:problem-clarification-reject:${request.id}:${memberId}`;
+                      const partValue = taskScorePartValue(data, task, memberId);
+                      return (
+                        <div
+                          key={memberId}
+                          className={cn(
+                            "rounded-md border p-2",
+                            response?.status === "approved"
+                              ? "border-emerald-200 bg-emerald-50"
+                              : response?.status === "submitted"
+                                ? "border-yellow-200 bg-yellow-50"
+                                : response?.status === "rejected"
+                                  ? "border-red-200 bg-red-50"
+                                  : "border-ink/10 bg-paper",
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <strong>{member ? memberArabicName(member) : memberId}</strong>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={cn(
+                                  "rounded-full border px-2 py-1 text-xs font-bold",
+                                  statusTone(response?.status),
+                                )}
+                              >
+                                {response?.status === "approved"
+                                  ? `مقبول +${partValue}`
+                                  : response?.status === "submitted"
+                                    ? "مستني المراجعة"
+                                    : response?.status === "rejected"
+                                      ? "مرفوض"
+                                      : "لم يرسل"}
+                              </span>
+                              {response?.htmlFile && (
+                                <HtmlSubmissionPreview file={response.htmlFile} compact />
+                              )}
+                            </div>
+                          </div>
+                          {response?.answer && (
+                            <StructuredTextBlock
+                              text={response.answer}
+                              compact
+                              forceCollapse
+                              className="mt-2 rounded-md border border-ink/10 bg-white p-2 text-sm"
+                            />
+                          )}
+                          {response?.status === "submitted" && (
+                            <>
+                              <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+                                <Input
+                                  value={note}
+                                  onChange={(event) =>
+                                    setReviewNotes((current) => ({
+                                      ...current,
+                                      [noteKey]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="ملاحظة مراجعة"
+                                  className="border border-ink/20 bg-white"
+                                />
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() =>
+                                    void runAdminAction(
+                                      approveKey,
+                                      () =>
+                                        onReviewClarificationResponse(
+                                          request.id,
+                                          memberId,
+                                          "approved",
+                                          note,
+                                        ),
+                                      "Clarification approved.",
+                                      "Approve failed.",
+                                    )
+                                  }
+                                  className={actionButtonClass("", actionFeedback[approveKey])}
+                                >
+                                  <Check data-icon="inline-start" />
+                                  قبول
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    void runAdminAction(
+                                      rejectKey,
+                                      () =>
+                                        onReviewClarificationResponse(
+                                          request.id,
+                                          memberId,
+                                          "rejected",
+                                          note,
+                                        ),
+                                      "Clarification rejected.",
+                                      "Reject failed.",
+                                    )
+                                  }
+                                  className={actionButtonClass(
+                                    "border border-red-200 bg-white text-red-700",
+                                    actionFeedback[rejectKey],
+                                  )}
+                                >
+                                  <X data-icon="inline-start" />
+                                  رفض
+                                </Button>
+                              </div>
+                              <ActionFeedbackLine
+                                feedback={actionFeedback[approveKey] ?? actionFeedback[rejectKey]}
+                              />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="mt-4 grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xl font-bold">Submitted solutions</h3>
@@ -6041,7 +6747,7 @@ function AdminView({
               const reviewNote = reviewNotes[reviewNoteKey] ?? "";
               const scoreValue =
                 reviewScores[reviewNoteKey] ??
-                String(calculateAwardedPoints(task, response, "approved"));
+                String(defaultReviewAwardedPoints(task, response, data));
               const approveKey = `admin:problem-approve:${task.id}:${response.memberId}`;
               const rejectKey = `admin:problem-reject:${task.id}:${response.memberId}`;
               const documentation = documentationForSolution(data, task.id, response);
@@ -6079,7 +6785,7 @@ function AdminView({
                       </p>
                     </div>
                     <span className="rounded-full border border-ink/10 bg-white px-2 py-1 text-xs font-bold">
-                      {responseAwardedPoints(task, response)}/
+                      {responseAwardedPoints(task, response, data)}/
                       {sanitizePositiveNumber(task.points, 1)} pts
                     </span>
                   </div>
@@ -6162,7 +6868,10 @@ function AdminView({
                                   response.memberId,
                                   "approved",
                                   reviewNote,
-                                  sanitizeScore(scoreValue, sanitizePositiveNumber(task.points, 1)),
+                                  sanitizeScore(
+                                    scoreValue,
+                                    defaultReviewAwardedPoints(task, response, data),
+                                  ),
                                   true,
                                 ),
                               "Solution approved.",
@@ -6225,8 +6934,12 @@ function AdminView({
     const restoreTaskKey = `admin:restore-task:${task.id}`;
     const deleteTaskKey = `admin:delete-task:${task.id}`;
     const taskUpdateKey = `admin:task-update:${task.id}`;
+    const createClarificationKey = `admin:create-clarification:${task.id}`;
     const editDraft = taskEditDraft(task);
     const taskUpdateDraft = taskUpdateDrafts[task.id] ?? "";
+    const clarificationTitle = clarificationTitles[task.id] ?? "";
+    const clarificationDescription = clarificationDescriptions[task.id] ?? "";
+    const clarificationRequests = activeClarificationRequestsForTask(data, task.id);
     const taskUpdates = data.taskUpdates?.[task.id] ?? [];
     const taskCanSendNotification = !isHiddenTask(task);
     const taskUpdateActionLabel = isActiveTask(task) ? "Send notification" : "Save admin note";
@@ -6583,6 +7296,225 @@ function AdminView({
           )}
         </div>
 
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 font-bold text-amber-950">
+              <ListChecks className="size-4" />
+              طلب توضيح
+            </div>
+            <span className="rounded-full border border-amber-300 bg-white px-2 py-1 text-xs font-bold">
+              {clarificationRequests.length} مطلوب
+            </span>
+          </div>
+          <div className="grid gap-2 lg:grid-cols-[220px_minmax(0,1fr)_auto]">
+            <Input
+              value={clarificationTitle}
+              onChange={(event) =>
+                setClarificationTitles((current) => ({
+                  ...current,
+                  [task.id]: event.target.value,
+                }))
+              }
+              placeholder="عنوان قصير للتوضيح"
+              className="border border-amber-200 bg-white"
+            />
+            <Input
+              value={clarificationDescription}
+              onChange={(event) =>
+                setClarificationDescriptions((current) => ({
+                  ...current,
+                  [task.id]: event.target.value,
+                }))
+              }
+              placeholder="اكتب المطلوب منهم يوضحوه..."
+              className="border border-amber-200 bg-white"
+            />
+            <Button
+              type="button"
+              data-testid={`admin-create-clarification-${task.id}`}
+              onClick={() => {
+                if (!clarificationTitle.trim() && !clarificationDescription.trim()) {
+                  blockAdminAction(createClarificationKey, ["عنوان أو وصف التوضيح"]);
+                  return;
+                }
+                void runAdminAction(
+                  createClarificationKey,
+                  () =>
+                    onCreateClarificationRequest(
+                      task,
+                      clarificationTitle,
+                      clarificationDescription,
+                    ),
+                  "Clarification request added.",
+                  "Clarification request failed.",
+                ).then((ok) => {
+                  if (ok) {
+                    setClarificationTitles((current) => ({ ...current, [task.id]: "" }));
+                    setClarificationDescriptions((current) => ({ ...current, [task.id]: "" }));
+                  }
+                });
+              }}
+              disabled={!isActiveTask(task)}
+              className={actionButtonClass(
+                "bg-amber-200 text-amber-950 hover:bg-amber-300",
+                actionFeedback[createClarificationKey],
+              )}
+            >
+              <Plus data-icon="inline-start" />
+              طلب توضيح
+            </Button>
+          </div>
+          <ActionFeedbackLine feedback={actionFeedback[createClarificationKey]} />
+
+          {clarificationRequests.length > 0 && (
+            <div className="mt-3 grid gap-2 border-t border-amber-200 pt-3">
+              {clarificationRequests.map((request, requestIndex) => (
+                <div key={request.id} className="rounded-lg border border-amber-200 bg-white p-3">
+                  <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-foreground/45">
+                        توضيح {requestIndex + 1} • {formatDateTime(request.createdAt)}
+                      </p>
+                      <strong className="break-words">{request.title}</strong>
+                      {request.description && (
+                        <p className="mt-1 text-sm text-foreground/65">{request.description}</p>
+                      )}
+                    </div>
+                    <span className="rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
+                      {request.memberIds.length} عضو
+                    </span>
+                  </div>
+                  <div className="grid gap-2">
+                    {request.memberIds.map((memberId) => {
+                      const member = data.members.find((item) => item.id === memberId);
+                      const response = clarificationResponse(data, request.id, memberId);
+                      const noteKey = `clarification-review:${request.id}:${memberId}`;
+                      const note = reviewNotes[noteKey] ?? "";
+                      const approveKey = `admin:clarification-approve:${request.id}:${memberId}`;
+                      const rejectKey = `admin:clarification-reject:${request.id}:${memberId}`;
+                      const partValue = taskScorePartValue(data, task, memberId);
+                      return (
+                        <div
+                          key={memberId}
+                          className={cn(
+                            "rounded-md border p-2",
+                            response?.status === "approved"
+                              ? "border-emerald-200 bg-emerald-50"
+                              : response?.status === "submitted"
+                                ? "border-yellow-200 bg-yellow-50"
+                                : response?.status === "rejected"
+                                  ? "border-red-200 bg-red-50"
+                                  : "border-ink/10 bg-paper",
+                          )}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <strong>{member ? memberArabicName(member) : memberId}</strong>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={cn(
+                                  "rounded-full border px-2 py-1 text-xs font-bold",
+                                  statusTone(response?.status),
+                                )}
+                              >
+                                {response?.status === "approved"
+                                  ? `مقبول +${partValue}`
+                                  : response?.status === "submitted"
+                                    ? "مستني المراجعة"
+                                    : response?.status === "rejected"
+                                      ? "مرفوض"
+                                      : "لم يرسل"}
+                              </span>
+                              {response?.htmlFile && (
+                                <HtmlSubmissionPreview file={response.htmlFile} compact />
+                              )}
+                            </div>
+                          </div>
+                          {response?.answer && (
+                            <StructuredTextBlock
+                              text={response.answer}
+                              compact
+                              forceCollapse
+                              className="mt-2 rounded-md border border-ink/10 bg-white p-2 text-sm"
+                            />
+                          )}
+                          {response?.status === "submitted" && (
+                            <>
+                              <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+                                <Input
+                                  value={note}
+                                  onChange={(event) =>
+                                    setReviewNotes((current) => ({
+                                      ...current,
+                                      [noteKey]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="ملاحظة مراجعة اختيارية"
+                                  className="border border-ink/20 bg-white"
+                                />
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() =>
+                                    void runAdminAction(
+                                      approveKey,
+                                      () =>
+                                        onReviewClarificationResponse(
+                                          request.id,
+                                          memberId,
+                                          "approved",
+                                          note,
+                                        ),
+                                      "Clarification approved.",
+                                      "Approve failed.",
+                                    )
+                                  }
+                                  className={actionButtonClass("", actionFeedback[approveKey])}
+                                >
+                                  <Check data-icon="inline-start" />
+                                  قبول
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    void runAdminAction(
+                                      rejectKey,
+                                      () =>
+                                        onReviewClarificationResponse(
+                                          request.id,
+                                          memberId,
+                                          "rejected",
+                                          note,
+                                        ),
+                                      "Clarification rejected.",
+                                      "Reject failed.",
+                                    )
+                                  }
+                                  className={actionButtonClass(
+                                    "border border-red-200 bg-white text-red-700",
+                                    actionFeedback[rejectKey],
+                                  )}
+                                >
+                                  <X data-icon="inline-start" />
+                                  رفض
+                                </Button>
+                              </div>
+                              <ActionFeedbackLine
+                                feedback={actionFeedback[approveKey] ?? actionFeedback[rejectKey]}
+                              />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr]">
           <div className="rounded-lg border border-ink/10 bg-paper p-3">
             <div className="mb-3 flex items-center gap-2 font-bold">
@@ -6722,13 +7654,13 @@ function AdminView({
               manualApproveScores[manualScoreKey] ?? String(sanitizePositiveNumber(task.points, 1));
             const scoreValue =
               reviewScores[reviewNoteKey] ??
-              (response ? String(calculateAwardedPoints(task, response, "approved")) : "");
+              (response ? String(defaultReviewAwardedPoints(task, response, data)) : "");
             const skipNote = skipNotes[reviewNoteKey] ?? "";
             const skipped = getTaskSkip(data, task.id, member.id);
             const progress = (data.progressUpdates?.[task.id] ?? []).filter(
               (update) => update.memberId === member.id,
             );
-            const awarded = responseAwardedPoints(task, response);
+            const awarded = responseAwardedPoints(task, response, data);
             const late = responseIsLate(task, response);
             const hardLocked = response ? isHardLocked(task, response) : false;
             const rowManualKey = `admin:row-manual:${task.id}:${member.id}`;
@@ -6961,7 +7893,7 @@ function AdminView({
                                 reviewNote,
                                 sanitizeScore(
                                   scoreValue,
-                                  calculateAwardedPoints(task, response, "approved"),
+                                  defaultReviewAwardedPoints(task, response, data),
                                 ),
                                 false,
                               ),
@@ -7442,7 +8374,7 @@ function AdminView({
           const progress = (data.progressUpdates?.[task.id] ?? []).filter(
             (update) => update.memberId === member.id,
           );
-          const awarded = responseAwardedPoints(task, response);
+          const awarded = responseAwardedPoints(task, response, data);
           const late = responseIsLate(task, response);
           const note = latestReviewNote(response);
           return (
@@ -7553,9 +8485,7 @@ function AdminView({
               const reviewNote = reviewNotes[reviewNoteKey] ?? "";
               const scoreValue =
                 reviewScores[reviewNoteKey] ??
-                String(
-                  responseAwardedPoints(task, response) || sanitizePositiveNumber(task.points, 1),
-                );
+                String(defaultReviewAwardedPoints(task, response, data));
               const approveKey = `attention:approve:${task.id}:${response.memberId}`;
               const rejectKey = `attention:reject:${task.id}:${response.memberId}`;
               const locked = isHardLocked(task, response);
@@ -7627,7 +8557,10 @@ function AdminView({
                               response.memberId,
                               "approved",
                               reviewNote,
-                              sanitizeScore(scoreValue, sanitizePositiveNumber(task.points, 1)),
+                              sanitizeScore(
+                                scoreValue,
+                                defaultReviewAwardedPoints(task, response, data),
+                              ),
                               locked,
                             ),
                           "Submission approved.",
@@ -11272,6 +12205,10 @@ async function postSubmission(item: QueuedSubmission) {
   return sanitizeData(await postApi<StudioData>("/api/submissions", item));
 }
 
+async function postClarificationSubmission(item: QueuedClarificationSubmission) {
+  return sanitizeData(await postApi<StudioData>("/api/clarification-submissions", item));
+}
+
 async function postProgressUpdate(item: QueuedProgressUpdate) {
   return sanitizeData(await postApi<StudioData>("/api/progress-updates", item));
 }
@@ -11871,6 +12808,7 @@ function Index() {
     const htmlFile = draftHtmlFiles[key];
     if (isProblemTask(task) && !answer) return false;
     if (htmlSubmissionMode(task) === "required" && !htmlFile) return false;
+    if (!memberClarificationsApproved(data, task, activeMember.member.id)) return false;
 
     const item: QueuedSubmission = {
       id: `submission-${Date.now()}`,
@@ -11913,6 +12851,56 @@ function Index() {
       setRefreshStatus(
         error instanceof Error ? error.message : "Submission failed. Nothing was approved.",
       );
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function submitClarificationSubmission(
+    request: TaskClarificationRequest,
+    answerOverride: string,
+  ) {
+    if (!activeMember) return false;
+    const task = data.tasks.find((item) => item.id === request.taskId);
+    if (!task) return false;
+    const key = clarificationKey(request.id, activeMember.member.id);
+    const answer = answerOverride.trim();
+    const htmlFile = draftHtmlFiles[key];
+    if (!answer && !htmlFile) return false;
+
+    const item: QueuedClarificationSubmission = {
+      id: `clarification-submission-${Date.now()}`,
+      requestId: request.id,
+      taskId: task.id,
+      memberId: activeMember.member.id,
+      memberName: activeMember.displayName,
+      answer,
+      ...(htmlFile ? { htmlFile } : {}),
+      submittedAt: new Date().toISOString(),
+    };
+
+    setIsSubmitting(true);
+    try {
+      const nextData = await postClarificationSubmission(item);
+      const repoUpdate = createAttentionUpdate({
+        memberId: item.memberId,
+        taskId: item.taskId,
+        source: "progress",
+        text: item.answer || item.htmlFile?.name || "توضيح بصري",
+      });
+      setData(appendRepoUpdateIfMissing(nextData, repoUpdate));
+      setIsDirty(false);
+      writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
+      setDraftHtmlFiles((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      setRefreshStatus("تم إرسال التوضيح. مستني مراجعة الأدمن.");
+      return true;
+    } catch (error) {
+      setRefreshStatus(error instanceof Error ? error.message : "تعذر إرسال التوضيح.");
       return false;
     } finally {
       setIsSubmitting(false);
@@ -12241,6 +13229,66 @@ function Index() {
     }
   }
 
+  async function createClarificationRequest(task: StudioTask, title: string, description: string) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
+    const cleanTitle = title.trim() || "طلب توضيح";
+    const cleanDescription = description.trim();
+
+    setIsSaving(true);
+    setSaveStatus("Syncing data...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "createClarificationRequest", {
+        taskId: task.id,
+        title: cleanTitle,
+        description: cleanDescription,
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Clarification request saved.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function reviewClarificationResponse(
+    requestId: string,
+    memberId: string,
+    status: "approved" | "rejected",
+    note = "",
+  ) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
+
+    setIsSaving(true);
+    setSaveStatus("Syncing data...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "reviewClarificationResponse", {
+        requestId,
+        memberId,
+        status,
+        note: note.trim(),
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus(status === "approved" ? "Clarification approved." : "Clarification rejected.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   function saveQueuedProgress(item: QueuedProgressUpdate) {
     const update: TaskProgressUpdate = {
       id: item.id,
@@ -12450,6 +13498,7 @@ function Index() {
           }}
           onDraftHtmlFileChange={updateDraftHtmlFile}
           onSubmitFinal={submitFinalSubmission}
+          onSubmitClarification={submitClarificationSubmission}
           onSubmitProgress={submitProgressUpdate}
           onSubmitDocumentation={submitDocumentationUpload}
           onRepoAttention={sendRepoAttention}
@@ -12488,6 +13537,8 @@ function Index() {
         onRemoveMeeting={removeMeeting}
         onRemoveTask={removeTask}
         onManualApprove={manualApprove}
+        onCreateClarificationRequest={createClarificationRequest}
+        onReviewClarificationResponse={reviewClarificationResponse}
         onSkipTaskMember={skipTaskMember}
         onUnskipTaskMember={unskipTaskMember}
         onApproveQueuedSubmission={approveQueuedSubmission}
@@ -12535,6 +13586,7 @@ function Index() {
         }}
         onDraftHtmlFileChange={updateDraftHtmlFile}
         onSubmitFinal={submitFinalSubmission}
+        onSubmitClarification={submitClarificationSubmission}
         onSubmitProgress={submitProgressUpdate}
         onSubmitDocumentation={submitDocumentationUpload}
         onRepoAttention={sendRepoAttention}
