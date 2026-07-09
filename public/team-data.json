@@ -304,6 +304,23 @@
       "deadlineAt": "2026-07-05T14:46:00.000Z",
       "status": "archived",
       "htmlSubmissionMode": "off"
+    },
+    {
+      "id": "task-1783557868998",
+      "title": "Upload",
+      "question": "Upload ur flow chart",
+      "points": 1,
+      "taskType": "technical",
+      "htmlSubmissionMode": "optional",
+      "scope": "member",
+      "memberId": "abozena",
+      "memberIds": [
+        "abozena"
+      ],
+      "createdAt": "2026-07-09T00:44:28.998Z",
+      "startAt": "2026-07-09T00:44:00.000Z",
+      "deadlineAt": "",
+      "status": "active"
     }
   ],
   "responses": {
@@ -2004,6 +2021,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-09T00:43:26.250Z"
+    "updatedAt": "2026-07-09T00:44:28.998Z"
   }
 }
