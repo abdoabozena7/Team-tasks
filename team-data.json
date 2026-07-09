@@ -1056,6 +1056,26 @@
         "reviewedAt": "2026-07-04T15:52:43.776Z",
         "scoreOverride": true
       }
+    },
+    "task-1783557868998": {
+      "abozena": {
+        "memberId": "abozena",
+        "memberName": "Abozena",
+        "answer": "",
+        "status": "submitted",
+        "submittedAt": "2026-07-09T09:56:59.552Z",
+        "awardedPoints": 0,
+        "lateSubmission": false,
+        "reviewEvents": [],
+        "htmlFile": {
+          "name": "flow.html",
+          "size": 1554,
+          "type": "text/html",
+          "lastModified": 1783590983093,
+          "content": "<!doctype html>\n<html lang=\"ar\" dir=\"rtl\">\n<head>\n<meta charset=\"utf-8\" />\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n<style>\n  html,body{margin:0;height:100%;font-family:system-ui,Arial;background:#f8fafc;color:#111827;overflow:auto}\n  .board{min-width:1100px;min-height:620px;padding:32px;box-sizing:border-box;display:grid;grid-template-columns:repeat(4,1fr);gap:18px;align-items:center}\n  .card{border:2px solid #111827;border-radius:14px;background:white;padding:22px;box-shadow:6px 6px 0 #dbeafe;min-height:120px}\n  .card b{display:block;font-size:24px;margin-bottom:10px}.card span{font-size:16px;color:#475569}\n  .arrow{text-align:center;font-size:44px;font-weight:900;color:#2563eb}.pulse{animation:pulse 1.5s ease-in-out infinite alternate}\n  @keyframes pulse{from{transform:translateY(0)}to{transform:translateY(-8px)}}\n</style>\n</head>\n<body>\n<main class=\"board\">\n  <section class=\"card pulse\"><b>١. استلام</b><span>قراءة التاسك وتجهيز الفلو</span></section><div class=\"arrow\">←</div>\n  <section class=\"card\"><b>٢. تنفيذ</b><span>كود أو رسم توضيحي</span></section><div class=\"arrow\">←</div>\n  <section class=\"card\"><b>٣. مراجعة</b><span>عرض كامل داخل الموقع</span></section><div class=\"arrow\">←</div>\n  <section class=\"card\"><b>٤. تسليم</b><span id=\"status\">جاهز</span></section>\n</main>\n<script>\n  let n=0; setInterval(()=>{document.getElementById('status').textContent='جاهز ' + (++n)}, 1000);\n</script>\n</body>\n</html>",
+          "kind": "html"
+        }
+      }
     }
   },
   "taskSkips": {},
@@ -2029,6 +2049,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-09T09:56:58.124Z"
+    "updatedAt": "2026-07-09T09:56:59.552Z"
   }
 }
