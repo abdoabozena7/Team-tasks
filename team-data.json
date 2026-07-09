@@ -224,7 +224,8 @@
       "startAt": "2026-06-29T19:18:00.000Z",
       "deadlineAt": "",
       "status": "archived",
-      "taskType": "technical"
+      "taskType": "technical",
+      "htmlSubmissionMode": "off"
     },
     {
       "id": "task-1782934576642",
@@ -246,7 +247,8 @@
       "startAt": "2026-07-01T19:35:00.000Z",
       "deadlineAt": "2026-07-02T19:35:00.000Z",
       "status": "archived",
-      "taskType": "nonTechnical"
+      "taskType": "nonTechnical",
+      "htmlSubmissionMode": "off"
     },
     {
       "id": "task-1782984779472",
@@ -262,7 +264,8 @@
       "startAt": "2026-07-02T09:32:00.000Z",
       "deadlineAt": "2026-07-03T09:32:00.000Z",
       "status": "archived",
-      "taskType": "nonTechnical"
+      "taskType": "nonTechnical",
+      "htmlSubmissionMode": "off"
     },
     {
       "id": "task-1783008997895",
@@ -275,7 +278,8 @@
       "startAt": "2026-07-02T16:15:00.000Z",
       "deadlineAt": "",
       "status": "active",
-      "taskType": "technical"
+      "taskType": "technical",
+      "htmlSubmissionMode": "off"
     },
     {
       "id": "task-1783176442116",
@@ -298,7 +302,8 @@
       "createdAt": "2026-07-04T14:47:22.116Z",
       "startAt": "2026-07-04T14:46:00.000Z",
       "deadlineAt": "2026-07-05T14:46:00.000Z",
-      "status": "archived"
+      "status": "archived",
+      "htmlSubmissionMode": "off"
     }
   ],
   "responses": {
@@ -1166,6 +1171,14 @@
   },
   "interactions": [
     {
+      "id": "abozena:taskUpdate:task-update-task-1783008997895-1783540577503",
+      "memberId": "abozena",
+      "targetType": "taskUpdate",
+      "targetId": "task-update-task-1783008997895-1783540577503",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-09T00:43:23.992Z"
+    },
+    {
       "id": "renad:taskUpdate:task-update-task-1783008997895-1783540802552",
       "memberId": "renad",
       "targetType": "taskUpdate",
@@ -1983,6 +1996,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-08T23:06:13.588Z"
+    "updatedAt": "2026-07-09T00:43:23.992Z"
   }
 }
