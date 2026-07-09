@@ -2566,7 +2566,6 @@ function MemberView({
   const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
   const [documentationErrors, setDocumentationErrors] = useState<Record<string, string>>({});
   const [htmlUploadErrors, setHtmlUploadErrors] = useState<Record<string, string>>({});
-  const [visualCodeDrafts, setVisualCodeDrafts] = useState<Record<string, string>>({});
   const [seenMeetingIds, setSeenMeetingIds] = useState(() =>
     readSeenMeetingIds(activeMember.member.id),
   );
@@ -2969,9 +2968,8 @@ function MemberView({
   }
 
   function handlePastedVisualCode(key: string) {
-    const fallbackValue =
-      (document.getElementById(`visual-code-${key}`) as HTMLTextAreaElement | null)?.value ?? "";
-    const content = normalizePastedVisualCode(visualCodeDrafts[key] || fallbackValue);
+    const input = document.getElementById(`visual-code-${key}`) as HTMLTextAreaElement | null;
+    const content = normalizePastedVisualCode(input?.value ?? "");
     const kind = visualSubmissionKindFromContent(content);
     const contentError = validateHtmlContent(content, kind);
     if (contentError) {
@@ -3094,22 +3092,10 @@ function MemberView({
           </label>
           <textarea
             id={`visual-code-${responseKeyValue}`}
-            value={visualCodeDrafts[responseKeyValue] ?? ""}
-            onChange={(event) =>
-              setVisualCodeDrafts((current) => ({
-                ...current,
-                [responseKeyValue]: event.target.value,
-              }))
-            }
-            onInput={(event) =>
-              setVisualCodeDrafts((current) => ({
-                ...current,
-                [responseKeyValue]: event.currentTarget.value,
-              }))
-            }
             placeholder="الصق الكود هنا..."
             className="min-h-28 resize-y rounded-md border border-sky-200 bg-sky-50/40 p-3 text-sm font-semibold outline-none focus:border-sky-500"
             dir="ltr"
+            spellCheck={false}
           />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs text-foreground/55">هنكتشف النوع تلقائيًا: SVG أو HTML.</span>
@@ -3137,6 +3123,10 @@ function MemberView({
                 onClick={() => {
                   onDraftHtmlFileChange(responseKeyValue, undefined);
                   setHtmlUploadErrors((current) => ({ ...current, [responseKeyValue]: "" }));
+                  const input = document.getElementById(
+                    `visual-code-${responseKeyValue}`,
+                  ) as HTMLTextAreaElement | null;
+                  if (input) input.value = "";
                 }}
                 className="h-8 border border-red-100 bg-red-50 text-red-700"
               >
