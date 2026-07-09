@@ -2377,6 +2377,7 @@ function HtmlSubmissionPreview({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [fitMode, setFitMode] = useState<"fit" | "scroll">("fit");
+  const [viewerUrl, setViewerUrl] = useState("");
 
   const kind = file
     ? (file.kind ??
@@ -2387,6 +2388,22 @@ function HtmlSubmissionPreview({
     file && kind === "svg"
       ? `<!doctype html><html dir="rtl"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100%;background:#fff;font-family:system-ui,Arial,sans-serif}.wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:auto;padding:16px;box-sizing:border-box}.wrap svg{max-width:100%;height:auto}</style></head><body><main class="wrap">${file.content}</main></body></html>`
       : (file?.content ?? "");
+
+  function visualDocumentUrl(content: string) {
+    const bytes = new TextEncoder().encode(content);
+    let binary = "";
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    return `data:${HTML_FILE_TYPE};charset=utf-8;base64,${window.btoa(binary)}`;
+  }
+
+  function openViewer() {
+    if (!file) return;
+    setViewerUrl(visualDocumentUrl(iframeContent));
+    setExpanded(true);
+    void requestLandscapeFullscreen();
+  }
 
   async function requestLandscapeFullscreen() {
     const root = document.documentElement;
@@ -2406,6 +2423,7 @@ function HtmlSubmissionPreview({
 
   function closeViewer() {
     setExpanded(false);
+    setViewerUrl("");
     try {
       void screen.orientation?.unlock?.();
     } catch {
@@ -2435,7 +2453,7 @@ function HtmlSubmissionPreview({
   const renderIframe = () => (
     <iframe
       title={`عرض المحتوى: ${file.name}`}
-      srcDoc={iframeContent}
+      src={viewerUrl}
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
       className={cn("h-full bg-white", fitMode === "fit" ? "w-full" : "w-[1200px] max-w-none")}
@@ -2459,10 +2477,7 @@ function HtmlSubmissionPreview({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => {
-              setExpanded(true);
-              void requestLandscapeFullscreen();
-            }}
+            onClick={openViewer}
             className="border border-ink/20 bg-paper"
           >
             <Eye data-icon="inline-start" />
@@ -2503,7 +2518,7 @@ function HtmlSubmissionPreview({
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto rounded-lg border-[2px] border-white/40 bg-white">
-            {renderIframe()}
+            {viewerUrl ? renderIframe() : null}
           </div>
         </div>
       )}
