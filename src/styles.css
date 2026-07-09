@@ -723,7 +723,7 @@
 }
 
 .stats-shell {
-  width: min(100%, 520px);
+  width: min(100%, 980px);
 }
 
 .stats-appear {
@@ -742,8 +742,9 @@
 .stats-hero {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.78fr);
+  align-items: stretch;
+  gap: 12px;
   overflow: hidden;
   border-radius: 24px 30px 20px 28px / 28px 22px 30px 22px;
   padding: 16px;
@@ -772,7 +773,7 @@
 }
 
 .stats-hero-copy {
-  text-align: center;
+  text-align: start;
 }
 
 .stats-health-pill,
@@ -796,17 +797,18 @@
 
 .stats-hero-panel {
   display: grid;
-  place-items: center;
-  gap: 14px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
   border: 2px dashed rgba(26, 26, 26, 0.24);
   border-radius: 22px 18px 24px 18px / 18px 24px 18px 22px;
   background: rgba(255, 255, 255, 0.5);
-  padding: 16px;
+  padding: 12px;
 }
 
 .stats-ring {
   position: relative;
-  width: min(190px, 68vw);
+  width: min(132px, 34vw);
   aspect-ratio: 1;
   display: grid;
   place-items: center;
@@ -844,13 +846,13 @@
 }
 
 .stats-ring-copy strong {
-  font-size: 2.85rem;
+  font-size: 2.25rem;
   line-height: 0.9;
 }
 
 .stats-ring-copy span {
   margin-top: 6px;
-  font-size: 0.95rem;
+  font-size: 0.78rem;
   font-weight: 800;
   color: rgba(26, 26, 26, 0.58);
 }
@@ -867,13 +869,13 @@
   border: 2px solid var(--ink);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.8);
-  padding: 9px 8px;
+  padding: 8px 7px;
   text-align: center;
 }
 
 .stats-visual-metric strong {
   display: block;
-  font-size: 1.55rem;
+  font-size: 1.32rem;
   line-height: 1;
 }
 
@@ -888,19 +890,19 @@
 .stats-attention-strip {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 12px;
+  gap: 10px;
   border-color: #a16207;
   border-radius: 18px 24px 18px 22px / 22px 18px 24px 18px;
   background: #fff7cc;
-  padding: 14px;
+  padding: 12px;
 }
 
 .stats-attention-heading {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 10px;
-  text-align: center;
+  text-align: start;
 }
 
 .stats-attention-heading > svg {
@@ -980,24 +982,24 @@
 
 .stats-panel {
   border-radius: 22px 26px 18px 24px / 24px 18px 26px 20px;
-  padding: 14px;
+  padding: 12px;
 }
 
 .stats-section-head {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  text-align: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  text-align: start;
 }
 
 .stats-task-board,
 .stats-member-list,
 .stats-meeting-lines {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .stats-task-card,
@@ -1006,7 +1008,7 @@
   border: 2px solid rgba(26, 26, 26, 0.16);
   border-radius: 16px 18px 14px 20px / 18px 14px 20px 16px;
   background: rgba(253, 252, 246, 0.78);
-  padding: 14px;
+  padding: 10px;
   animation: stats-rise 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -1015,19 +1017,18 @@
 .stats-member-summary,
 .stats-meeting-row {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  text-align: center;
+  gap: 10px;
+  text-align: start;
 }
 
 .stats-task-main h3 {
   overflow-wrap: anywhere;
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   font-weight: 800;
   line-height: 1.25;
-  text-align: center;
 }
 
 .stats-task-main p,
@@ -1041,11 +1042,11 @@
 .stats-task-score,
 .stats-member-numbers {
   flex: 0 0 auto;
-  min-width: 72px;
+  min-width: 66px;
   border: 2px solid var(--ink);
   border-radius: 14px;
   background: #ffffff;
-  padding: 8px;
+  padding: 7px;
   text-align: center;
   box-shadow: 2px 2px 0 0 var(--ink);
 }
@@ -1053,7 +1054,7 @@
 .stats-task-score strong,
 .stats-member-numbers strong {
   display: block;
-  font-size: 1.25rem;
+  font-size: 1.18rem;
   line-height: 1;
 }
 
@@ -1068,7 +1069,7 @@
 
 .stats-segmented-bar {
   display: flex;
-  height: 12px;
+  height: 10px;
   overflow: hidden;
   border: 1.5px solid rgba(26, 26, 26, 0.55);
   border-radius: 999px;
@@ -1103,10 +1104,10 @@
 .stats-member-meta {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
-  gap: 7px;
-  margin-top: 10px;
-  font-size: 0.78rem;
+  justify-content: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.74rem;
   font-weight: 800;
   color: rgba(26, 26, 26, 0.58);
 }
@@ -1115,7 +1116,7 @@
 .stats-member-meta span {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
-  padding: 4px 9px;
+  padding: 3px 8px;
 }
 
 .stats-task-meta .is-approved {
@@ -1251,8 +1252,8 @@
 
 .stats-member-rank {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   flex: 0 0 auto;
   place-items: center;
   border: 2px solid var(--ink);
@@ -1266,12 +1267,12 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 7px;
 }
 
 .stats-member-name-line strong {
-  font-size: 1.18rem;
+  font-size: 1.05rem;
   line-height: 1.1;
 }
 
@@ -1285,22 +1286,22 @@
 }
 
 .stats-member-insight {
-  margin-top: 5px;
-  font-size: 0.78rem;
+  margin-top: 3px;
+  font-size: 0.74rem;
   font-weight: 800;
-  text-align: center;
+  text-align: start;
   color: rgba(26, 26, 26, 0.5);
 }
 
 .stats-meeting-summary {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 14px;
+  grid-template-columns: 106px minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
 }
 
 .stats-meetings-panel .stats-ring {
-  width: min(150px, 62vw);
+  width: 96px;
   margin-inline: auto;
 }
 
@@ -1311,7 +1312,7 @@
 .stats-meeting-row strong {
   display: block;
   overflow-wrap: anywhere;
-  font-size: 1.05rem;
+  font-size: 0.98rem;
 }
 
 .stats-mini-meter {
@@ -1365,13 +1366,16 @@
 
   .stats-hero,
   .stats-attention-strip,
-  .stats-performance-grid,
-  .stats-meeting-summary {
+  .stats-performance-grid {
     grid-template-columns: 1fr;
   }
 
   .stats-hero {
-    padding: 16px;
+    padding: 14px;
+  }
+
+  .stats-hero-panel {
+    grid-template-columns: 108px minmax(0, 1fr);
   }
 
   .stats-hero-metrics,
@@ -1379,19 +1383,19 @@
     grid-template-columns: 1fr 1fr;
   }
 
-  .stats-section-head,
-  .stats-task-main,
-  .stats-member-summary,
-  .stats-meeting-row {
-    align-items: stretch;
+  .stats-section-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
   }
 
-  .stats-section-head,
   .stats-task-main,
   .stats-member-summary,
-  .stats-task-progress-line,
   .stats-meeting-row {
-    flex-direction: column;
+    align-items: center;
+  }
+
+  .stats-task-progress-line {
+    align-items: center;
   }
 
   .stats-count-pill,
@@ -1401,11 +1405,11 @@
   }
 
   .stats-ring {
-    width: min(190px, 70vw);
+    width: 108px;
   }
 
   .stats-ring-copy strong {
-    font-size: 2.75rem;
+    font-size: 2rem;
   }
 
   .stats-visual-metric strong {
@@ -1413,7 +1417,7 @@
   }
 
   .stats-meetings-panel .stats-ring {
-    width: min(150px, 62vw);
+    width: 84px;
     margin-inline: auto;
   }
 

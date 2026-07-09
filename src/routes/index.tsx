@@ -11458,22 +11458,23 @@ function DeanStatsView({
       }
       const deadlineMs = new Date(task.deadlineAt).getTime();
       const response = getResponse(data, task.id, item.member.id);
-      return Number.isFinite(deadlineMs) && deadlineMs + 24 * 36e5 < now && !response;
+      return Number.isFinite(deadlineMs) && deadlineMs + 48 * 36e5 < now && !response;
     });
   }
 
   function isStrictCriticalMember(item: MemberScore) {
     return (
-      (item.reviewed >= 2 && item.approvalRate < 50) ||
-      (item.assignedTasks >= 2 && item.responseRate < 50) ||
+      (item.reviewed >= 3 && item.approvalRate < 40) ||
+      (item.assignedTasks >= 3 && item.responseRate < 35) ||
       memberHasOverdueMissingTask(item)
     );
   }
 
   function memberState(item: MemberScore) {
-    if (item.assignedTasks === 0) return "بدون تكليف";
-    if (isStrictCriticalMember(item)) return "حرج";
-    return item.approvalRate >= 80 || item.responseRate >= 80 ? "تمام" : "مستقر";
+    if (item.assignedTasks === 0) return "Idle";
+    if (isStrictCriticalMember(item)) return "Needs help";
+    if (item.approvalRate >= 85 && item.responseRate >= 80) return "Strong";
+    return "Steady";
   }
 
   function memberTone(item: MemberScore) {
@@ -11485,14 +11486,14 @@ function DeanStatsView({
 
   function memberInsight(item: MemberScore) {
     if (isStrictCriticalMember(item)) {
-      if (item.reviewed >= 2 && item.approvalRate < 50) return "نسبة القبول محتاجة تدخل";
-      if (item.assignedTasks >= 2 && item.responseRate < 50) return "التسليمات ناقصة بشكل واضح";
-      return "فيه تكليف عدى موعده بوضوح";
+      if (item.reviewed >= 3 && item.approvalRate < 40) return "Acceptance needs a serious review";
+      if (item.assignedTasks >= 3 && item.responseRate < 35) return "Delivery is clearly behind";
+      return "Has a task overdue by more than 48h";
     }
-    if (item.assignedTasks === 0) return "مفيش تكليفات شغالة عليه";
-    if (item.approved === item.assignedTasks) return "خلص كل التكليفات";
-    if (item.pending > 0) return "فيه تسليمات قيد المراجعة";
-    return "الأداء مستقر";
+    if (item.assignedTasks === 0) return "No active assignments";
+    if (item.approved === item.assignedTasks) return "All assigned work is accepted";
+    if (item.pending > 0) return "Has submissions waiting for review";
+    return "Performance is steady";
   }
 
   function SegmentedStatusBar({
@@ -11563,26 +11564,16 @@ function DeanStatsView({
     );
   }
 
-  const submissionHourSamples = activeTasks.flatMap((task) =>
-    activeTaskMembers(task)
-      .map((member) => {
-        const response = getResponse(data, task.id, member.id);
-        return response ? hoursBetween(task.createdAt, response.submittedAt) : null;
-      })
-      .filter((value): value is number => value !== null),
-  );
-  const teamAverageSubmissionHours =
-    submissionHourSamples.length > 0
-      ? submissionHourSamples.reduce((sum, value) => sum + value, 0) / submissionHourSamples.length
-      : null;
-  const highestProgressMember =
-    [...visibleStats]
-      .filter((item) => item.assignedTasks > 0)
-      .sort((a, b) => {
-        if (b.responseRate !== a.responseRate) return b.responseRate - a.responseRate;
-        if (b.approvalRate !== a.approvalRate) return b.approvalRate - a.approvalRate;
-        return b.points - a.points;
-      })[0] ?? stats.leader;
+  function englishTaskPoints(points: number) {
+    return `${points} ${points === 1 ? "point" : "points"}`;
+  }
+
+  function memberDisplayName(member: Member) {
+    return member.name || memberArabicName(member);
+  }
+
+  const topCompetitionMember = stats.leader;
+  const topPointsMember = [...visibleStats].sort((a, b) => b.points - a.points)[0] ?? stats.leader;
   const lowestProgressMember =
     [...visibleStats]
       .filter((item) => item.assignedTasks > 0)
@@ -11592,19 +11583,29 @@ function DeanStatsView({
         return a.points - b.points;
       })[0] ?? stats.worst;
   const strictCriticalMembers = visibleStats.filter(isStrictCriticalMember);
-  const hasCriticalState = strictCriticalMembers.length > 0;
-  const teamHealthLabel = hasCriticalState ? "حالة حرجة" : "مستقر";
+  const severeCriticalThreshold = Math.max(3, Math.ceil(activeMemberCount * 0.4));
+  const hasCriticalState =
+    (reviewedTotal >= 6 && teamApprovalRate < 60) ||
+    (expectedTotal >= 6 && completionRate < 35) ||
+    strictCriticalMembers.length >= severeCriticalThreshold;
+  const hasWatchState =
+    !hasCriticalState &&
+    (stats.pendingTotal > 0 || missingTotal > 0 || strictCriticalMembers.length > 0);
+  const teamHealthLabel = hasCriticalState ? "Critical" : hasWatchState ? "Watch" : "Healthy";
   const healthTone = hasCriticalState
     ? "border-red-200 bg-red-50 text-red-700"
-    : "border-emerald-200 bg-emerald-50 text-emerald-900";
+    : hasWatchState
+      ? "border-amber-200 bg-amber-50 text-amber-900"
+      : "border-emerald-200 bg-emerald-50 text-emerald-900";
   const meetingExpectedTotal = stats.meetingMetrics.reduce((sum, item) => sum + item.expected, 0);
   const meetingAttendedTotal = stats.meetingMetrics.reduce((sum, item) => sum + item.attended, 0);
   const meetingPulseRate =
     meetingExpectedTotal > 0 ? Math.round((meetingAttendedTotal / meetingExpectedTotal) * 100) : 0;
   const visibleMemberRows = visibleStats.slice(0, 8);
+  const deliverySummary = expectedTotal > 0 ? `${receivedTotal}/${expectedTotal}` : "No target";
 
   return (
-    <div className="stats-page min-h-screen text-foreground" dir="rtl">
+    <div className="stats-page min-h-screen text-foreground" dir="ltr">
       <main className="stats-shell mx-auto grid gap-4 px-3 py-4">
         <header className="stats-hero stats-appear">
           <div className="stats-hero-copy">
@@ -11618,7 +11619,7 @@ function DeanStatsView({
                 <div className="min-w-0">
                   <div className="text-sm font-bold text-foreground/55">Hivo Studio</div>
                   <h1 className="mt-1 text-4xl font-bold leading-tight">
-                    <span className="highlight-yellow">لوحة التيم</span>
+                    <span className="highlight-yellow">Hello Dr Soha</span>
                   </h1>
                 </div>
               </div>
@@ -11628,39 +11629,39 @@ function DeanStatsView({
                 size="icon"
                 onClick={onLogout}
                 className="size-11 shrink-0 rounded-full border-[2px] border-ink bg-card doodle-shadow-sm"
-                aria-label="تسجيل خروج"
+                aria-label="Log out"
               >
                 <LogOut className="size-5" />
               </Button>
             </div>
             <p className="mt-4 text-lg leading-8 text-foreground/70">
-              حضرتك هنا شايفة أداء التيم بسرعة: التسليمات، القبول، السرعة، والدرجات.
+              A fast command view for team delivery, acceptance, scores, meetings, and risk.
             </p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
               <span className={`stats-health-pill ${healthTone}`}>{teamHealthLabel}</span>
               <span className="stats-soft-pill">
                 <Users className="size-4" />
-                {activeMemberCount} أعضاء شغالين حاليا
+                {activeMemberCount} active members
               </span>
               <span className="stats-soft-pill">
                 <ListChecks className="size-4" />
-                {activeTasks.length} تاسكات شغالة
+                {activeTasks.length} active tasks
               </span>
             </div>
           </div>
 
           <div className="stats-hero-panel">
             <AnimatedProgressRing
-              value={completionRate}
-              label="Team completion"
-              caption="تسليمات التيم"
+              value={teamApprovalRate}
+              label="Team acceptance"
+              caption="acceptance"
             />
             <div className="stats-hero-metrics">
-              <VisualMetric label="أعضاء شغالين" value={activeMemberCount} />
-              <VisualMetric label="تاسكات شغالة" value={activeTasks.length} />
-              <VisualMetric label="التسليمات" value={`${receivedTotal}/${expectedTotal}`} />
+              <VisualMetric label="active members" value={activeMemberCount} />
+              <VisualMetric label="active tasks" value={activeTasks.length} />
+              <VisualMetric label="submitted" value={deliverySummary} />
               <VisualMetric
-                label="القبول / الدرجات"
+                label="acceptance / points"
                 value={`${teamApprovalRate}% / ${totalPoints}`}
               />
             </div>
@@ -11674,41 +11675,43 @@ function DeanStatsView({
           <div className="stats-attention-heading">
             <Bell className="size-5" />
             <div>
-              <h2>اللي حضرتك محتاج تبص عليه</h2>
-              <p>أربع مؤشرات مختصرة لأداء التيم ككل.</p>
+              <h2>Executive signals</h2>
+              <p>The four quickest signals for the whole team.</p>
             </div>
           </div>
           <div className="stats-attention-grid">
             <div className="stats-attention-card is-calm">
-              <span>أعلى تقدم</span>
+              <span>Top performer</span>
               <strong>
-                {highestProgressMember ? memberArabicName(highestProgressMember.member) : "مفيش"}
+                {topCompetitionMember ? memberDisplayName(topCompetitionMember.member) : "None"}
               </strong>
               <small>
-                {highestProgressMember ? formatPercent(highestProgressMember.responseRate) : "0%"}
+                {topCompetitionMember
+                  ? `${formatPercent(topCompetitionMember.competitionScore)} competition`
+                  : "0%"}
               </small>
             </div>
             <div className={cn("stats-attention-card", missingTotal > 0 ? "is-warn" : "is-calm")}>
-              <span>تسليمات ناقصة</span>
+              <span>Missing submissions</span>
               <strong>{missingTotal}</strong>
             </div>
             <div className="stats-attention-card is-soft">
-              <span>أقل تقدم</span>
+              <span>Needs follow-up</span>
               <strong>
-                {lowestProgressMember ? memberArabicName(lowestProgressMember.member) : "تمام"}
+                {lowestProgressMember ? memberDisplayName(lowestProgressMember.member) : "All good"}
               </strong>
               <small>
-                {lowestProgressMember ? formatPercent(lowestProgressMember.responseRate) : "0%"}
+                {lowestProgressMember
+                  ? `${formatPercent(lowestProgressMember.responseRate)} delivered`
+                  : "0%"}
               </small>
             </div>
             <div className="stats-attention-card is-soft">
-              <span>متوسط سرعة التسليم</span>
+              <span>Top points</span>
               <strong>
-                {teamAverageSubmissionHours === null
-                  ? "لسه"
-                  : formatHours(teamAverageSubmissionHours)}
+                {topPointsMember ? memberDisplayName(topPointsMember.member) : "None"}
               </strong>
-              <small>على مستوى التيم</small>
+              <small>{topPointsMember ? `${topPointsMember.points} points` : "0 points"}</small>
             </div>
           </div>
         </section>
@@ -11718,27 +11721,27 @@ function DeanStatsView({
             <div className="stats-section-head">
               <div>
                 <h2>
-                  <span className="highlight-yellow">نبض الاجتماعات</span>
+                  <span className="highlight-yellow">Meeting pulse</span>
                 </h2>
-                <p>عدد الميتينج الشغالة ونسبة حضور التيم.</p>
+                <p>Attendance, coverage, and meeting score in one compact scan.</p>
               </div>
               <span className="stats-count-pill">
                 <CalendarClock className="size-4" />
-                {activeMeetings.length} ميتينج
+                {activeMeetings.length} meetings
               </span>
             </div>
             <div className="stats-meeting-summary">
               <AnimatedProgressRing
                 value={meetingPulseRate}
                 label="Meeting attendance"
-                caption="حضور"
+                caption="attendance"
               />
               <div className="stats-meeting-lines">
                 <div className="stats-meeting-row is-summary">
                   <div>
-                    <strong>{meetingPulseRate}% حضور عام</strong>
+                    <strong>{meetingPulseRate}% overall attendance</strong>
                     <span>
-                      {meetingAttendedTotal}/{meetingExpectedTotal} حضور مسجل
+                      {meetingAttendedTotal}/{meetingExpectedTotal} recorded attendance
                     </span>
                   </div>
                   <div className="stats-mini-meter" aria-label={`${meetingPulseRate}% attendance`}>
@@ -11755,7 +11758,7 @@ function DeanStatsView({
                           {item.meeting.title}
                         </strong>
                         <span>
-                          {item.attended}/{item.expected} حضور • {item.totalScore} درجات
+                          {item.attended}/{item.expected} attended • {item.totalScore} points
                         </span>
                       </div>
                       <div
@@ -11776,24 +11779,25 @@ function DeanStatsView({
           <div className="stats-section-head">
             <div>
               <h2>
-                <span className="highlight-yellow">تقدم التاسكات</span>
+                <span className="highlight-yellow">Task progress</span>
               </h2>
-              <p>كل تاسك ظاهر مع نسبة التسليم، القبول، الرفض، والناقص.</p>
+              <p>Each task shows delivery, review status, missing work, and score weight.</p>
             </div>
             <span className="stats-count-pill">
               <ListChecks className="size-4" />
-              {activeTasks.length} تاسكات شغالة
+              {activeTasks.length} active tasks
             </span>
           </div>
 
           <div className="stats-task-board">
             {stats.taskMetrics.length === 0 ? (
-              <p className="stats-empty-state">مفيش تاسكات شغالة دلوقتي.</p>
+              <p className="stats-empty-state">No active tasks right now.</p>
             ) : (
               stats.taskMetrics.map((metric, index) => {
                 const segments = taskSegments(metric.task);
                 const taskRate =
                   metric.expected > 0 ? Math.round((metric.received / metric.expected) * 100) : 0;
+                const hasTaskTarget = metric.expected > 0;
                 const submissionDetails = taskSubmissionDetails(metric.task);
                 return (
                   <article
@@ -11810,40 +11814,46 @@ function DeanStatsView({
                           {metric.task.title}
                         </h3>
                         <p>
-                          {taskDeadlineMeta(metric.task)
-                            ? `${taskDeadlineMeta(metric.task)} • `
+                          {taskDeadlineMeta(metric.task, "Deadline")
+                            ? `${taskDeadlineMeta(metric.task, "Deadline")} • `
                             : ""}
-                          {formatTaskPointsLabel(metric.task.points || 1)}
+                          {englishTaskPoints(metric.task.points || 1)}
                         </p>
                       </div>
                       <div className="stats-task-score">
                         <strong>
-                          {metric.received}/{metric.expected}
+                          {hasTaskTarget ? `${metric.received}/${metric.expected}` : "No target"}
                         </strong>
-                        <span>تسليم</span>
+                        <span>{hasTaskTarget ? "sent" : "assigned"}</span>
                       </div>
                     </div>
                     <div className="stats-task-progress-line">
                       <SegmentedStatusBar segments={segments} total={metric.expected} />
-                      <span>{taskRate}%</span>
+                      <span>{hasTaskTarget ? `${taskRate}%` : "-"}</span>
                     </div>
                     <div className="stats-task-meta">
-                      <span className="is-approved">مقبول {metric.approved}</span>
-                      <span className="is-pending">مراجعة {metric.submitted}</span>
-                      {submissionDetails.rejectedNames.length > 0 ? (
-                        <details className="stats-rejected-details">
-                          <summary className="is-rejected">مرفوض {metric.rejected}</summary>
-                          <div className="stats-rejected-list">
-                            {submissionDetails.rejectedNames.join("، ")}
-                          </div>
-                        </details>
+                      {!hasTaskTarget ? (
+                        <span>No assigned members</span>
                       ) : (
-                        <span className="is-rejected">مرفوض {metric.rejected}</span>
+                        <>
+                          <span className="is-approved">Accepted {metric.approved}</span>
+                          <span className="is-pending">Review {metric.submitted}</span>
+                          {submissionDetails.rejectedNames.length > 0 ? (
+                            <details className="stats-rejected-details">
+                              <summary className="is-rejected">Rejected {metric.rejected}</summary>
+                              <div className="stats-rejected-list">
+                                {submissionDetails.rejectedNames.join("، ")}
+                              </div>
+                            </details>
+                          ) : (
+                            <span className="is-rejected">Rejected {metric.rejected}</span>
+                          )}
+                        </>
                       )}
-                      <span>متابعات {metric.progressUpdates}</span>
+                      <span>Updates {metric.progressUpdates}</span>
                       {submissionDetails.singleSubmitter && (
                         <span className="is-single-submitter">
-                          سلّم: {submissionDetails.singleSubmitter}
+                          Sent by: {submissionDetails.singleSubmitter}
                         </span>
                       )}
                     </div>
@@ -11855,16 +11865,16 @@ function DeanStatsView({
 
           <div className="stats-legend">
             <span>
-              <i className="bg-emerald-500" /> مقبول
+              <i className="bg-emerald-500" /> Accepted
             </span>
             <span>
-              <i className="bg-yellow-400" /> مراجعة
+              <i className="bg-yellow-400" /> Review
             </span>
             <span>
-              <i className="bg-red-500" /> مرفوض
+              <i className="bg-red-500" /> Rejected
             </span>
             <span>
-              <i className="bg-zinc-200" /> ناقص
+              <i className="bg-zinc-200" /> Missing
             </span>
           </div>
         </section>
@@ -11873,13 +11883,13 @@ function DeanStatsView({
           <div className="stats-section-head">
             <div>
               <h2>
-                <span className="highlight-yellow">أداء الأعضاء</span>
+                <span className="highlight-yellow">Member performance</span>
               </h2>
-              <p>كل صف يوضح الدرجات، نسبة التسليم، القبول، والحالة بشكل سريع.</p>
+              <p>Compact leaderboard rows using the same competition score as the main ranking.</p>
             </div>
             <span className="stats-count-pill">
               <BarChart3 className="size-4" />
-              {teamApprovalRate}% قبول
+              {teamApprovalRate}% acceptance
             </span>
           </div>
           <div className="stats-member-list">
@@ -11898,26 +11908,27 @@ function DeanStatsView({
                       <div className="stats-member-rank">{index + 1}</div>
                       <div className="min-w-0">
                         <div className="stats-member-name-line">
-                          <strong>{memberArabicName(item.member)}</strong>
+                          <strong>{memberDisplayName(item.member)}</strong>
                           <span>{state}</span>
                         </div>
                         <div className="stats-member-insight">{insight}</div>
                       </div>
                       <div className="stats-member-numbers">
                         <strong>{item.points}</strong>
-                        <span>درجات</span>
+                        <span>points</span>
                       </div>
                     </div>
                     <div className="mt-3">
                       <SegmentedStatusBar segments={segments} total={item.assignedTasks} />
                     </div>
                     <div className="stats-member-meta">
-                      <span>{formatPercent(item.responseRate)} تسليم</span>
-                      <span>{formatPercent(item.approvalRate)} قبول</span>
+                      <span>{formatPercent(item.competitionScore)} competition</span>
+                      <span>{formatPercent(item.responseRate)} delivery</span>
+                      <span>{formatPercent(item.approvalRate)} acceptance</span>
                       <span>
-                        خلص {item.approved}/{item.assignedTasks}
+                        done {item.approved}/{item.assignedTasks}
                       </span>
-                      <span>{item.pending} مراجعة</span>
+                      <span>{item.pending} review</span>
                     </div>
                   </summary>
                   <StatsMemberDetails item={item} />
@@ -11927,7 +11938,7 @@ function DeanStatsView({
           </div>
           {visibleStats.length > visibleMemberRows.length && (
             <p className="mt-3 text-center text-sm font-bold text-foreground/45">
-              +{visibleStats.length - visibleMemberRows.length} أعضاء موجودين في الداتا.
+              +{visibleStats.length - visibleMemberRows.length} more members in the data.
             </p>
           )}
         </section>
