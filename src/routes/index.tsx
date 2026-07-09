@@ -9,8 +9,10 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Archive,
   BarChart3,
@@ -2039,49 +2041,50 @@ function StatsMemberDetails({ item }: { item: MemberScore }) {
 }
 
 function leadershipReason(leader: MemberScore, runner?: MemberScore) {
+  const reasons: string[] = [];
   if (!runner) {
-    return `Competition ${formatPercent(leader.competitionScore)} | ${leader.points} total points`;
+    if (leader.points > 0) reasons.push(`${leader.points} نقطة`);
+    reasons.push(`نتيجة المنافسة ${formatPercent(leader.competitionScore)}`);
+    if (leader.recentPoints > 0) reasons.push(`نشاطه عالي الأسبوع ده`);
+    return reasons.slice(0, 2).join(" و ");
   }
   if (leader.points > runner.points) {
-    return `${leader.points} total points vs ${runner.points}`;
+    reasons.push(`درجاته أعلى: ${leader.points} نقطة`);
   }
   if (leader.competitionScore > runner.competitionScore) {
-    return `Competition score ${formatPercent(leader.competitionScore)}`;
+    reasons.push(`نتيجة المنافسة ${formatPercent(leader.competitionScore)}`);
   }
   if (leader.recentPoints > runner.recentPoints) {
-    return `${leader.recentPoints} recent points this week`;
-  }
-  if (!runner) {
-    if (leader.submitted > 0) {
-      return `سلم ${leader.submitted} مرة وقبوله ${formatPercent(leader.approvalRate)}`;
-    }
-    return "أعلى نشاط متاح حاليا";
+    reasons.push(`عامل حركة قوية الأسبوع ده`);
   }
   if (leader.submitted > runner.submitted) {
-    return `سلم أكتر (${leader.submitted} مقابل ${runner.submitted})`;
+    reasons.push(`سلم أكتر`);
   }
   if (leader.responseRate > runner.responseRate) {
-    return `التزامه أعلى (${formatPercent(leader.responseRate)})`;
+    reasons.push(`ملتزم أكتر`);
   }
   if (leader.approvalRate > runner.approvalRate) {
-    return `قبوله أعلى (${formatPercent(leader.approvalRate)})`;
+    reasons.push(`قبوله أعلى`);
   }
   if (leader.timingScore > runner.timingScore) {
     if (
       leader.avgFastHours !== null &&
       (runner.avgFastHours === null || leader.avgFastHours < runner.avgFastHours)
     ) {
-      return `بيسلم أسرع في المشاكل والتاسكات السريعة (${formatHours(leader.avgFastHours)})`;
+      reasons.push(`بيسلم أسرع`);
+    } else {
+      reasons.push(`توقيته أحسن`);
     }
-    return `تقييم التوقيت عنده أقوى (${formatPercent(leader.timingScore)})`;
   }
   if (leader.interactionScore > runner.interactionScore) {
-    return `تفاعله أسرع (${formatPercent(leader.interactionScore)})`;
+    reasons.push(`تفاعله أسرع`);
   }
   if (leader.meetingScore > runner.meetingScore) {
-    return `حضوره أقوى (${formatPercent(leader.meetingScore)})`;
+    reasons.push(`حضوره أقوى`);
   }
-  return `مجهوده الإجمالي أعلى (${formatPercent(leader.effortScore)})`;
+  return reasons.length > 0
+    ? reasons.slice(0, 2).join(" و ")
+    : `مجهوده الإجمالي أعلى (${formatPercent(leader.effortScore)})`;
 }
 
 function leaderboardLeaderHeadline(scores: MemberScore[]) {
@@ -2248,7 +2251,7 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
             </span>
             <span className="leaderboard-podium-review">
               <span>
-                Total points <strong>{item.points}</strong>
+                النقاط <strong>{item.points}</strong>
               </span>
             </span>
           </div>
@@ -2303,22 +2306,22 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
           </div>
 
           <div className="flex items-center justify-between gap-3" dir="rtl">
-            <span className="text-sm font-bold text-foreground/70">Total points {item.points}</span>
+            <span className="text-sm font-bold text-foreground/70">النقاط {item.points}</span>
             <span className="leaderboard-acceptance-rate">
               {formatPercent(item.competitionScore)}
             </span>
           </div>
 
           <span className="grid grid-cols-4 gap-2" dir="ltr">
-            <LeaderboardStatPill label="Score" value={formatPercent(item.competitionScore)} />
-            <LeaderboardStatPill label="Points" value={item.points} />
+            <LeaderboardStatPill label="النتيجة" value={formatPercent(item.competitionScore)} />
+            <LeaderboardStatPill label="النقاط" value={item.points} />
             <LeaderboardStatPill
-              label="Quality"
+              label="الجودة"
               value={formatPercent(item.qualityScore)}
               className="bg-emerald-100/70"
             />
             <LeaderboardStatPill
-              label="Momentum"
+              label="النشاط"
               value={formatPercent(item.momentumScore)}
               className="bg-sky-100/70"
             />
@@ -2371,13 +2374,16 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
 function HtmlSubmissionPreview({
   file,
   className,
+  compact = false,
 }: {
   file?: HtmlSubmissionFile;
   className?: string;
+  compact?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [fitMode, setFitMode] = useState<"fit" | "scroll">("fit");
   const [viewerUrl, setViewerUrl] = useState("");
+  const viewerRootRef = useRef<HTMLDivElement | null>(null);
 
   const kind = file
     ? (file.kind ??
@@ -2402,11 +2408,10 @@ function HtmlSubmissionPreview({
     if (!file) return;
     setViewerUrl(visualDocumentUrl(iframeContent));
     setExpanded(true);
-    void requestLandscapeFullscreen();
   }
 
   async function requestLandscapeFullscreen() {
-    const root = document.documentElement;
+    const root = viewerRootRef.current ?? document.documentElement;
     try {
       if (!document.fullscreenElement && root.requestFullscreen) {
         await root.requestFullscreen();
@@ -2436,7 +2441,14 @@ function HtmlSubmissionPreview({
 
   useEffect(() => {
     if (!expanded) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    void requestLandscapeFullscreen();
     return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
       try {
         void screen.orientation?.unlock?.();
       } catch {
@@ -2459,6 +2471,70 @@ function HtmlSubmissionPreview({
       className={cn("h-full bg-white", fitMode === "fit" ? "w-full" : "w-[1200px] max-w-none")}
     />
   );
+
+  const viewerPortal =
+    expanded &&
+    createPortal(
+      <div
+        ref={viewerRootRef}
+        className="fixed inset-0 z-[9999] isolate flex flex-col bg-ink p-0 text-foreground"
+        dir="rtl"
+        onPointerMove={(event) => event.stopPropagation()}
+        onMouseMove={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-white/20 bg-white px-3 py-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold">{file.name}</p>
+            <p className="text-xs text-foreground/55">
+              عرض آمن داخل الموقع - {visualSubmissionKindLabel(kind)}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setFitMode((current) => (current === "fit" ? "scroll" : "fit"))}
+              className="border border-ink/20 bg-paper"
+            >
+              {fitMode === "fit" ? "تمرير" : "ملاءمة"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={closeViewer}
+              className="border border-ink/20 bg-paper"
+            >
+              <X data-icon="inline-start" />
+              إغلاق
+            </Button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto bg-white">
+          {viewerUrl ? renderIframe() : null}
+        </div>
+      </div>,
+      document.body,
+    );
+
+  if (compact) {
+    return (
+      <>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={openViewer}
+          className={cn("border border-ink/20 bg-paper", className)}
+        >
+          <Eye data-icon="inline-start" />
+          عرض المحتوى
+        </Button>
+        {viewerPortal}
+      </>
+    );
+  }
 
   return (
     <>
@@ -2485,43 +2561,7 @@ function HtmlSubmissionPreview({
           </Button>
         </div>
       </section>
-
-      {expanded && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-ink p-2 sm:p-3" dir="rtl">
-          <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-white/20 bg-white px-3 py-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-bold">{file.name}</p>
-              <p className="text-xs text-foreground/55">
-                عرض آمن داخل الموقع - {visualSubmissionKindLabel(kind)}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setFitMode((current) => (current === "fit" ? "scroll" : "fit"))}
-                className="border border-ink/20 bg-paper"
-              >
-                {fitMode === "fit" ? "تمرير" : "ملاءمة"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={closeViewer}
-                className="border border-ink/20 bg-paper"
-              >
-                <X data-icon="inline-start" />
-                إغلاق
-              </Button>
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto rounded-lg border-[2px] border-white/40 bg-white">
-            {viewerUrl ? renderIframe() : null}
-          </div>
-        </div>
-      )}
+      {viewerPortal}
     </>
   );
 }
@@ -2581,6 +2621,7 @@ function MemberView({
   const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
   const [documentationErrors, setDocumentationErrors] = useState<Record<string, string>>({});
   const [htmlUploadErrors, setHtmlUploadErrors] = useState<Record<string, string>>({});
+  const [openVisualEditorKey, setOpenVisualEditorKey] = useState("");
   const [seenMeetingIds, setSeenMeetingIds] = useState(() =>
     readSeenMeetingIds(activeMember.member.id),
   );
@@ -2975,6 +3016,7 @@ function MemberView({
         content,
         kind,
       });
+      setOpenVisualEditorKey("");
       setHtmlUploadErrors((current) => ({ ...current, [key]: "" }));
     } catch {
       setHtmlUploadErrors((current) => ({ ...current, [key]: "تعذر قراءة الملف." }));
@@ -2999,6 +3041,7 @@ function MemberView({
       content,
       kind,
     });
+    setOpenVisualEditorKey("");
     setHtmlUploadErrors((current) => ({ ...current, [key]: "" }));
   }
 
@@ -3064,73 +3107,107 @@ function MemberView({
     handleDocumentationFile(request, event.dataTransfer.files?.[0]);
   }
 
-  function renderHtmlSubmissionUpload(task: StudioTask, responseKeyValue: string) {
+  function renderHtmlSubmissionUpload(
+    task: StudioTask,
+    responseKeyValue: string,
+    submittedFile?: HtmlSubmissionFile,
+  ) {
     const mode = htmlSubmissionMode(task);
-    if (mode === "off") return null;
+    if (mode === "off" && !submittedFile) return null;
     const draftFile = draftHtmlFiles[responseKeyValue];
     const error = htmlUploadErrors[responseKeyValue];
+    const visualFile = draftFile ?? submittedFile;
+    const editorOpen =
+      mode === "required" || openVisualEditorKey === responseKeyValue || Boolean(error);
+    const canEdit = mode !== "off";
 
     return (
-      <div className="mt-3 rounded-xl border-[2px] border-sky-200 bg-sky-50 p-3 text-sky-950">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <strong className="text-sm">عرض بصري</strong>
-          <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-xs font-bold">
-            {htmlSubmissionModeLabel(mode)}
-          </span>
-        </div>
-        <label
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => handleHtmlDrop(responseKeyValue, event)}
-          className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-[2px] border-dashed border-sky-300 bg-white p-4 text-center text-sm font-bold"
-        >
-          <Upload className="size-5" />
-          <span>اسحب ملف HTML أو SVG هنا، أو اختاره</span>
-          <span className="text-xs font-normal text-foreground/55">
-            ملف واحد فقط. SVG مناسب للفلو الثابت، وHTML مناسب للتفاعل. الحد الأقصى 500 KB.
-          </span>
-          <input
-            type="file"
-            accept=".html,.htm,.svg,text/html,image/svg+xml"
-            className="hidden"
-            onChange={(event) => {
-              void handleHtmlSubmissionFile(responseKeyValue, event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-        </label>
-        <div className="mt-3 grid gap-2 rounded-lg border border-sky-200 bg-white p-3">
-          <label
-            className="text-xs font-bold text-sky-950"
-            htmlFor={`visual-code-${responseKeyValue}`}
-          >
-            أو الصق كود SVG/HTML
-          </label>
-          <textarea
-            id={`visual-code-${responseKeyValue}`}
-            placeholder="الصق الكود هنا..."
-            className="min-h-28 resize-y rounded-md border border-sky-200 bg-sky-50/40 p-3 text-sm font-semibold outline-none focus:border-sky-500"
-            dir="ltr"
-            spellCheck={false}
-          />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs text-foreground/55">هنكتشف النوع تلقائيًا: SVG أو HTML.</span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => handlePastedVisualCode(responseKeyValue)}
-              className="border border-sky-300 bg-white"
-            >
-              استخدام الكود
-            </Button>
+      <div className="mt-3 grid gap-2 rounded-xl border-[2px] border-sky-200 bg-sky-50/70 p-2 text-sky-950">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-2">
+          <div className="min-w-0">
+            <strong className="text-sm">عرض بصري</strong>
+            <span className="ms-2 rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[11px] font-bold">
+              {htmlSubmissionModeLabel(mode)}
+            </span>
+            {visualFile && (
+              <p className="mt-1 truncate text-xs font-bold text-foreground/50">
+                {visualSubmissionKindLabel(visualFile.kind)} - {visualFile.name} -{" "}
+                {Math.max(1, Math.round(visualFile.size / 1024))} KB
+              </p>
+            )}
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {visualFile && <HtmlSubmissionPreview file={visualFile} compact />}
+            {canEdit && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setOpenVisualEditorKey((current) =>
+                    current === responseKeyValue ? "" : responseKeyValue,
+                  )
+                }
+                className="border border-sky-300 bg-white"
+              >
+                {editorOpen ? "إخفاء" : visualFile ? "تعديل" : "إضافة"}
+              </Button>
+            )}
           </div>
         </div>
-        {draftFile && (
-          <div className="mt-3 grid gap-2">
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-bold">
-              <span className="min-w-0 truncate">
-                {visualSubmissionKindLabel(draftFile.kind)} - {draftFile.name}
+
+        {editorOpen && canEdit && (
+          <div className="grid gap-2 rounded-lg border border-sky-200 bg-white p-3">
+            <label
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => handleHtmlDrop(responseKeyValue, event)}
+              className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-[2px] border-dashed border-sky-300 bg-sky-50/60 p-4 text-center text-sm font-bold"
+            >
+              <Upload className="size-5" />
+              <span>اسحب ملف HTML أو SVG هنا، أو اختاره</span>
+              <span className="text-xs font-normal text-foreground/55">
+                ملف واحد فقط. SVG للفلو الثابت، وHTML للتفاعل. الحد الأقصى 500 KB.
               </span>
+              <input
+                type="file"
+                accept=".html,.htm,.svg,text/html,image/svg+xml"
+                className="hidden"
+                onChange={(event) => {
+                  void handleHtmlSubmissionFile(responseKeyValue, event.target.files?.[0]);
+                  event.target.value = "";
+                }}
+              />
+            </label>
+            <div className="grid gap-2 rounded-lg border border-sky-200 bg-sky-50/40 p-3">
+              <label
+                className="text-xs font-bold text-sky-950"
+                htmlFor={`visual-code-${responseKeyValue}`}
+              >
+                أو الصق كود SVG/HTML
+              </label>
+              <textarea
+                id={`visual-code-${responseKeyValue}`}
+                placeholder="الصق الكود هنا..."
+                className="min-h-28 resize-y rounded-md border border-sky-200 bg-white p-3 text-sm font-semibold outline-none focus:border-sky-500"
+                dir="ltr"
+                spellCheck={false}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs text-foreground/55">
+                  هنكتشف النوع تلقائيًا: SVG أو HTML.
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePastedVisualCode(responseKeyValue)}
+                  className="border border-sky-300 bg-white"
+                >
+                  استخدام الكود
+                </Button>
+              </div>
+            </div>
+            {draftFile && (
               <Button
                 type="button"
                 variant="ghost"
@@ -3143,13 +3220,12 @@ function MemberView({
                   ) as HTMLTextAreaElement | null;
                   if (input) input.value = "";
                 }}
-                className="h-8 border border-red-100 bg-red-50 text-red-700"
+                className="justify-self-start border border-red-100 bg-red-50 text-red-700"
               >
                 <X data-icon="inline-start" />
-                إزالة
+                إزالة العرض
               </Button>
-            </div>
-            <HtmlSubmissionPreview file={draftFile} />
+            )}
           </div>
         )}
         {error && <p className="mt-2 text-sm font-bold text-red-700">{error}</p>}
@@ -3734,12 +3810,10 @@ function MemberView({
           </p>
           <div className="mt-4 font-bold">
             <span className="highlight-blue">
-              Total points: {activeMemberScore?.points ?? 0} | Competition:{" "}
-              {formatPercent(activeMemberScore?.competitionScore ?? 0)} | Tasks:{" "}
-              {memberTasks.length} | Counted: {activeMemberScore?.completed ?? 0}
-              {documentationTasks.length > 0
-                ? ` | documentation: ${documentationTasks.length}`
-                : ""}
+              النقاط: {activeMemberScore?.points ?? 0} | المنافسة:{" "}
+              {formatPercent(activeMemberScore?.competitionScore ?? 0)} | المهام:{" "}
+              {memberTasks.length} | المحسوب: {activeMemberScore?.completed ?? 0}
+              {documentationTasks.length > 0 ? ` | توثيق: ${documentationTasks.length}` : ""}
             </span>
           </div>
           {refreshStatus && <p className="mt-3 text-sm text-foreground/65">{refreshStatus}</p>}
@@ -3774,12 +3848,12 @@ function MemberView({
                     </span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold uppercase tracking-wide text-sky-700">
-                        {meetingPhaseLabel(phase)} meeting for all users
+                        {meetingPhaseLabel(phase)} اجتماع لكل التيم
                       </p>
                       <h2 className="mt-1 break-words text-2xl font-bold">{meeting.title}</h2>
                       <p className="mt-1 text-sm font-bold leading-6 text-sky-900/75">
-                        Starts {formatDateTime(meeting.startsAt)}
-                        {` | ${meeting.points} points`}
+                        يبدأ {formatDateTime(meeting.startsAt)}
+                        {` | ${meeting.points} نقطة`}
                       </p>
                     </div>
                   </div>
@@ -3791,7 +3865,7 @@ function MemberView({
                     className="shrink-0 border border-sky-300 bg-white text-sky-900"
                   >
                     <Eye data-icon="inline-start" />
-                    Seen
+                    شوفت
                   </Button>
                 </div>
               );
@@ -3837,7 +3911,7 @@ function MemberView({
                     className="shrink-0 border border-yellow-700 bg-white text-yellow-950"
                   >
                     <Eye data-icon="inline-start" />
-                    Seen
+                    شوفت
                   </Button>
                 </div>
               );
@@ -3870,14 +3944,14 @@ function MemberView({
             onClick={() => setMemberTab("tasks")}
             className={`flex-1 rounded-md px-3 py-2 text-sm font-bold ${memberTab === "tasks" ? "bg-ink text-white" : ""}`}
           >
-            Tasks
+            المهام
           </button>
           <button
             type="button"
             onClick={() => setMemberTab("log")}
             className={`flex-1 rounded-md px-3 py-2 text-sm font-bold ${memberTab === "log" ? "bg-ink text-white" : ""}`}
           >
-            Log
+            السجل
           </button>
         </div>
 
@@ -3968,15 +4042,7 @@ function MemberView({
                             <>
                               <span className="mx-1.5">•</span>
                               <span className="rounded-full border border-red-700 bg-red-50 px-2 py-0.5 text-red-700">
-                                Problem
-                              </span>
-                            </>
-                          )}
-                          {htmlMode !== "off" && (
-                            <>
-                              <span className="mx-1.5">عرض بصري</span>
-                              <span className="rounded-full border border-sky-700 bg-sky-50 px-2 py-0.5 text-sky-700">
-                                {htmlSubmissionModeLabel(htmlMode)}
+                                مسألة
                               </span>
                             </>
                           )}
@@ -4025,7 +4091,7 @@ function MemberView({
                           className="border-[2px] border-ink bg-white"
                         >
                           <Eye data-icon="inline-start" />
-                          Seen
+                          شوفت
                         </Button>
                       )}
                     </div>
@@ -4099,10 +4165,10 @@ function MemberView({
                       <div className="mb-4 rounded-xl border-[2px] border-sky-200 bg-sky-50 p-3 text-sky-950">
                         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-2">
-                            <strong className="text-base">Latest updates</strong>
+                            <strong className="text-base">آخر التحديثات</strong>
                             {unseenTaskUpdates.length > 0 && (
                               <span className="rounded-full border border-yellow-700 bg-yellow-100 px-2 py-0.5 text-xs font-bold text-yellow-900">
-                                New
+                                جديد
                               </span>
                             )}
                           </div>
@@ -4115,7 +4181,7 @@ function MemberView({
                               className="border border-sky-300 bg-white text-sky-950"
                             >
                               <Eye data-icon="inline-start" />
-                              Seen
+                              شوفت
                             </Button>
                           )}
                         </div>
@@ -4159,7 +4225,7 @@ function MemberView({
                             }}
                             className="mt-2 text-xs font-bold text-sky-700 underline underline-offset-4"
                           >
-                            Show all updates
+                            عرض كل التحديثات
                           </button>
                         )}
                       </div>
@@ -4222,12 +4288,12 @@ function MemberView({
                             الباست محظور في problem. اكتب الحل بإيدك.
                           </div>
                         )}
-                        {renderHtmlSubmissionUpload(task, key)}
+                        {renderHtmlSubmissionUpload(task, key, existing?.htmlFile)}
                       </>
                     )}
-                    {existing?.htmlFile && (
-                      <HtmlSubmissionPreview file={existing.htmlFile} className="mt-3" />
-                    )}
+                    {existing?.status === "approved" &&
+                      existing.htmlFile &&
+                      renderHtmlSubmissionUpload(task, key, existing.htmlFile)}
                     {existing?.status !== "approved" && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button
@@ -4688,7 +4754,7 @@ function StructuredTextBlock({
   return (
     <div className={cn("structured-text-stack", className)}>
       {sections.map((section, index) => {
-        const title = shouldRenderSections ? structuredTextTitle(section, index) : "عرض النص";
+        const title = shouldRenderSections ? structuredTextTitle(section, index) : "وصف التاسك";
         const previewSource = section.replace(/\s+/g, " ").trim();
         const preview = previewSource.slice(0, 150);
         const previewIsTrimmed = previewSource.length > preview.length;
@@ -4702,7 +4768,7 @@ function StructuredTextBlock({
           >
             <summary className="structured-text-summary">
               <span className="min-w-0 flex-1">
-                <span className={cn("block truncate", textAlignClass(title))}>{title}</span>
+                <span className="block truncate text-center">{title}</span>
                 {preview && preview !== title && (
                   <span className={cn("structured-text-summary-preview", textAlignClass(section))}>
                     {preview}
@@ -4734,7 +4800,7 @@ function StructuredTextPreviewList({
   return (
     <div className="grid gap-2">
       {sections.map((section, index) => {
-        const title = sections.length > 1 ? structuredTextTitle(section, index) : "عرض النص";
+        const title = sections.length > 1 ? structuredTextTitle(section, index) : "وصف التاسك";
         const previewSource = section.replace(/\s+/g, " ").trim();
         const preview = previewSource.slice(0, 150);
         const previewIsTrimmed = previewSource.length > preview.length;
@@ -4747,9 +4813,7 @@ function StructuredTextPreviewList({
             className="structured-text-preview-button"
             dir={textDirection(section)}
           >
-            <span className={cn("block truncate text-sm font-bold", textAlignClass(title))}>
-              {title}
-            </span>
+            <span className="block truncate text-center text-sm font-bold">{title}</span>
             {preview && preview !== title && (
               <span className={cn("structured-text-summary-preview", textAlignClass(section))}>
                 {preview}
