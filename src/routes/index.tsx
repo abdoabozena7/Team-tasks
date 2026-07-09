@@ -95,6 +95,7 @@ type StudioTask = {
 
 type TaskType = "technical" | "nonTechnical" | "problem";
 type HtmlSubmissionMode = "off" | "optional" | "required";
+type VisualSubmissionKind = "html" | "svg";
 
 type HtmlSubmissionFile = {
   name: string;
@@ -102,6 +103,7 @@ type HtmlSubmissionFile = {
   type: string;
   lastModified: number;
   content: string;
+  kind?: VisualSubmissionKind;
 };
 
 type TaskResponse = {
@@ -423,8 +425,9 @@ const HIVO_API_URL = (import.meta.env.VITE_HIVO_API_URL || DEFAULT_HIVO_API_URL)
 const HIVO_QUEUE_URL = `${HIVO_API_URL}/api`;
 const DOCUMENTATION_POINTS = 1;
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const HTML_FILE_MAX_BYTES = 500 * 1024;
+const VISUAL_FILE_MAX_BYTES = 500 * 1024;
 const HTML_FILE_TYPE = "text/html";
+const SVG_FILE_TYPE = "image/svg+xml";
 const HIVO_LOGO_SRC = `${import.meta.env.BASE_URL}hivo.png?v=3`;
 
 type StoredSession = {
@@ -669,35 +672,70 @@ function htmlSubmissionMode(task: Pick<StudioTask, "htmlSubmissionMode">): HtmlS
 }
 
 function htmlSubmissionModeLabel(mode: HtmlSubmissionMode) {
-  if (mode === "required") return "HTML required";
-  if (mode === "optional") return "HTML optional";
-  return "HTML off";
+  if (mode === "required") return "مطلوب";
+  if (mode === "optional") return "اختياري";
+  return "مغلق";
 }
 
 function htmlContentByteLength(value: string) {
   return new TextEncoder().encode(value).byteLength;
 }
 
-function isHtmlFileName(name: string) {
+function visualSubmissionKindFromName(name: string): VisualSubmissionKind | undefined {
   const lowerName = name.trim().toLowerCase();
-  return lowerName.endsWith(".html") || lowerName.endsWith(".htm");
+  if (lowerName.endsWith(".svg")) return "svg";
+  if (lowerName.endsWith(".html") || lowerName.endsWith(".htm")) return "html";
+  return undefined;
 }
 
-function isHtmlMime(type?: string) {
-  return !type || type === HTML_FILE_TYPE;
+function visualSubmissionKindFromContent(content: string): VisualSubmissionKind {
+  const trimmed = content.trim().toLowerCase();
+  if (trimmed.startsWith("<svg") || trimmed.includes("<svg")) return "svg";
+  return "html";
+}
+
+function isVisualMime(type: string | undefined, kind: VisualSubmissionKind) {
+  if (!type) return true;
+  if (kind === "svg") return type === SVG_FILE_TYPE || type === "text/plain" || type === "text/xml";
+  return type === HTML_FILE_TYPE || type === "text/plain";
+}
+
+function visualSubmissionKindLabel(kind?: VisualSubmissionKind) {
+  return kind === "svg" ? "SVG" : "HTML";
+}
+
+function visualSubmissionName(kind: VisualSubmissionKind) {
+  return kind === "svg" ? "flow.svg" : "flow.html";
+}
+
+function normalizePastedVisualCode(value: string) {
+  const trimmed = value.trim();
+  const fenced = trimmed.match(/^```(?:html|svg|xml)?\s*([\s\S]*?)\s*```$/i);
+  return (fenced?.[1] ?? trimmed).trim();
 }
 
 function validateHtmlFileShape(file: Pick<File, "name" | "size" | "type">) {
-  if (!isHtmlFileName(file.name)) return "Only one .html or .htm file is accepted.";
-  if (!isHtmlMime(file.type)) return "The HTML preview must be a text/html file.";
-  if (file.size > HTML_FILE_MAX_BYTES) return "HTML file must be 500 KB or smaller.";
+  const kind = visualSubmissionKindFromName(file.name);
+  if (!kind) return "ارفع ملف HTML أو SVG واحد فقط.";
+  if (!isVisualMime(file.type, kind)) return "نوع الملف غير مناسب للعرض البصري.";
+  if (file.size > VISUAL_FILE_MAX_BYTES) return "حجم الملف لازم يكون 500 KB أو أقل.";
   return "";
 }
 
-function validateHtmlContent(content: string) {
-  if (!content.trim()) return "HTML file is empty.";
-  if (htmlContentByteLength(content) > HTML_FILE_MAX_BYTES) {
-    return "HTML file must be 500 KB or smaller.";
+function validateHtmlContent(content: string, kind = visualSubmissionKindFromContent(content)) {
+  const trimmed = content.trim();
+  const lowerContent = trimmed.toLowerCase();
+  if (!trimmed) return "الكود فاضي.";
+  if (htmlContentByteLength(content) > VISUAL_FILE_MAX_BYTES) {
+    return "حجم الكود لازم يكون 500 KB أو أقل.";
+  }
+  if (kind === "svg" && !lowerContent.includes("<svg")) return "كود SVG لازم يحتوي على <svg>.";
+  if (
+    kind === "html" &&
+    !lowerContent.startsWith("<!doctype html") &&
+    !lowerContent.includes("<html")
+  ) {
+    return "كود HTML لازم يكون صفحة كاملة تبدأ بـ <!doctype html> أو تحتوي على <html>.";
   }
   return "";
 }
@@ -706,14 +744,21 @@ function sanitizeHtmlSubmissionFile(file?: Partial<HtmlSubmissionFile>) {
   if (!file) return undefined;
   const name = String(file.name ?? "").trim();
   const content = String(file.content ?? "");
-  const type = String(file.type ?? HTML_FILE_TYPE);
-  if (!isHtmlFileName(name) || !isHtmlMime(type) || validateHtmlContent(content)) return undefined;
+  const nameKind = visualSubmissionKindFromName(name);
+  const kind =
+    file.kind === "svg" || file.kind === "html"
+      ? file.kind
+      : (nameKind ?? visualSubmissionKindFromContent(content));
+  const type = String(file.type || (kind === "svg" ? SVG_FILE_TYPE : HTML_FILE_TYPE));
+  if (name && (!nameKind || nameKind !== kind)) return undefined;
+  if (!isVisualMime(type, kind) || validateHtmlContent(content, kind)) return undefined;
   return {
-    name,
+    name: name || visualSubmissionName(kind),
     size: sanitizeNumber(file.size) || htmlContentByteLength(content),
     type: type || HTML_FILE_TYPE,
     lastModified: sanitizeNumber(file.lastModified),
     content,
+    kind,
   };
 }
 
@@ -906,7 +951,12 @@ function isTechnicalTask(task: StudioTask) {
 }
 
 function taskDeadlineLabel(task: StudioTask) {
-  return isTechnicalTask(task) ? "No deadline" : formatDateTime(task.deadlineAt);
+  return isTechnicalTask(task) ? "" : formatDateTime(task.deadlineAt);
+}
+
+function taskDeadlineMeta(task: StudioTask, label = "الموعد النهائي") {
+  const deadline = taskDeadlineLabel(task);
+  return deadline ? `${label}: ${deadline}` : "";
 }
 
 function privateTaskMemberId(task: StudioTask) {
@@ -2321,22 +2371,74 @@ function Leaderboard({ scores }: { scores: MemberScore[] }) {
 function HtmlSubmissionPreview({
   file,
   className,
-  compact = false,
 }: {
   file?: HtmlSubmissionFile;
   className?: string;
-  compact?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [fitMode, setFitMode] = useState<"fit" | "scroll">("fit");
+
+  const kind = file
+    ? (file.kind ??
+      visualSubmissionKindFromName(file.name) ??
+      visualSubmissionKindFromContent(file.content))
+    : "html";
+  const iframeContent =
+    file && kind === "svg"
+      ? `<!doctype html><html dir="rtl"><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100%;background:#fff;font-family:system-ui,Arial,sans-serif}.wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:auto;padding:16px;box-sizing:border-box}.wrap svg{max-width:100%;height:auto}</style></head><body><main class="wrap">${file.content}</main></body></html>`
+      : (file?.content ?? "");
+
+  async function requestLandscapeFullscreen() {
+    const root = document.documentElement;
+    try {
+      if (!document.fullscreenElement && root.requestFullscreen) {
+        await root.requestFullscreen();
+      }
+    } catch {
+      // Fullscreen is best-effort and may be blocked by browser policy.
+    }
+    try {
+      await screen.orientation?.lock?.("landscape");
+    } catch {
+      // Orientation lock is best-effort and often blocked on mobile browsers.
+    }
+  }
+
+  function closeViewer() {
+    setExpanded(false);
+    try {
+      void screen.orientation?.unlock?.();
+    } catch {
+      // Ignore unsupported orientation APIs.
+    }
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }
+
+  useEffect(() => {
+    if (!expanded) return;
+    return () => {
+      try {
+        void screen.orientation?.unlock?.();
+      } catch {
+        // Ignore unsupported orientation APIs.
+      }
+      if (document.fullscreenElement) {
+        void document.exitFullscreen().catch(() => undefined);
+      }
+    };
+  }, [expanded]);
+
   if (!file) return null;
 
-  const renderIframe = (titleSuffix: string) => (
+  const renderIframe = () => (
     <iframe
-      title={`HTML preview ${titleSuffix}: ${file.name}`}
-      srcDoc={file.content}
+      title={`عرض المحتوى: ${file.name}`}
+      srcDoc={iframeContent}
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
-      className="h-full w-full bg-white"
+      className={cn("h-full bg-white", fitMode === "fit" ? "w-full" : "w-[1200px] max-w-none")}
     />
   );
 
@@ -2345,54 +2447,63 @@ function HtmlSubmissionPreview({
       <section
         className={cn("rounded-lg border-[2px] border-ink/20 bg-white p-3 text-start", className)}
       >
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            <p className="text-sm font-bold">HTML preview</p>
+            <p className="text-sm font-bold">عرض بصري</p>
             <p className="truncate text-xs font-bold text-foreground/50">
-              {file.name} - {Math.max(1, Math.round(file.size / 1024))} KB
+              {visualSubmissionKindLabel(kind)} - {file.name} -{" "}
+              {Math.max(1, Math.round(file.size / 1024))} KB
             </p>
           </div>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setExpanded(true)}
+            onClick={() => {
+              setExpanded(true);
+              void requestLandscapeFullscreen();
+            }}
             className="border border-ink/20 bg-paper"
           >
             <Eye data-icon="inline-start" />
-            Open
+            عرض المحتوى
           </Button>
-        </div>
-        <div
-          className={cn(
-            "overflow-hidden rounded-md border border-ink/10 bg-white",
-            compact ? "h-44" : "h-72",
-          )}
-        >
-          {renderIframe("inline")}
         </div>
       </section>
 
       {expanded && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-ink/75 p-3 sm:p-5" dir="ltr">
-          <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-ink bg-white px-3 py-2">
+        <div className="fixed inset-0 z-50 flex flex-col bg-ink p-2 sm:p-3" dir="rtl">
+          <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-white/20 bg-white px-3 py-2">
             <div className="min-w-0">
               <p className="truncate text-sm font-bold">{file.name}</p>
-              <p className="text-xs text-foreground/55">Sandboxed HTML preview</p>
+              <p className="text-xs text-foreground/55">
+                عرض آمن داخل الموقع - {visualSubmissionKindLabel(kind)}
+              </p>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setExpanded(false)}
-              className="border border-ink/20 bg-paper"
-            >
-              <X data-icon="inline-start" />
-              Close
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setFitMode((current) => (current === "fit" ? "scroll" : "fit"))}
+                className="border border-ink/20 bg-paper"
+              >
+                {fitMode === "fit" ? "تمرير" : "ملاءمة"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={closeViewer}
+                className="border border-ink/20 bg-paper"
+              >
+                <X data-icon="inline-start" />
+                إغلاق
+              </Button>
+            </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-hidden rounded-lg border-[2px] border-ink bg-white">
-            {renderIframe("expanded")}
+          <div className="min-h-0 flex-1 overflow-auto rounded-lg border-[2px] border-white/40 bg-white">
+            {renderIframe()}
           </div>
         </div>
       )}
@@ -2455,6 +2566,7 @@ function MemberView({
   const [actionFeedback, setActionFeedback] = useState<Record<string, ActionFeedback>>({});
   const [documentationErrors, setDocumentationErrors] = useState<Record<string, string>>({});
   const [htmlUploadErrors, setHtmlUploadErrors] = useState<Record<string, string>>({});
+  const [visualCodeDrafts, setVisualCodeDrafts] = useState<Record<string, string>>({});
   const [seenMeetingIds, setSeenMeetingIds] = useState(() =>
     readSeenMeetingIds(activeMember.member.id),
   );
@@ -2820,7 +2932,7 @@ function MemberView({
 
   async function handleHtmlSubmissionFile(key: string, file?: File) {
     if (!file) {
-      setHtmlUploadErrors((current) => ({ ...current, [key]: "Choose one HTML file first." }));
+      setHtmlUploadErrors((current) => ({ ...current, [key]: "اختار ملف HTML أو SVG الأول." }));
       return;
     }
 
@@ -2833,7 +2945,9 @@ function MemberView({
 
     try {
       const content = await file.text();
-      const contentError = validateHtmlContent(content);
+      const kind =
+        visualSubmissionKindFromName(file.name) ?? visualSubmissionKindFromContent(content);
+      const contentError = validateHtmlContent(content, kind);
       if (contentError) {
         setHtmlUploadErrors((current) => ({ ...current, [key]: contentError }));
         onDraftHtmlFileChange(key, undefined);
@@ -2842,15 +2956,37 @@ function MemberView({
       onDraftHtmlFileChange(key, {
         name: file.name,
         size: htmlContentByteLength(content),
-        type: file.type || HTML_FILE_TYPE,
+        type: file.type || (kind === "svg" ? SVG_FILE_TYPE : HTML_FILE_TYPE),
         lastModified: file.lastModified,
         content,
+        kind,
       });
       setHtmlUploadErrors((current) => ({ ...current, [key]: "" }));
     } catch {
-      setHtmlUploadErrors((current) => ({ ...current, [key]: "Could not read this HTML file." }));
+      setHtmlUploadErrors((current) => ({ ...current, [key]: "تعذر قراءة الملف." }));
       onDraftHtmlFileChange(key, undefined);
     }
+  }
+
+  function handlePastedVisualCode(key: string) {
+    const fallbackValue =
+      (document.getElementById(`visual-code-${key}`) as HTMLTextAreaElement | null)?.value ?? "";
+    const content = normalizePastedVisualCode(visualCodeDrafts[key] || fallbackValue);
+    const kind = visualSubmissionKindFromContent(content);
+    const contentError = validateHtmlContent(content, kind);
+    if (contentError) {
+      setHtmlUploadErrors((current) => ({ ...current, [key]: contentError }));
+      return;
+    }
+    onDraftHtmlFileChange(key, {
+      name: visualSubmissionName(kind),
+      size: htmlContentByteLength(content),
+      type: kind === "svg" ? SVG_FILE_TYPE : HTML_FILE_TYPE,
+      lastModified: Date.now(),
+      content,
+      kind,
+    });
+    setHtmlUploadErrors((current) => ({ ...current, [key]: "" }));
   }
 
   function handleHtmlDrop(key: string, event: DragEvent<HTMLLabelElement>) {
@@ -2858,7 +2994,7 @@ function MemberView({
     if (event.dataTransfer.files.length > 1) {
       setHtmlUploadErrors((current) => ({
         ...current,
-        [key]: "Upload exactly one HTML file.",
+        [key]: "ارفع ملف واحد فقط.",
       }));
       onDraftHtmlFileChange(key, undefined);
       return;
@@ -2924,7 +3060,7 @@ function MemberView({
     return (
       <div className="mt-3 rounded-xl border-[2px] border-sky-200 bg-sky-50 p-3 text-sky-950">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <strong className="text-sm">HTML preview file</strong>
+          <strong className="text-sm">عرض بصري</strong>
           <span className="rounded-full border border-sky-300 bg-white px-2 py-0.5 text-xs font-bold">
             {htmlSubmissionModeLabel(mode)}
           </span>
@@ -2935,13 +3071,13 @@ function MemberView({
           className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-[2px] border-dashed border-sky-300 bg-white p-4 text-center text-sm font-bold"
         >
           <Upload className="size-5" />
-          <span>Drop one .html file here, or choose one</span>
+          <span>اسحب ملف HTML أو SVG هنا، أو اختاره</span>
           <span className="text-xs font-normal text-foreground/55">
-            Inline CSS/JavaScript is okay. CDN links are okay. Max 500 KB.
+            ملف واحد فقط. SVG مناسب للفلو الثابت، وHTML مناسب للتفاعل. الحد الأقصى 500 KB.
           </span>
           <input
             type="file"
-            accept=".html,.htm,text/html"
+            accept=".html,.htm,.svg,text/html,image/svg+xml"
             className="hidden"
             onChange={(event) => {
               void handleHtmlSubmissionFile(responseKeyValue, event.target.files?.[0]);
@@ -2949,10 +3085,51 @@ function MemberView({
             }}
           />
         </label>
+        <div className="mt-3 grid gap-2 rounded-lg border border-sky-200 bg-white p-3">
+          <label
+            className="text-xs font-bold text-sky-950"
+            htmlFor={`visual-code-${responseKeyValue}`}
+          >
+            أو الصق كود SVG/HTML
+          </label>
+          <textarea
+            id={`visual-code-${responseKeyValue}`}
+            value={visualCodeDrafts[responseKeyValue] ?? ""}
+            onChange={(event) =>
+              setVisualCodeDrafts((current) => ({
+                ...current,
+                [responseKeyValue]: event.target.value,
+              }))
+            }
+            onInput={(event) =>
+              setVisualCodeDrafts((current) => ({
+                ...current,
+                [responseKeyValue]: event.currentTarget.value,
+              }))
+            }
+            placeholder="الصق الكود هنا..."
+            className="min-h-28 resize-y rounded-md border border-sky-200 bg-sky-50/40 p-3 text-sm font-semibold outline-none focus:border-sky-500"
+            dir="ltr"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-foreground/55">هنكتشف النوع تلقائيًا: SVG أو HTML.</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => handlePastedVisualCode(responseKeyValue)}
+              className="border border-sky-300 bg-white"
+            >
+              استخدام الكود
+            </Button>
+          </div>
+        </div>
         {draftFile && (
           <div className="mt-3 grid gap-2">
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-200 bg-white px-3 py-2 text-xs font-bold">
-              <span className="min-w-0 truncate">{draftFile.name}</span>
+              <span className="min-w-0 truncate">
+                {visualSubmissionKindLabel(draftFile.kind)} - {draftFile.name}
+              </span>
               <Button
                 type="button"
                 variant="ghost"
@@ -2964,10 +3141,10 @@ function MemberView({
                 className="h-8 border border-red-100 bg-red-50 text-red-700"
               >
                 <X data-icon="inline-start" />
-                Remove
+                إزالة
               </Button>
             </div>
-            <HtmlSubmissionPreview file={draftFile} compact />
+            <HtmlSubmissionPreview file={draftFile} />
           </div>
         )}
         {error && <p className="mt-2 text-sm font-bold text-red-700">{error}</p>}
@@ -3042,7 +3219,7 @@ function MemberView({
                     className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-[2px] border-dashed border-sky-400 bg-white p-4 text-center text-sm font-bold text-sky-950 transition hover:border-sky-600 hover:bg-sky-50"
                   >
                     <Upload className="size-6" />
-                    <span>Drop a Word .docx file here, or choose one</span>
+                    <span>اسحب ملف Word .docx هنا، أو اختاره</span>
                     <input
                       type="file"
                       accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -3179,7 +3356,7 @@ function MemberView({
                   <div>
                     <h2 className="text-2xl font-bold">{task.title}</h2>
                     <p className="mt-1 text-sm text-foreground/60">
-                      {taskStatus(task)} | deadline {taskDeadlineLabel(task)}
+                      {[taskStatus(task), taskDeadlineMeta(task)].filter(Boolean).join(" | ")}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -3221,7 +3398,7 @@ function MemberView({
                   />
                 )}
                 {response?.htmlFile && (
-                  <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" compact />
+                  <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" />
                 )}
                 {progress.length > 0 && (
                   <div className="mt-3 grid gap-2">
@@ -3485,7 +3662,7 @@ function MemberView({
                         </div>
                       )}
                       {response.htmlFile && (
-                        <HtmlSubmissionPreview file={response.htmlFile} className="mt-2" compact />
+                        <HtmlSubmissionPreview file={response.htmlFile} className="mt-2" />
                       )}
                       {adminPreview && (
                         <Button
@@ -3792,21 +3969,23 @@ function MemberView({
                           )}
                           {htmlMode !== "off" && (
                             <>
-                              <span className="mx-1.5">HTML</span>
+                              <span className="mx-1.5">عرض بصري</span>
                               <span className="rounded-full border border-sky-700 bg-sky-50 px-2 py-0.5 text-sky-700">
                                 {htmlSubmissionModeLabel(htmlMode)}
                               </span>
                             </>
                           )}
                         </p>
-                        <div
-                          className="mb-2 flex w-full flex-wrap items-center justify-center gap-2 text-xs font-bold"
-                          dir="ltr"
-                        >
-                          <span className="rounded-full border-[2px] border-ink bg-white px-2.5 py-1">
-                            deadline: {taskDeadlineLabel(task)}
-                          </span>
-                        </div>
+                        {!isTechnicalTask(task) && (
+                          <div
+                            className="mb-2 flex w-full flex-wrap items-center justify-center gap-2 text-xs font-bold"
+                            dir="rtl"
+                          >
+                            <span className="rounded-full border-[2px] border-ink bg-white px-2.5 py-1">
+                              {taskDeadlineMeta(task)}
+                            </span>
+                          </div>
+                        )}
                         <h2
                           className={cn(
                             "text-lg font-bold leading-tight sm:text-xl",
@@ -4055,7 +4234,7 @@ function MemberView({
                               return;
                             }
                             if (htmlMode === "required" && !draftHtmlFile) {
-                              blockMemberAction(key, ["HTML file"]);
+                              blockMemberAction(key, ["عرض بصري"]);
                               return;
                             }
                             markTaskSeen(task.id);
@@ -4391,11 +4570,11 @@ function structuredTextTitle(text: string, index: number) {
 function buildTaskCopyText(task: StudioTask, updates: TaskAnnouncement[]) {
   const parts = [
     `Task: ${task.title}`,
-    `Deadline: ${taskDeadlineLabel(task)}`,
+    taskDeadlineMeta(task, "الموعد النهائي"),
     `Points: ${sanitizePositiveNumber(task.points, 1)}`,
     "",
     cleanTextForMember(task.question),
-  ];
+  ].filter((part) => part !== "");
 
   if (updates.length > 0) {
     parts.push(
@@ -5302,6 +5481,7 @@ function AdminView({
       question: string;
       points: string;
       taskType: TaskType;
+      htmlSubmissionMode: HtmlSubmissionMode;
       status: "active" | "hidden" | "archived";
       scope: "all" | "member";
       memberIds: string[];
@@ -5381,8 +5561,9 @@ function AdminView({
                 <div className="min-w-0">
                   <div className="break-words text-lg font-bold">{task.title}</div>
                   <div className="mt-1 text-xs text-foreground/55">
-                    {taskAudienceLabel(task)} | {task.points || 1} pts | deadline{" "}
-                    {taskDeadlineLabel(task)}
+                    {[taskAudienceLabel(task), `${task.points || 1} pts`, taskDeadlineMeta(task)]
+                      .filter(Boolean)
+                      .join(" | ")}
                   </div>
                 </div>
                 <span className="shrink-0 rounded-full border border-ink/10 bg-paper px-2 py-1 text-xs font-bold">
@@ -5554,8 +5735,13 @@ function AdminView({
                 <div className="min-w-0">
                   <div className="break-words text-lg font-bold">{task.title}</div>
                   <div className="mt-1 text-xs text-foreground/55">
-                    {taskStatus(task)} | {assignedMembers(task).length} members | deadline{" "}
-                    {taskDeadlineLabel(task)}
+                    {[
+                      taskStatus(task),
+                      `${assignedMembers(task).length} members`,
+                      taskDeadlineMeta(task),
+                    ]
+                      .filter(Boolean)
+                      .join(" | ")}
                   </div>
                 </div>
                 <span className="shrink-0 rounded-full border border-red-200 bg-white px-2 py-1 text-xs font-bold text-red-700">
@@ -5618,7 +5804,7 @@ function AdminView({
             </div>
             <h2 className="mt-2 break-words text-2xl font-bold">{task.title}</h2>
             <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
-              <span>Deadline {taskDeadlineLabel(task)}</span>
+              {taskDeadlineMeta(task) && <span>{taskDeadlineMeta(task)}</span>}
               <span>{sanitizePositiveNumber(task.points, 1)} points</span>
               <span>{responses.length} submitted solutions</span>
             </div>
@@ -5838,11 +6024,11 @@ function AdminView({
                     />
                   ) : (
                     <p className="mt-3 rounded-md border border-ink/10 bg-white p-2 text-sm font-bold text-foreground/45">
-                      No written answer.
+                      لا توجد إجابة مكتوبة.
                     </p>
                   )}
                   {response.htmlFile && (
-                    <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" compact />
+                    <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" />
                   )}
 
                   {response.status === "approved" && (
@@ -5995,9 +6181,9 @@ function AdminView({
             />
             <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-foreground/55">
               <span>Start: {formatDateTime(task.startAt)}</span>
-              <span>Deadline: {taskDeadlineLabel(task)}</span>
+              {taskDeadlineMeta(task) && <span>{taskDeadlineMeta(task)}</span>}
               <span>{task.points || 1} points</span>
-              <span>{htmlSubmissionModeLabel(htmlSubmissionMode(task))}</span>
+              <span>عرض بصري: {htmlSubmissionModeLabel(htmlSubmissionMode(task))}</span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -6072,23 +6258,23 @@ function AdminView({
 
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           <DateTimeField
-            label="Start"
+            label="البداية"
             value={toDateTimeInputValue(task.startAt)}
             onChange={(value) => onUpdateTask(task.id, { startAt: fromDateTimeInputValue(value) })}
-            help="Start controls when this assignment opens."
+            help="وقت ظهور التاسك للأعضاء."
           />
           {isTechnicalTask(task) ? (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
-              Technical task: no deadline, no late penalty, no hard lock.
+              التاسك التقني بدون موعد نهائي أو خصم تأخير.
             </div>
           ) : (
             <DateTimeField
-              label="Deadline"
+              label="الموعد النهائي"
               value={toDateTimeInputValue(task.deadlineAt)}
               onChange={(value) =>
                 onUpdateTask(task.id, { deadlineAt: fromDateTimeInputValue(value) })
               }
-              help="After deadline: default half score. After double time: locked unless overridden."
+              help="بعد الموعد: نصف الدرجة افتراضيًا. بعد ضعف المدة: يحتاج override."
               tone="deadline"
             />
           )}
@@ -6130,7 +6316,7 @@ function AdminView({
               ))}
             </div>
             <div className="grid gap-1 text-xs font-bold text-foreground/65">
-              HTML preview
+              عرض بصري
               <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
                 {(["off", "optional", "required"] as const).map((mode) => (
                   <button
@@ -6144,7 +6330,7 @@ function AdminView({
                         : "text-foreground/65 hover:bg-paper",
                     )}
                   >
-                    {mode}
+                    {htmlSubmissionModeLabel(mode)}
                   </button>
                 ))}
               </div>
@@ -6630,10 +6816,10 @@ function AdminView({
                     {response.answer ? (
                       <StructuredTextBlock text={response.answer} forceCollapse />
                     ) : (
-                      <p className="text-sm font-bold text-foreground/45">No written answer.</p>
+                      <p className="text-sm font-bold text-foreground/45">لا توجد إجابة مكتوبة.</p>
                     )}
                     {response.htmlFile && (
-                      <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" compact />
+                      <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" />
                     )}
                     <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
                       <span className="rounded-full border border-ink/10 bg-white px-2 py-1">
@@ -6682,8 +6868,7 @@ function AdminView({
                         className="border border-ink/20 bg-white"
                       />
                       <span className="font-normal text-foreground/55">
-                        You can award bonus above the task points. Default follows the deadline
-                        rule.
+                        يمكن إضافة Bonus فوق درجة التاسك. الدرجة الافتراضية تتبع قاعدة الموعد.
                       </span>
                     </label>
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -7197,7 +7382,7 @@ function AdminView({
                 <div>
                   <strong>{task.title}</strong>
                   <div className="text-xs text-foreground/55">
-                    {taskStatus(task)} | deadline {taskDeadlineLabel(task)}
+                    {[taskStatus(task), taskDeadlineMeta(task)].filter(Boolean).join(" | ")}
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -7243,7 +7428,7 @@ function AdminView({
                     />
                   )}
                   {response?.htmlFile && (
-                    <HtmlSubmissionPreview file={response.htmlFile} className="mt-2" compact />
+                    <HtmlSubmissionPreview file={response.htmlFile} className="mt-2" />
                   )}
                 </>
               )}
@@ -7329,11 +7514,11 @@ function AdminView({
                     />
                   ) : (
                     <p className="mt-3 rounded-md border border-ink/10 bg-white p-2 text-sm font-bold text-foreground/45">
-                      No written answer.
+                      لا توجد إجابة مكتوبة.
                     </p>
                   )}
                   {response.htmlFile && (
-                    <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" compact />
+                    <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" />
                   )}
 
                   <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_120px_auto_auto]">
@@ -7990,7 +8175,7 @@ function AdminView({
                       ))}
                     </div>
                     <div className="grid gap-1 text-xs font-bold text-foreground/65">
-                      HTML preview
+                      عرض بصري
                       <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
                         {(["off", "optional", "required"] as const).map((mode) => (
                           <button
@@ -8004,7 +8189,7 @@ function AdminView({
                                 : "text-foreground/65 hover:bg-paper",
                             )}
                           >
-                            {mode}
+                            {htmlSubmissionModeLabel(mode)}
                           </button>
                         ))}
                       </div>
@@ -8066,34 +8251,33 @@ function AdminView({
                     </div>
                     <div className="grid gap-2">
                       <DateTimeField
-                        label="Start"
+                        label="البداية"
                         value={taskStartAt}
                         onChange={setTaskStartAt}
-                        help="Start controls when the task opens."
+                        help="وقت ظهور التاسك للأعضاء."
                       />
                       {taskType === "technical" ? (
                         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
-                          Technical tasks have no deadline. They stay open until you review or
-                          archive them.
+                          التاسكات التقنية بدون موعد نهائي. تفضل مفتوحة لحد المراجعة أو الأرشفة.
                         </div>
                       ) : (
                         <DateTimeField
-                          label="Deadline"
+                          label="الموعد النهائي"
                           value={taskDeadlineAt}
                           onChange={setTaskDeadlineAt}
-                          help="After deadline: default half score. After double time: locked unless overridden."
+                          help="بعد الموعد: نصف الدرجة افتراضيًا. بعد ضعف المدة: يحتاج override."
                           tone="deadline"
                         />
                       )}
                     </div>
                     {taskType === "technical" ? (
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold leading-5 text-emerald-900">
-                        Technical tasks do not use deadlines, late penalties, or hard locks.
+                        التاسكات التقنية لا تستخدم موعد نهائي أو خصم تأخير أو قفل تلقائي.
                       </div>
                     ) : (
                       <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs leading-5 text-yellow-900">
-                        Deadline rule: late submissions default to half score. Submissions after
-                        double the task window require override approval.
+                        قاعدة الموعد: التسليم المتأخر يأخذ نصف الدرجة افتراضيًا، وبعد ضعف مدة التاسك
+                        يحتاج موافقة override.
                       </div>
                     )}
                     <Button
@@ -8900,11 +9084,11 @@ function LegacyAdminView({
                           <StructuredTextBlock text={item.answer} forceCollapse className="mt-2" />
                         ) : (
                           <p className="mt-2 text-sm font-bold text-foreground/45">
-                            No written answer.
+                            لا توجد إجابة مكتوبة.
                           </p>
                         )}
                         {item.htmlFile && (
-                          <HtmlSubmissionPreview file={item.htmlFile} className="mt-3" compact />
+                          <HtmlSubmissionPreview file={item.htmlFile} className="mt-3" />
                         )}
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button
@@ -9317,7 +9501,7 @@ function LegacyAdminView({
                             <StructuredTextBlock text={response.answer} forceCollapse />
                           ) : (
                             <p className="text-sm font-bold text-foreground/45">
-                              No written answer.
+                              لا توجد إجابة مكتوبة.
                             </p>
                           )}
                           {response.htmlFile && (
@@ -9935,7 +10119,7 @@ function StatsView({
               </small>
             </div>
             <div className="stats-attention-card is-soft">
-              <span>أقرب Deadline</span>
+              <span>أقرب موعد</span>
               <strong dir={nextDeadlineTask ? textDirection(nextDeadlineTask.title) : "rtl"}>
                 {nextDeadlineTask?.title ?? "مفيش"}
               </strong>
@@ -9983,7 +10167,9 @@ function StatsView({
                           {metric.task.title}
                         </h3>
                         <p>
-                          الموعد النهائي: {taskDeadlineLabel(metric.task)} •{" "}
+                          {taskDeadlineMeta(metric.task)
+                            ? `${taskDeadlineMeta(metric.task)} • `
+                            : ""}
                           {formatTaskPointsLabel(metric.task.points || 1)}
                         </p>
                       </div>
@@ -10622,7 +10808,9 @@ function DeanStatsView({
                           {metric.task.title}
                         </h3>
                         <p>
-                          deadline: {taskDeadlineLabel(metric.task)} •{" "}
+                          {taskDeadlineMeta(metric.task)
+                            ? `${taskDeadlineMeta(metric.task)} • `
+                            : ""}
                           {formatTaskPointsLabel(metric.task.points || 1)}
                         </p>
                       </div>
@@ -11635,7 +11823,7 @@ function Index() {
         memberId: item.memberId,
         taskId: item.taskId,
         source: "submission",
-        text: item.answer || item.htmlFile?.name || "Submitted without a written answer.",
+        text: item.answer || item.htmlFile?.name || "تم التسليم بدون إجابة مكتوبة.",
       });
       setData(appendRepoUpdateIfMissing(nextData, repoUpdate));
       setIsDirty(false);

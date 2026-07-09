@@ -31,6 +31,7 @@ type StudioTask = {
 
 type TaskType = "technical" | "nonTechnical" | "problem";
 type HtmlSubmissionMode = "off" | "optional" | "required";
+type VisualSubmissionKind = "html" | "svg";
 
 type HtmlSubmissionFile = {
   name: string;
@@ -38,6 +39,7 @@ type HtmlSubmissionFile = {
   type: string;
   lastModified: number;
   content: string;
+  kind?: VisualSubmissionKind;
 };
 
 type TaskResponse = {
@@ -223,8 +225,9 @@ const jsonHeaders = (env: Env, status = 200) => ({
 });
 const DOCUMENTATION_POINTS = 1;
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const HTML_FILE_MAX_BYTES = 500 * 1024;
+const VISUAL_FILE_MAX_BYTES = 500 * 1024;
 const HTML_FILE_TYPE = "text/html";
+const SVG_FILE_TYPE = "image/svg+xml";
 
 function json(env: Env, body: unknown, status = 200) {
   return new Response(JSON.stringify(body), jsonHeaders(env, status));
@@ -270,31 +273,74 @@ function htmlContentByteLength(value: string) {
   return new TextEncoder().encode(value).byteLength;
 }
 
-function isHtmlFileName(name: string) {
+function visualSubmissionKindFromName(name: string): VisualSubmissionKind | undefined {
   const lowerName = name.trim().toLowerCase();
-  return lowerName.endsWith(".html") || lowerName.endsWith(".htm");
+  if (lowerName.endsWith(".svg")) return "svg";
+  if (lowerName.endsWith(".html") || lowerName.endsWith(".htm")) return "html";
+  return undefined;
 }
 
-function isHtmlMime(type?: string) {
-  return !type || type === HTML_FILE_TYPE;
+function visualSubmissionKindFromContent(content: string): VisualSubmissionKind {
+  const trimmed = content.trim().toLowerCase();
+  if (trimmed.startsWith("<svg") || trimmed.includes("<svg")) return "svg";
+  return "html";
+}
+
+function isVisualMime(type: string | undefined, kind: VisualSubmissionKind) {
+  if (!type) return true;
+  if (kind === "svg") return type === SVG_FILE_TYPE || type === "text/plain" || type === "text/xml";
+  return type === HTML_FILE_TYPE || type === "text/plain";
+}
+
+function visualSubmissionName(kind: VisualSubmissionKind) {
+  return kind === "svg" ? "flow.svg" : "flow.html";
+}
+
+function normalizePastedVisualCode(value: string) {
+  const trimmed = value.trim();
+  const fenced = trimmed.match(/^```(?:html|svg|xml)?\s*([\s\S]*?)\s*```$/i);
+  return (fenced?.[1] ?? trimmed).trim();
+}
+
+function validateVisualSubmissionContent(content: string, kind: VisualSubmissionKind) {
+  const trimmed = content.trim();
+  const lowerContent = trimmed.toLowerCase();
+  if (!trimmed) throw new Error("Visual content is empty.");
+  if (kind === "svg" && !lowerContent.includes("<svg")) {
+    throw new Error("SVG content must include an <svg> element.");
+  }
+  if (
+    kind === "html" &&
+    !lowerContent.startsWith("<!doctype html") &&
+    !lowerContent.includes("<html")
+  ) {
+    throw new Error("HTML content must be a complete HTML document.");
+  }
 }
 
 function cleanHtmlSubmissionFile(file?: Partial<HtmlSubmissionFile>) {
   if (!file) return undefined;
   const name = String(file.name ?? "").trim();
-  const type = String(file.type ?? HTML_FILE_TYPE);
-  const content = String(file.content ?? "");
-  if (!isHtmlFileName(name)) throw new Error("Only one .html or .htm file is accepted.");
-  if (!isHtmlMime(type)) throw new Error("The HTML preview must be a text/html file.");
-  if (!content.trim()) throw new Error("HTML file is empty.");
+  const content = normalizePastedVisualCode(String(file.content ?? ""));
+  const nameKind = visualSubmissionKindFromName(name);
+  const kind =
+    file.kind === "svg" || file.kind === "html"
+      ? file.kind
+      : (nameKind ?? visualSubmissionKindFromContent(content));
+  const type = String(file.type || (kind === "svg" ? SVG_FILE_TYPE : HTML_FILE_TYPE));
+  if (name && (!nameKind || nameKind !== kind))
+    throw new Error("Only one HTML or SVG file is accepted.");
+  if (!isVisualMime(type, kind)) throw new Error("The visual file type is not accepted.");
+  validateVisualSubmissionContent(content, kind);
   const size = htmlContentByteLength(content);
-  if (size > HTML_FILE_MAX_BYTES) throw new Error("HTML file must be 500 KB or smaller.");
+  if (size > VISUAL_FILE_MAX_BYTES) throw new Error("Visual content must be 500 KB or smaller.");
   return {
-    name,
+    name: name || visualSubmissionName(kind),
     size,
-    type: type || HTML_FILE_TYPE,
+    type,
     lastModified: nonNegativeNumber(file.lastModified, 0),
     content,
+    kind,
   };
 }
 
@@ -1075,11 +1121,11 @@ export default {
           const htmlMode = htmlSubmissionMode(task);
           if (taskType === "problem" && !answer) throw new Error("Problem answer is required.");
           if (htmlMode === "off" && item.htmlFile) {
-            throw new Error("This task does not accept HTML preview files.");
+            throw new Error("This task does not accept visual submissions.");
           }
           const htmlFile = htmlMode === "off" ? undefined : cleanHtmlSubmissionFile(item.htmlFile);
           if (htmlMode === "required" && !htmlFile) {
-            throw new Error("HTML preview file is required for this task.");
+            throw new Error("A visual submission is required for this task.");
           }
           const previous = data.responses[task.id]?.[member.id];
           if (previous && previous.status !== "rejected") {
