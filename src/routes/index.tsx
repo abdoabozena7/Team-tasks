@@ -21,6 +21,7 @@ import {
   Check,
   ChevronDown,
   ClipboardList,
+  Clock3,
   Copy,
   Crown,
   ExternalLink,
@@ -11603,6 +11604,24 @@ function DeanStatsView({
     meetingExpectedTotal > 0 ? Math.round((meetingAttendedTotal / meetingExpectedTotal) * 100) : 0;
   const visibleMemberRows = visibleStats.slice(0, 8);
   const deliverySummary = expectedTotal > 0 ? `${receivedTotal}/${expectedTotal}` : "No target";
+  const seenExpectedTotal = visibleStats.reduce((sum, item) => sum + item.expectedSeenTargets, 0);
+  const seenTotal = visibleStats.reduce((sum, item) => sum + item.seenTargets, 0);
+  const teamSeenRate =
+    seenExpectedTotal > 0 ? Math.round((seenTotal / seenExpectedTotal) * 100) : 100;
+  const totalUpdates = stats.taskMetrics.reduce((sum, item) => sum + item.progressUpdates, 0);
+  const topReactionMember =
+    [...visibleStats]
+      .filter((item) => item.expectedSeenTargets > 0)
+      .sort((a, b) => {
+        if (b.interactionScore !== a.interactionScore)
+          return b.interactionScore - a.interactionScore;
+        return b.seenTargets - a.seenTargets;
+      })[0] ?? stats.leader;
+  const pulseAvailable =
+    stats.meetingMetrics.length > 0 ||
+    seenExpectedTotal > 0 ||
+    totalUpdates > 0 ||
+    stats.pendingTotal > 0;
 
   return (
     <div className="stats-page min-h-screen text-foreground" dir="ltr">
@@ -11634,18 +11653,19 @@ function DeanStatsView({
                 <LogOut className="size-5" />
               </Button>
             </div>
-            <p className="mt-4 text-lg leading-8 text-foreground/70">
-              A fast command view for team delivery, acceptance, scores, meetings, and risk.
-            </p>
-            <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+            <div className="stats-hero-insights">
               <span className={`stats-health-pill ${healthTone}`}>{teamHealthLabel}</span>
-              <span className="stats-soft-pill">
+              <span className="stats-soft-pill is-members">
                 <Users className="size-4" />
-                {activeMemberCount} active members
+                {activeMemberCount} members
               </span>
-              <span className="stats-soft-pill">
-                <ListChecks className="size-4" />
-                {activeTasks.length} active tasks
+              <span className="stats-soft-pill is-review">
+                <Clock3 className="size-4" />
+                {stats.pendingTotal} in review
+              </span>
+              <span className="stats-soft-pill is-seen">
+                <Eye className="size-4" />
+                {teamSeenRate}% seen
               </span>
             </div>
           </div>
@@ -11660,10 +11680,7 @@ function DeanStatsView({
               <VisualMetric label="active members" value={activeMemberCount} />
               <VisualMetric label="active tasks" value={activeTasks.length} />
               <VisualMetric label="submitted" value={deliverySummary} />
-              <VisualMetric
-                label="acceptance / points"
-                value={`${teamApprovalRate}% / ${totalPoints}`}
-              />
+              <VisualMetric label="total points" value={totalPoints} />
             </div>
           </div>
         </header>
@@ -11676,7 +11693,7 @@ function DeanStatsView({
             <Bell className="size-5" />
             <div>
               <h2>Executive signals</h2>
-              <p>The four quickest signals for the whole team.</p>
+              <p>Six quick signals for delivery, points, reactions, and review load.</p>
             </div>
           </div>
           <div className="stats-attention-grid">
@@ -11713,41 +11730,74 @@ function DeanStatsView({
               </strong>
               <small>{topPointsMember ? `${topPointsMember.points} points` : "0 points"}</small>
             </div>
+            <div className="stats-attention-card is-calm">
+              <span>Fast reactions</span>
+              <strong>
+                {topReactionMember ? memberDisplayName(topReactionMember.member) : "None"}
+              </strong>
+              <small>
+                {topReactionMember
+                  ? `${formatPercent(topReactionMember.interactionScore)} seen score`
+                  : "0%"}
+              </small>
+            </div>
+            <div
+              className={cn("stats-attention-card", stats.pendingTotal > 0 ? "is-warn" : "is-calm")}
+            >
+              <span>Review queue</span>
+              <strong>{stats.pendingTotal}</strong>
+              <small>{totalUpdates} updates logged</small>
+            </div>
           </div>
         </section>
 
-        {stats.meetingMetrics.length > 0 && (
+        {pulseAvailable && (
           <section className="stats-panel stats-meetings-panel stats-appear">
             <div className="stats-section-head">
               <div>
                 <h2>
-                  <span className="highlight-yellow">Meeting pulse</span>
+                  <span className="highlight-yellow">Team pulse</span>
                 </h2>
-                <p>Attendance, coverage, and meeting score in one compact scan.</p>
+                <p>Attendance, seen reactions, updates, and review load in one scan.</p>
               </div>
               <span className="stats-count-pill">
                 <CalendarClock className="size-4" />
                 {activeMeetings.length} meetings
               </span>
             </div>
+            <div className="stats-pulse-strip">
+              <VisualMetric label="attendance" value={`${meetingPulseRate}%`} />
+              <VisualMetric label="seen reactions" value={`${teamSeenRate}%`} />
+              <VisualMetric label="updates" value={totalUpdates} />
+              <VisualMetric label="review queue" value={stats.pendingTotal} />
+            </div>
             <div className="stats-meeting-summary">
-              <AnimatedProgressRing
-                value={meetingPulseRate}
-                label="Meeting attendance"
-                caption="attendance"
-              />
+              <AnimatedProgressRing value={meetingPulseRate} label="Attendance" caption="attend" />
               <div className="stats-meeting-lines">
-                <div className="stats-meeting-row is-summary">
+                <div className="stats-meeting-row is-summary is-attendance">
                   <div>
-                    <strong>{meetingPulseRate}% overall attendance</strong>
+                    <strong>{meetingPulseRate}% attendance</strong>
                     <span>
-                      {meetingAttendedTotal}/{meetingExpectedTotal} recorded attendance
+                      {meetingAttendedTotal}/{meetingExpectedTotal} recorded
                     </span>
                   </div>
                   <div className="stats-mini-meter" aria-label={`${meetingPulseRate}% attendance`}>
                     <span style={{ width: `${meetingPulseRate}%` }} />
                   </div>
                 </div>
+                {seenExpectedTotal > 0 && (
+                  <div className="stats-meeting-row is-summary is-seen">
+                    <div>
+                      <strong>{teamSeenRate}% seen reactions</strong>
+                      <span>
+                        {seenTotal}/{seenExpectedTotal} tasks, updates, and meetings seen
+                      </span>
+                    </div>
+                    <div className="stats-mini-meter" aria-label={`${teamSeenRate}% seen`}>
+                      <span style={{ width: `${teamSeenRate}%` }} />
+                    </div>
+                  </div>
+                )}
                 {stats.meetingMetrics.map((item) => {
                   const attendanceRate =
                     item.expected > 0 ? Math.round((item.attended / item.expected) * 100) : 0;
@@ -11822,7 +11872,7 @@ function DeanStatsView({
                       </div>
                       <div className="stats-task-score">
                         <strong>
-                          {hasTaskTarget ? `${metric.received}/${metric.expected}` : "No target"}
+                          {hasTaskTarget ? `${metric.received}/${metric.expected}` : "0"}
                         </strong>
                         <span>{hasTaskTarget ? "sent" : "assigned"}</span>
                       </div>
