@@ -1171,6 +1171,14 @@
   },
   "interactions": [
     {
+      "id": "abozena:taskUpdate:task-update-task-1783008997895-1783540802552",
+      "memberId": "abozena",
+      "targetType": "taskUpdate",
+      "targetId": "task-update-task-1783008997895-1783540802552",
+      "taskId": "task-1783008997895",
+      "seenAt": "2026-07-09T00:43:26.250Z"
+    },
+    {
       "id": "abozena:taskUpdate:task-update-task-1783008997895-1783540577503",
       "memberId": "abozena",
       "targetType": "taskUpdate",
@@ -1996,6 +2004,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-09T00:43:23.992Z"
+    "updatedAt": "2026-07-09T00:43:26.250Z"
   }
 }
