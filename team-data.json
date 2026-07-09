@@ -1078,6 +1078,20 @@
       }
     }
   },
+  "clarificationRequests": [
+    {
+      "id": "clarification-task-1783557868998-1783612759122",
+      "taskId": "task-1783557868998",
+      "title": "وصلت لايه",
+      "description": "الاماكن الي دورت فيها",
+      "memberIds": [
+        "abozena"
+      ],
+      "createdAt": "2026-07-09T15:59:19.122Z",
+      "status": "active"
+    }
+  ],
+  "clarificationResponses": {},
   "taskSkips": {},
   "progressUpdates": {
     "task-1783176442116": [
@@ -2049,6 +2063,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-09T09:56:59.552Z"
+    "updatedAt": "2026-07-09T15:59:19.122Z"
   }
 }
