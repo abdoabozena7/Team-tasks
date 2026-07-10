@@ -303,7 +303,7 @@
       "createdAt": "2026-07-04T14:47:22.116Z",
       "startAt": "2026-07-04T14:46:00.000Z",
       "deadlineAt": "2026-07-05T14:46:00.000Z",
-      "status": "active",
+      "status": "archived",
       "htmlSubmissionMode": "off"
     },
     {
@@ -2148,6 +2148,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-10T01:20:14.101Z"
+    "updatedAt": "2026-07-10T01:21:14.699Z"
   }
 }
