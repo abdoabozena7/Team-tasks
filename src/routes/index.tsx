@@ -24,6 +24,7 @@ import {
   Clock3,
   Copy,
   Crown,
+  Download,
   ExternalLink,
   Eye,
   EyeOff,
@@ -109,11 +110,20 @@ type HtmlSubmissionFile = {
   kind?: VisualSubmissionKind;
 };
 
+type WordSubmissionFile = {
+  name: string;
+  size: number;
+  type: string;
+  lastModified: number;
+  contentBase64: string;
+};
+
 type TaskResponse = {
   memberId: string;
   memberName: string;
   answer: string;
   htmlFile?: HtmlSubmissionFile;
+  wordFile?: WordSubmissionFile;
   status: "submitted" | "approved" | "rejected";
   submittedAt: string;
   reviewedAt?: string;
@@ -249,6 +259,7 @@ type QueuedSubmission = {
   memberName: string;
   answer: string;
   htmlFile?: HtmlSubmissionFile;
+  wordFile?: WordSubmissionFile;
   submittedAt: string;
 };
 
@@ -465,6 +476,7 @@ const HIVO_QUEUE_URL = `${HIVO_API_URL}/api`;
 const DOCUMENTATION_POINTS = 1;
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const VISUAL_FILE_MAX_BYTES = 500 * 1024;
+const WORD_FILE_MAX_BYTES = 2 * 1024 * 1024;
 const HTML_FILE_TYPE = "text/html";
 const SVG_FILE_TYPE = "image/svg+xml";
 const HIVO_LOGO_SRC = `${import.meta.env.BASE_URL}hivo.png?v=3`;
@@ -973,8 +985,10 @@ function sanitizeData(data: StudioData): StudioData {
         Object.fromEntries(
           Object.entries(taskResponses ?? {}).map(([memberId, response]) => {
             const htmlFile = sanitizeHtmlSubmissionFile(response.htmlFile);
+            const wordFile = sanitizeWordSubmissionFile(response.wordFile);
             const responseFields = { ...response };
             delete responseFields.htmlFile;
+            delete responseFields.wordFile;
             return [
               memberId,
               {
@@ -987,6 +1001,7 @@ function sanitizeData(data: StudioData): StudioData {
                     ? response.status
                     : "submitted",
                 ...(htmlFile ? { htmlFile } : {}),
+                ...(wordFile ? { wordFile } : {}),
               },
             ];
           }),
@@ -1556,6 +1571,175 @@ function memberDocumentationRequests(data: StudioData, memberId: string) {
 
 function isDocxFile(file: File) {
   return file.name.toLowerCase().endsWith(".docx") || file.type === DOCX_MIME;
+}
+
+function base64ByteLength(value: string) {
+  const normalized = value.replace(/\s+/g, "");
+  if (!normalized || normalized.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) {
+    return 0;
+  }
+  try {
+    return window.atob(normalized).length;
+  } catch {
+    return 0;
+  }
+}
+
+function sanitizeWordSubmissionFile(file?: Partial<WordSubmissionFile>) {
+  if (!file) return undefined;
+  const name = String(file.name ?? "").trim();
+  const type = String(file.type ?? "");
+  const contentBase64 = String(file.contentBase64 ?? "").replace(/\s+/g, "");
+  const decodedSize = base64ByteLength(contentBase64);
+  const size = sanitizeNumber(file.size) || decodedSize;
+  if (!name.toLowerCase().endsWith(".docx")) return undefined;
+  if (type && type !== DOCX_MIME && type !== "application/octet-stream") return undefined;
+  if (!contentBase64 || decodedSize === 0 || decodedSize > WORD_FILE_MAX_BYTES) return undefined;
+  if (size > WORD_FILE_MAX_BYTES || Math.abs(size - decodedSize) > 16) return undefined;
+  let signature = "";
+  try {
+    signature = window.atob(contentBase64).slice(0, 2);
+  } catch {
+    return undefined;
+  }
+  if (signature !== "PK") return undefined;
+  return {
+    name,
+    size: decodedSize,
+    type: type || DOCX_MIME,
+    lastModified: sanitizeNumber(file.lastModified),
+    contentBase64,
+  };
+}
+
+async function wordSubmissionFileFromFile(file: File) {
+  if (!isDocxFile(file)) throw new Error("Only Word .docx files are accepted.");
+  if (file.size > WORD_FILE_MAX_BYTES) throw new Error("Word files must be 2 MB or smaller.");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return {
+    name: file.name,
+    size: file.size,
+    type: file.type || DOCX_MIME,
+    lastModified: file.lastModified,
+    contentBase64: window.btoa(binary),
+  } satisfies WordSubmissionFile;
+}
+
+function downloadWordSubmission(file: WordSubmissionFile) {
+  const binary = window.atob(file.contentBase64);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: file.type || DOCX_MIME }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = file.name;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function WordFileCard({ file, compact = false }: { file: WordSubmissionFile; compact?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5",
+        compact ? "text-xs" : "text-sm",
+      )}
+    >
+      <div className="min-w-0">
+        <p className="truncate font-bold text-amber-950">{file.name}</p>
+        <p className="text-foreground/55">Word · {Math.max(1, Math.round(file.size / 1024))} KB</p>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => downloadWordSubmission(file)}
+        className="shrink-0 border border-amber-300 bg-white text-amber-950"
+      >
+        <Download data-icon="inline-start" />
+        تنزيل
+      </Button>
+    </div>
+  );
+}
+
+function WordSubmissionPicker({
+  file,
+  onChange,
+  disabled = false,
+}: {
+  file?: WordSubmissionFile;
+  onChange: (file?: WordSubmissionFile) => void;
+  disabled?: boolean;
+}) {
+  const [error, setError] = useState("");
+
+  async function selectFile(nextFile?: File) {
+    if (!nextFile) return;
+    try {
+      const next = await wordSubmissionFileFromFile(nextFile);
+      onChange(next);
+      setError("");
+    } catch (reason) {
+      onChange(undefined);
+      setError(reason instanceof Error ? reason.message : "Invalid Word file.");
+    }
+  }
+
+  return (
+    <div className="grid gap-2 rounded-xl border-[2px] border-amber-200 bg-amber-50/70 p-2 text-amber-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <strong className="text-sm">ملف Word</strong>
+          <p className="text-xs text-foreground/55">اختياري · ملف .docx واحد · حتى 2 MB</p>
+        </div>
+        {file && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onChange(undefined)}
+            disabled={disabled}
+            className="border border-amber-300 bg-white"
+          >
+            إزالة
+          </Button>
+        )}
+      </div>
+      {file ? (
+        <WordFileCard file={file} compact />
+      ) : (
+        <label
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            void selectFile(event.dataTransfer.files?.[0]);
+          }}
+          className={cn(
+            "flex min-h-16 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-amber-400 bg-white px-3 py-3 text-center text-sm font-bold transition hover:bg-amber-100",
+            disabled && "pointer-events-none opacity-50",
+          )}
+        >
+          <FileText className="size-5" />
+          اسحب ملف Word هنا أو اختاره
+          <input
+            type="file"
+            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            className="sr-only"
+            disabled={disabled}
+            onChange={(event) => {
+              void selectFile(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
+        </label>
+      )}
+      {error && <p className="text-xs font-bold text-red-700">{error}</p>}
+    </div>
+  );
 }
 
 function documentationFileMetadata(file: File): DocumentationFileMetadata {
@@ -2879,10 +3063,12 @@ function MemberView({
   stats,
   draftAnswers,
   draftHtmlFiles,
+  draftWordFiles,
   sentState,
   refreshStatus,
   onDraftChange,
   onDraftHtmlFileChange,
+  onDraftWordFileChange,
   isSubmitting,
   onSubmitFinal,
   onSubmitClarification,
@@ -2901,10 +3087,12 @@ function MemberView({
   stats: ReturnType<typeof createStats>;
   draftAnswers: Record<string, string>;
   draftHtmlFiles: Record<string, HtmlSubmissionFile | undefined>;
+  draftWordFiles: Record<string, WordSubmissionFile | undefined>;
   sentState: Record<string, string>;
   refreshStatus: string;
   onDraftChange: (key: string, value: string) => void;
   onDraftHtmlFileChange: (key: string, file?: HtmlSubmissionFile) => void;
+  onDraftWordFileChange: (key: string, file?: WordSubmissionFile) => void;
   isSubmitting: boolean;
   onSubmitFinal: (task: StudioTask) => boolean | Promise<boolean>;
   onSubmitClarification: (
@@ -3613,6 +3801,7 @@ function MemberView({
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-bold">
                   <span>اتقبل واتحسبت {partValue} درجة.</span>
                   {response.htmlFile && <HtmlSubmissionPreview file={response.htmlFile} compact />}
+                  {response.wordFile && <WordFileCard file={response.wordFile} compact />}
                 </div>
               ) : response?.status === "submitted" ? (
                 <div className="mt-2 grid gap-2 text-sm font-bold">
@@ -3931,6 +4120,7 @@ function MemberView({
                 {response?.htmlFile && (
                   <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" />
                 )}
+                {response?.wordFile && <WordFileCard file={response.wordFile} />}
                 {progress.length > 0 && (
                   <div className="mt-3 grid gap-2">
                     {progress.map((update) => (
@@ -4195,6 +4385,7 @@ function MemberView({
                       {response.htmlFile && (
                         <HtmlSubmissionPreview file={response.htmlFile} className="mt-2" />
                       )}
+                      {response.wordFile && <WordFileCard file={response.wordFile} compact />}
                       {adminPreview && (
                         <Button
                           type="button"
@@ -4268,6 +4459,21 @@ function MemberView({
           </div>
           {refreshStatus && <p className="mt-3 text-sm text-foreground/65">{refreshStatus}</p>}
         </header>
+
+        {data.announcement?.trim() && (
+          <details className="mb-7 rounded-xl border-[2px] border-sky-300 bg-sky-50 p-3 shadow-sm">
+            <summary className="cursor-pointer list-none text-base font-bold text-sky-950">
+              <span className="inline-flex items-center gap-2">
+                <Bell className="size-4" />
+                رسالة من الأدمن
+                <ChevronDown className="size-4" />
+              </span>
+            </summary>
+            <div className="mt-3 border-t border-sky-200 pt-3 text-sky-950">
+              <StructuredTextBlock text={data.announcement} memberFacing forceCollapse />
+            </div>
+          </details>
+        )}
 
         {(!activeMember.member.repoUrl || !activeMember.member.driveUrl) && (
           <section
@@ -4384,7 +4590,7 @@ function MemberView({
             style={{ borderRadius: "18px 22px 16px 24px / 22px 16px 24px 18px" }}
           >
             <strong>رسالة الأدمن: </strong>
-            {activeMember.member.adminNote}
+            <StructuredTextBlock text={activeMember.member.adminNote} memberFacing forceCollapse />
           </section>
         )}
 
@@ -4439,6 +4645,7 @@ function MemberView({
                   draftAnswers[key] ?? draftAnswers[taskProgressKey] ?? existingDraftAnswer;
                 const htmlMode = htmlSubmissionMode(task);
                 const draftHtmlFile = draftHtmlFiles[key];
+                const draftWordFile = draftWordFiles[key];
                 const reviewNote = latestReviewNote(existing);
                 const officialProgress = (data.progressUpdates?.[task.id] ?? []).filter(
                   (update) => update.memberId === activeMember.member.id,
@@ -4746,11 +4953,19 @@ function MemberView({
                           </div>
                         )}
                         {renderHtmlSubmissionUpload(task, key, existing?.htmlFile)}
+                        <WordSubmissionPicker
+                          file={draftWordFile ?? existing?.wordFile}
+                          onChange={(file) => onDraftWordFileChange(key, file)}
+                          disabled={isSubmitting || existing?.status === "approved"}
+                        />
                       </>
                     )}
                     {existing?.status === "approved" &&
                       existing.htmlFile &&
                       renderHtmlSubmissionUpload(task, key, existing.htmlFile)}
+                    {existing?.status === "approved" && existing.wordFile && (
+                      <WordFileCard file={existing.wordFile} />
+                    )}
                     {existing?.status !== "approved" && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {finalLockedByClarifications && (
@@ -5147,6 +5362,30 @@ async function copyTextToClipboard(value: string) {
   document.body.removeChild(textarea);
 }
 
+function renderSafeLinkedText(value: string) {
+  const parts = value.split(/((?:https?:\/\/|mailto:)[^\s<>"']+)/gi);
+  return parts.map((part, index) => {
+    if (!/^(?:https?:\/\/|mailto:)/i.test(part)) {
+      return <span key={`${index}-${part.slice(0, 10)}`}>{part}</span>;
+    }
+    const trailing = part.match(/[.,!?;:)}\]]+$/)?.[0] ?? "";
+    const href = trailing ? part.slice(0, -trailing.length) : part;
+    return (
+      <span key={`${index}-${href}`}>
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-bold text-sky-700 underline underline-offset-2 hover:text-sky-900"
+        >
+          {href}
+        </a>
+        {trailing}
+      </span>
+    );
+  });
+}
+
 function TaskMessageBody({ text, compact = false }: { text: string; compact?: boolean }) {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
 
@@ -5183,7 +5422,7 @@ function TaskMessageBody({ text, compact = false }: { text: string; compact?: bo
               isBullet && (direction === "rtl" ? "pe-3" : "ps-3"),
             )}
           >
-            {trimmed}
+            {renderSafeLinkedText(trimmed)}
           </p>
         );
       })}
@@ -5573,6 +5812,7 @@ function AdminView({
   onAddBonusGrade,
   onUpdateMember,
   onUpdateSettings,
+  onUpdateAnnouncement,
   onMarkRepoUpdateSeen,
   onReviewProfileRequest,
   onRefreshAdminQueue,
@@ -5632,6 +5872,7 @@ function AdminView({
   onAddBonusGrade: (memberId: string, points: number, note: string) => ActionResult;
   onUpdateMember: (memberId: string, updates: Partial<Member>) => void;
   onUpdateSettings: (settings: Partial<StudioSettings>) => void;
+  onUpdateAnnouncement: (announcement: string) => ActionResult;
   onMarkRepoUpdateSeen: (updateId: string) => ActionResult;
   onReviewProfileRequest: (requestId: string, status: "approved" | "rejected") => ActionResult;
   onRefreshAdminQueue: () => ActionResult;
@@ -5643,6 +5884,7 @@ function AdminView({
 }) {
   const [section, setSection] = useState<AdminSection>("repo-updates");
   const [navOpen, setNavOpen] = useState(false);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskQuestion, setTaskQuestion] = useState("");
   const [taskPoints, setTaskPoints] = useState(1);
@@ -5653,6 +5895,7 @@ function AdminView({
   const [taskStatusDraft, setTaskStatusDraft] = useState<"active" | "hidden">("active");
   const [taskStartAt, setTaskStartAt] = useState("");
   const [taskDeadlineAt, setTaskDeadlineAt] = useState("");
+  const [announcementDraft, setAnnouncementDraft] = useState(data.announcement ?? "");
   const [meetingTitle, setMeetingTitle] = useState("");
   const [meetingStartsAt, setMeetingStartsAt] = useState("");
   const [meetingDuration, setMeetingDuration] = useState(60);
@@ -5696,6 +5939,20 @@ function AdminView({
   const [adminNowTime, setAdminNowTime] = useState(() => Date.now());
   const refreshAdminKey = "admin:refresh-data";
   const saveGithubKey = "admin:save-github";
+  const announcementKey = "admin:announcement";
+
+  useEffect(() => {
+    setAnnouncementDraft(data.announcement ?? "");
+  }, [data.announcement]);
+
+  async function saveAnnouncement() {
+    await runAdminAction(
+      announcementKey,
+      () => onUpdateAnnouncement(announcementDraft),
+      "Announcement saved.",
+      "Announcement was not saved.",
+    );
+  }
 
   const activeTasks = data.tasks.filter(isActiveTask);
   const hiddenTasks = data.tasks.filter(isHiddenTask);
@@ -5733,6 +5990,7 @@ function AdminView({
             memberName: response.memberName,
             answer: response.answer,
             htmlFile: response.htmlFile,
+            wordFile: response.wordFile,
             submittedAt: response.submittedAt,
           })),
   );
@@ -5758,6 +6016,15 @@ function AdminView({
     const timer = window.setInterval(() => setAdminNowTime(Date.now()), 30000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!taskModalOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setTaskModalOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [taskModalOpen]);
 
   function go(nextSection: AdminSection) {
     setSection(nextSection);
@@ -5896,6 +6163,7 @@ function AdminView({
     setTaskStatusDraft("active");
     setTaskStartAt("");
     setTaskDeadlineAt("");
+    setTaskModalOpen(false);
   }
 
   async function submitMeeting() {
@@ -6642,6 +6910,9 @@ function AdminView({
                               {response?.htmlFile && (
                                 <HtmlSubmissionPreview file={response.htmlFile} compact />
                               )}
+                              {response?.wordFile && (
+                                <WordFileCard file={response.wordFile} compact />
+                              )}
                             </div>
                           </div>
                           {response?.answer && (
@@ -6806,6 +7077,7 @@ function AdminView({
                   {response.htmlFile && (
                     <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" />
                   )}
+                  {response.wordFile && <WordFileCard file={response.wordFile} />}
 
                   {response.status === "approved" && (
                     <div className="mt-3 rounded-md border border-sky-100 bg-white p-2 text-xs font-bold text-sky-950">
@@ -7428,6 +7700,9 @@ function AdminView({
                               {response?.htmlFile && (
                                 <HtmlSubmissionPreview file={response.htmlFile} compact />
                               )}
+                              {response?.wordFile && (
+                                <WordFileCard file={response.wordFile} compact />
+                              )}
                             </div>
                           </div>
                           {response?.answer && (
@@ -7823,6 +8098,7 @@ function AdminView({
                     {response.htmlFile && (
                       <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" />
                     )}
+                    {response.wordFile && <WordFileCard file={response.wordFile} />}
                     <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold">
                       <span className="rounded-full border border-ink/10 bg-white px-2 py-1">
                         Score {awarded}/{sanitizePositiveNumber(task.points, 1)}
@@ -8432,6 +8708,7 @@ function AdminView({
                   {response?.htmlFile && (
                     <HtmlSubmissionPreview file={response.htmlFile} className="mt-2" />
                   )}
+                  {response?.wordFile && <WordFileCard file={response.wordFile} compact />}
                 </>
               )}
               {progress.length > 0 && (
@@ -8520,6 +8797,7 @@ function AdminView({
                   {response.htmlFile && (
                     <HtmlSubmissionPreview file={response.htmlFile} className="mt-3" />
                   )}
+                  {response.wordFile && <WordFileCard file={response.wordFile} />}
 
                   <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_120px_auto_auto]">
                     <Input
@@ -8753,6 +9031,37 @@ function AdminView({
         </header>
 
         <div className="mx-auto grid max-w-7xl gap-5 px-4 py-5 pb-24">
+          <section className="rounded-xl border border-sky-200 bg-sky-50/70 p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold">رسالة عامة للفريق</h2>
+                <p className="mt-1 text-sm text-foreground/60">
+                  تظهر لكل الأعضاء، وتدعم الأقسام والروابط وتفتح عند الضغط عليها.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void saveAnnouncement()}
+                disabled={isSaving}
+                className={actionButtonClass(
+                  "bg-sky-600 text-white hover:bg-sky-700",
+                  actionFeedback[announcementKey],
+                )}
+              >
+                <Save data-icon="inline-start" />
+                حفظ الرسالة
+              </Button>
+            </div>
+            <Textarea
+              value={announcementDraft}
+              onChange={(event) => setAnnouncementDraft(event.target.value)}
+              placeholder="اكتب رسالة واحدة للفريق..."
+              className="mt-3 min-h-24 border border-sky-200 bg-white"
+            />
+            <ActionFeedbackLine feedback={actionFeedback[announcementKey]} />
+          </section>
+
           {section === "repo-updates" && (
             <section className="grid gap-5">
               {pendingProfileRequests.length > 0 && (
@@ -9135,169 +9444,210 @@ function AdminView({
           {section === "tasks" && (
             <section className="grid min-w-0 gap-5 2xl:grid-cols-[420px_minmax(0,1fr)]">
               <div className="grid gap-4">
-                <div className="rounded-xl border border-sky-100 bg-white p-4 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-xl font-bold">Create task</h2>
-                      <p className="mt-1 text-sm text-foreground/55">
-                        Choose who gets the task, then set scoring and timing rules.
-                      </p>
-                    </div>
-                    <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700">
-                      Guided
-                    </span>
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-sky-100 bg-white p-3 shadow-sm">
+                  <div>
+                    <h2 className="text-lg font-bold">التاسكات</h2>
+                    <p className="text-sm text-foreground/55">أنشئ تاسك من شاشة واسعة.</p>
                   </div>
-                  <div className="mt-4 grid gap-3">
-                    <Input
-                      value={taskTitle}
-                      onChange={(event) => setTaskTitle(event.target.value)}
-                      placeholder="Task title"
-                      className="h-11 border border-ink/20 bg-white"
-                    />
-                    <Textarea
-                      value={taskQuestion}
-                      onChange={(event) => setTaskQuestion(event.target.value)}
-                      placeholder="Question or instructions"
-                      className="min-h-24 border border-ink/20 bg-white"
-                    />
-                    <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
-                      {(["technical", "nonTechnical", "problem"] as const).map((type) => (
-                        <button
-                          key={type}
-                          type="button"
-                          onClick={() => setTaskType(type)}
-                          className={cn(
-                            "flex-1 rounded-md px-3 py-2 transition",
-                            taskType === type
-                              ? "bg-ink text-white"
-                              : "text-foreground/65 hover:bg-paper",
-                          )}
-                        >
-                          {taskTypeOptionLabel(type)}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="grid gap-1 text-xs font-bold text-foreground/65">
-                      عرض بصري
-                      <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
-                        {(["off", "optional", "required"] as const).map((mode) => (
-                          <button
-                            key={mode}
+                  <Button
+                    type="button"
+                    data-testid="admin-open-task-modal"
+                    onClick={() => setTaskModalOpen(true)}
+                    className="shrink-0 bg-sky-600 text-white hover:bg-sky-700"
+                  >
+                    <Plus data-icon="inline-start" />
+                    إضافة تاسك
+                  </Button>
+                </div>
+                {taskModalOpen &&
+                  createPortal(
+                    <>
+                      <div
+                        className="fixed inset-0 z-[100] bg-ink/40 p-3 sm:p-6"
+                        onMouseDown={() => setTaskModalOpen(false)}
+                      />
+                      <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="create-task-title"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        className="fixed inset-3 z-[101] mx-auto max-w-3xl overflow-y-auto rounded-xl border border-sky-100 bg-white p-4 shadow-xl sm:inset-6"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h2 id="create-task-title" className="text-xl font-bold">
+                              Create task
+                            </h2>
+                            <p className="mt-1 text-sm text-foreground/55">
+                              Choose who gets the task, then set scoring and timing rules.
+                            </p>
+                          </div>
+                          <Button
                             type="button"
-                            onClick={() => setTaskHtmlSubmissionMode(mode)}
-                            className={cn(
-                              "flex-1 rounded-md px-3 py-2 transition",
-                              taskHtmlSubmissionMode === mode
-                                ? "bg-ink text-white"
-                                : "text-foreground/65 hover:bg-paper",
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setTaskModalOpen(false)}
+                            className="shrink-0 border border-ink/20 bg-white"
+                            aria-label="Close create task"
+                          >
+                            <X className="size-4" />
+                          </Button>
+                        </div>
+                        <div className="mt-4 grid gap-3">
+                          <Input
+                            value={taskTitle}
+                            onChange={(event) => setTaskTitle(event.target.value)}
+                            placeholder="Task title"
+                            className="h-11 border border-ink/20 bg-white"
+                          />
+                          <Textarea
+                            value={taskQuestion}
+                            onChange={(event) => setTaskQuestion(event.target.value)}
+                            placeholder="Question or instructions"
+                            className="min-h-24 border border-ink/20 bg-white"
+                          />
+                          <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
+                            {(["technical", "nonTechnical", "problem"] as const).map((type) => (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => setTaskType(type)}
+                                className={cn(
+                                  "flex-1 rounded-md px-3 py-2 transition",
+                                  taskType === type
+                                    ? "bg-ink text-white"
+                                    : "text-foreground/65 hover:bg-paper",
+                                )}
+                              >
+                                {taskTypeOptionLabel(type)}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="grid gap-1 text-xs font-bold text-foreground/65">
+                            عرض بصري
+                            <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
+                              {(["off", "optional", "required"] as const).map((mode) => (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  onClick={() => setTaskHtmlSubmissionMode(mode)}
+                                  className={cn(
+                                    "flex-1 rounded-md px-3 py-2 transition",
+                                    taskHtmlSubmissionMode === mode
+                                      ? "bg-ink text-white"
+                                      : "text-foreground/65 hover:bg-paper",
+                                  )}
+                                >
+                                  {htmlSubmissionModeLabel(mode)}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
+                            {(["active", "hidden"] as const).map((status) => (
+                              <button
+                                key={status}
+                                type="button"
+                                onClick={() => setTaskStatusDraft(status)}
+                                className={cn(
+                                  "flex-1 rounded-md px-3 py-2 capitalize transition",
+                                  taskStatusDraft === status
+                                    ? "bg-ink text-white"
+                                    : "text-foreground/65 hover:bg-paper",
+                                )}
+                              >
+                                {status}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="grid gap-3">
+                            <label className="grid gap-1 text-xs font-bold text-foreground/65">
+                              Base points
+                              <Input
+                                type="number"
+                                min={1}
+                                value={taskPoints}
+                                onChange={(event) => setTaskPoints(Number(event.target.value))}
+                                placeholder="Points"
+                                className="h-11 border border-ink/20 bg-white"
+                              />
+                              <span className="font-normal text-foreground/50">
+                                Admin can still award bonus when approving.
+                              </span>
+                            </label>
+                            <div className="grid gap-2 rounded-md border border-ink/20 bg-white p-2 text-sm">
+                              <label className="flex h-8 items-center gap-2 font-bold">
+                                <input
+                                  type="checkbox"
+                                  checked={areAllMembersSelected(taskMemberIds)}
+                                  onChange={(event) => toggleAllTaskMembers(event.target.checked)}
+                                />
+                                All team
+                              </label>
+                              <div className="max-h-32 overflow-auto border-t border-ink/10 pt-2">
+                                {data.members.map((member) => (
+                                  <label key={member.id} className="flex h-8 items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={taskMemberIds.includes(member.id)}
+                                      onChange={() => toggleTaskMemberDraft(member.id)}
+                                    />
+                                    <span className="truncate">{member.name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="grid gap-2">
+                            <DateTimeField
+                              label="البداية"
+                              value={taskStartAt}
+                              onChange={setTaskStartAt}
+                              help="وقت ظهور التاسك للأعضاء."
+                            />
+                            {taskType === "technical" ? (
+                              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
+                                التاسكات التقنية بدون موعد نهائي. تفضل مفتوحة لحد المراجعة أو
+                                الأرشفة.
+                              </div>
+                            ) : (
+                              <DateTimeField
+                                label="الموعد النهائي"
+                                value={taskDeadlineAt}
+                                onChange={setTaskDeadlineAt}
+                                help="بعد الموعد: نصف الدرجة افتراضيًا. بعد ضعف المدة: يحتاج override."
+                                tone="deadline"
+                              />
+                            )}
+                          </div>
+                          {taskType === "technical" ? (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold leading-5 text-emerald-900">
+                              التاسكات التقنية لا تستخدم موعد نهائي أو خصم تأخير أو قفل تلقائي.
+                            </div>
+                          ) : (
+                            <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs leading-5 text-yellow-900">
+                              قاعدة الموعد: التسليم المتأخر يأخذ نصف الدرجة افتراضيًا، وبعد ضعف مدة
+                              التاسك يحتاج موافقة override.
+                            </div>
+                          )}
+                          <Button
+                            type="button"
+                            data-testid="admin-add-task"
+                            onClick={submitTask}
+                            className={actionButtonClass(
+                              "h-11 bg-sky-500 text-white hover:bg-sky-600",
+                              actionFeedback["admin:add-task"],
                             )}
                           >
-                            {htmlSubmissionModeLabel(mode)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="flex rounded-lg border border-ink/20 bg-white p-1 text-sm font-bold">
-                      {(["active", "hidden"] as const).map((status) => (
-                        <button
-                          key={status}
-                          type="button"
-                          onClick={() => setTaskStatusDraft(status)}
-                          className={cn(
-                            "flex-1 rounded-md px-3 py-2 capitalize transition",
-                            taskStatusDraft === status
-                              ? "bg-ink text-white"
-                              : "text-foreground/65 hover:bg-paper",
-                          )}
-                        >
-                          {status}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="grid gap-3">
-                      <label className="grid gap-1 text-xs font-bold text-foreground/65">
-                        Base points
-                        <Input
-                          type="number"
-                          min={1}
-                          value={taskPoints}
-                          onChange={(event) => setTaskPoints(Number(event.target.value))}
-                          placeholder="Points"
-                          className="h-11 border border-ink/20 bg-white"
-                        />
-                        <span className="font-normal text-foreground/50">
-                          Admin can still award bonus when approving.
-                        </span>
-                      </label>
-                      <div className="grid gap-2 rounded-md border border-ink/20 bg-white p-2 text-sm">
-                        <label className="flex h-8 items-center gap-2 font-bold">
-                          <input
-                            type="checkbox"
-                            checked={areAllMembersSelected(taskMemberIds)}
-                            onChange={(event) => toggleAllTaskMembers(event.target.checked)}
-                          />
-                          All team
-                        </label>
-                        <div className="max-h-32 overflow-auto border-t border-ink/10 pt-2">
-                          {data.members.map((member) => (
-                            <label key={member.id} className="flex h-8 items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={taskMemberIds.includes(member.id)}
-                                onChange={() => toggleTaskMemberDraft(member.id)}
-                              />
-                              <span className="truncate">{member.name}</span>
-                            </label>
-                          ))}
+                            <Plus data-icon="inline-start" />
+                            Add task
+                          </Button>
+                          <ActionFeedbackLine feedback={actionFeedback["admin:add-task"]} />
                         </div>
                       </div>
-                    </div>
-                    <div className="grid gap-2">
-                      <DateTimeField
-                        label="البداية"
-                        value={taskStartAt}
-                        onChange={setTaskStartAt}
-                        help="وقت ظهور التاسك للأعضاء."
-                      />
-                      {taskType === "technical" ? (
-                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
-                          التاسكات التقنية بدون موعد نهائي. تفضل مفتوحة لحد المراجعة أو الأرشفة.
-                        </div>
-                      ) : (
-                        <DateTimeField
-                          label="الموعد النهائي"
-                          value={taskDeadlineAt}
-                          onChange={setTaskDeadlineAt}
-                          help="بعد الموعد: نصف الدرجة افتراضيًا. بعد ضعف المدة: يحتاج override."
-                          tone="deadline"
-                        />
-                      )}
-                    </div>
-                    {taskType === "technical" ? (
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold leading-5 text-emerald-900">
-                        التاسكات التقنية لا تستخدم موعد نهائي أو خصم تأخير أو قفل تلقائي.
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs leading-5 text-yellow-900">
-                        قاعدة الموعد: التسليم المتأخر يأخذ نصف الدرجة افتراضيًا، وبعد ضعف مدة التاسك
-                        يحتاج موافقة override.
-                      </div>
-                    )}
-                    <Button
-                      type="button"
-                      data-testid="admin-add-task"
-                      onClick={submitTask}
-                      className={actionButtonClass(
-                        "h-11 bg-sky-500 text-white hover:bg-sky-600",
-                        actionFeedback["admin:add-task"],
-                      )}
-                    >
-                      <Plus data-icon="inline-start" />
-                      Add task
-                    </Button>
-                    <ActionFeedbackLine feedback={actionFeedback["admin:add-task"]} />
-                  </div>
-                </div>
+                    </>,
+                    document.body,
+                  )}
                 <div className="rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
                   <h2 className="mb-3 text-xl font-bold">Active tasks</h2>
                   {renderTaskRows(activeTasks)}
@@ -9976,6 +10326,7 @@ function LegacyAdminView({
           memberName: response.memberName,
           answer: response.answer,
           htmlFile: response.htmlFile,
+          wordFile: response.wordFile,
           submittedAt: response.submittedAt,
         })),
     ),
@@ -10093,6 +10444,7 @@ function LegacyAdminView({
                         {item.htmlFile && (
                           <HtmlSubmissionPreview file={item.htmlFile} className="mt-3" />
                         )}
+                        {item.wordFile && <WordFileCard file={item.wordFile} />}
                         <div className="mt-3 flex flex-wrap gap-2">
                           <Button
                             type="button"
@@ -12371,6 +12723,9 @@ function Index() {
   const [draftHtmlFiles, setDraftHtmlFiles] = useState<
     Record<string, HtmlSubmissionFile | undefined>
   >({});
+  const [draftWordFiles, setDraftWordFiles] = useState<
+    Record<string, WordSubmissionFile | undefined>
+  >({});
   const [sentState, setSentState] = useState<Record<string, string>>(() => readMemberSentState());
   const [githubToken, setGithubToken] = useState("");
   const [adminPassword, setAdminPassword] = useState(storedSession.adminPassword);
@@ -12867,6 +13222,7 @@ function Index() {
       ""
     ).trim();
     const htmlFile = draftHtmlFiles[key];
+    const wordFile = draftWordFiles[key];
     if (isProblemTask(task) && !answer) return false;
     if (htmlSubmissionMode(task) === "required" && !htmlFile) return false;
     if (!memberClarificationsApproved(data, task, activeMember.member.id)) return false;
@@ -12878,6 +13234,7 @@ function Index() {
       memberName: activeMember.displayName,
       answer,
       ...(htmlFile ? { htmlFile } : {}),
+      ...(wordFile ? { wordFile } : {}),
       submittedAt: new Date().toISOString(),
     };
 
@@ -12897,6 +13254,11 @@ function Index() {
       setIsDirty(false);
       writeMemberDrafts({ ...readMemberDrafts(), [key]: answer });
       setDraftHtmlFiles((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      setDraftWordFiles((current) => {
         const next = { ...current };
         delete next[key];
         return next;
@@ -12970,6 +13332,10 @@ function Index() {
 
   function updateDraftHtmlFile(key: string, file?: HtmlSubmissionFile) {
     setDraftHtmlFiles((current) => ({ ...current, [key]: file }));
+  }
+
+  function updateDraftWordFile(key: string, file?: WordSubmissionFile) {
+    setDraftWordFiles((current) => ({ ...current, [key]: file }));
   }
 
   async function submitProgressUpdate(task: StudioTask) {
@@ -13387,6 +13753,29 @@ function Index() {
     }));
   }
 
+  async function updateAnnouncement(announcement: string) {
+    if (!adminPassword) {
+      setSaveStatus("Log in as admin again before saving.");
+      return false;
+    }
+    setIsSaving(true);
+    setSaveStatus("Saving announcement...");
+    try {
+      const nextData = await postAdminMutation(adminPassword, "updateAnnouncement", {
+        announcement: announcement.trim(),
+      });
+      setData(nextData);
+      setIsDirty(false);
+      setSaveStatus("Announcement saved.");
+      return true;
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? `Save failed: ${error.message}` : "Save failed.");
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   function addRepoUpdate(memberId: string) {
     const update: RepoUpdate = {
       id: `repo-${Date.now()}`,
@@ -13547,6 +13936,7 @@ function Index() {
           stats={stats}
           draftAnswers={draftAnswers}
           draftHtmlFiles={draftHtmlFiles}
+          draftWordFiles={draftWordFiles}
           sentState={sentState}
           refreshStatus={refreshStatus}
           isSubmitting={isSubmitting}
@@ -13558,6 +13948,7 @@ function Index() {
             });
           }}
           onDraftHtmlFileChange={updateDraftHtmlFile}
+          onDraftWordFileChange={updateDraftWordFile}
           onSubmitFinal={submitFinalSubmission}
           onSubmitClarification={submitClarificationSubmission}
           onSubmitProgress={submitProgressUpdate}
@@ -13611,6 +14002,7 @@ function Index() {
         onAddBonusGrade={addBonusGrade}
         onUpdateMember={updateMember}
         onUpdateSettings={updateSettings}
+        onUpdateAnnouncement={updateAnnouncement}
         onMarkRepoUpdateSeen={markRepoUpdateSeen}
         onReviewProfileRequest={reviewProfileRequest}
         onRefreshAdminQueue={refreshAdminQueue}
@@ -13635,6 +14027,7 @@ function Index() {
         stats={stats}
         draftAnswers={draftAnswers}
         draftHtmlFiles={draftHtmlFiles}
+        draftWordFiles={draftWordFiles}
         sentState={sentState}
         refreshStatus={refreshStatus}
         isSubmitting={isSubmitting}
@@ -13646,6 +14039,7 @@ function Index() {
           });
         }}
         onDraftHtmlFileChange={updateDraftHtmlFile}
+        onDraftWordFileChange={updateDraftWordFile}
         onSubmitFinal={submitFinalSubmission}
         onSubmitClarification={submitClarificationSubmission}
         onSubmitProgress={submitProgressUpdate}

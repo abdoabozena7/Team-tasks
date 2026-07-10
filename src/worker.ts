@@ -42,11 +42,20 @@ type HtmlSubmissionFile = {
   kind?: VisualSubmissionKind;
 };
 
+type WordSubmissionFile = {
+  name: string;
+  size: number;
+  type: string;
+  lastModified: number;
+  contentBase64: string;
+};
+
 type TaskResponse = {
   memberId: string;
   memberName: string;
   answer: string;
   htmlFile?: HtmlSubmissionFile;
+  wordFile?: WordSubmissionFile;
   status: "submitted" | "approved" | "rejected";
   submittedAt: string;
   reviewedAt?: string;
@@ -251,6 +260,7 @@ const jsonHeaders = (env: Env, status = 200) => ({
 const DOCUMENTATION_POINTS = 1;
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const VISUAL_FILE_MAX_BYTES = 500 * 1024;
+const WORD_FILE_MAX_BYTES = 2 * 1024 * 1024;
 const HTML_FILE_TYPE = "text/html";
 const SVG_FILE_TYPE = "image/svg+xml";
 
@@ -366,6 +376,45 @@ function cleanHtmlSubmissionFile(file?: Partial<HtmlSubmissionFile>) {
     lastModified: nonNegativeNumber(file.lastModified, 0),
     content,
     kind,
+  };
+}
+
+function cleanWordSubmissionFile(file?: Partial<WordSubmissionFile>) {
+  if (!file) return undefined;
+  const name = String(file.name ?? "").trim();
+  const type = String(file.type ?? "");
+  const contentBase64 = String(file.contentBase64 ?? "").replace(/\s+/g, "");
+  if (!name.toLowerCase().endsWith(".docx")) {
+    throw new Error("Only Word .docx files are accepted.");
+  }
+  if (type && type !== DOCX_MIME && type !== "application/octet-stream") {
+    throw new Error("The Word file type is not accepted.");
+  }
+  if (!contentBase64 || !/^[A-Za-z0-9+/]*={0,2}$/.test(contentBase64)) {
+    throw new Error("The Word file content is invalid.");
+  }
+  let decodedSize = 0;
+  try {
+    decodedSize = atob(contentBase64).length;
+  } catch {
+    throw new Error("The Word file content is invalid.");
+  }
+  if (decodedSize === 0 || decodedSize > WORD_FILE_MAX_BYTES) {
+    throw new Error("Word files must be 2 MB or smaller.");
+  }
+  const declaredSize = nonNegativeNumber(file.size, decodedSize);
+  if (declaredSize > WORD_FILE_MAX_BYTES || Math.abs(declaredSize - decodedSize) > 16) {
+    throw new Error("The Word file size is invalid.");
+  }
+  if (atob(contentBase64).slice(0, 2) !== "PK") {
+    throw new Error("The Word file content is not a valid .docx file.");
+  }
+  return {
+    name,
+    size: decodedSize,
+    type: type || DOCX_MIME,
+    lastModified: nonNegativeNumber(file.lastModified, 0),
+    contentBase64,
   };
 }
 
@@ -693,11 +742,18 @@ function normalizeData(data: StudioData): StudioData {
           Object.entries(taskResponses ?? {}).map(([memberId, response]) => {
             const responseFields = { ...response };
             delete responseFields.htmlFile;
+            delete responseFields.wordFile;
             let htmlFile: HtmlSubmissionFile | undefined;
+            let wordFile: WordSubmissionFile | undefined;
             try {
               htmlFile = cleanHtmlSubmissionFile(response.htmlFile);
             } catch {
               htmlFile = undefined;
+            }
+            try {
+              wordFile = cleanWordSubmissionFile(response.wordFile);
+            } catch {
+              wordFile = undefined;
             }
             return [
               memberId,
@@ -711,6 +767,7 @@ function normalizeData(data: StudioData): StudioData {
                     ? response.status
                     : "submitted",
                 ...(htmlFile ? { htmlFile } : {}),
+                ...(wordFile ? { wordFile } : {}),
               },
             ];
           }),
@@ -1333,6 +1390,7 @@ export default {
             throw new Error("This task does not accept visual submissions.");
           }
           const htmlFile = htmlMode === "off" ? undefined : cleanHtmlSubmissionFile(item.htmlFile);
+          const wordFile = cleanWordSubmissionFile(item.wordFile);
           if (htmlMode === "required" && !htmlFile) {
             throw new Error("A visual submission is required for this task.");
           }
@@ -1373,6 +1431,7 @@ export default {
                   memberName: member.name,
                   answer,
                   ...(htmlFile ? { htmlFile } : {}),
+                  ...(wordFile ? { wordFile } : {}),
                   status: "submitted",
                   submittedAt,
                   awardedPoints: 0,
@@ -1837,6 +1896,13 @@ export default {
                 ...(data.taskUpdates ?? {}),
                 [taskId]: [update, ...((data.taskUpdates ?? {})[taskId] ?? [])],
               },
+            };
+          }
+
+          if (action === "updateAnnouncement") {
+            return {
+              ...data,
+              announcement: String(payload.announcement ?? "").trim(),
             };
           }
 
