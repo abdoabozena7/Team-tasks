@@ -1127,7 +1127,15 @@
     }
   ],
   "clarificationResponses": {},
-  "taskSkips": {},
+  "taskSkips": {
+    "task-1783686365320": {
+      "abozena": {
+        "memberId": "abozena",
+        "memberName": "Abozena",
+        "skippedAt": "2026-07-10T12:26:58.988Z"
+      }
+    }
+  },
   "progressUpdates": {
     "task-1783176442116": [
       {
@@ -2162,6 +2170,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-10T12:26:05.320Z"
+    "updatedAt": "2026-07-10T12:26:58.988Z"
   }
 }
