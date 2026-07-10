@@ -322,6 +322,20 @@
       "startAt": "2026-07-09T00:44:00.000Z",
       "deadlineAt": "",
       "status": "active"
+    },
+    {
+      "id": "task-1783686365320",
+      "title": "Survey Research Paper",
+      "question": "PDF on Whatsapp",
+      "points": 25,
+      "taskType": "nonTechnical",
+      "htmlSubmissionMode": "off",
+      "scope": "all",
+      "memberIds": [],
+      "createdAt": "2026-07-10T12:26:05.320Z",
+      "startAt": "2026-07-10T12:24:00.000Z",
+      "deadlineAt": "2026-07-31T09:00:00.000Z",
+      "status": "active"
     }
   ],
   "responses": {
@@ -2148,6 +2162,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-10T12:23:52.406Z"
+    "updatedAt": "2026-07-10T12:26:05.320Z"
   }
 }
