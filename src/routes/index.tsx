@@ -12713,6 +12713,7 @@ async function deleteQueuedItem(
 
 function Index() {
   const [data, setData] = useState<StudioData>(DEFAULT_DATA);
+  const [hydrated, setHydrated] = useState(false);
   const [storedSession] = useState(readStoredSession);
   const [activeMember, setActiveMember] = useState<ActiveMember | null>(null);
   const [activeAdmin, setActiveAdmin] = useState(storedSession.mode === "admin");
@@ -12738,6 +12739,10 @@ function Index() {
   const [isSaving, setIsSaving] = useState(false);
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -13909,6 +13914,17 @@ function Index() {
       return;
     }
     void saveToGithub(nextToken);
+  }
+
+  if (!hydrated) {
+    return (
+      <LoginScreen
+        data={data}
+        onMemberLogin={loginMember}
+        onAdminLogin={loginAdmin}
+        onStatsLogin={loginStats}
+      />
+    );
   }
 
   if (activeAdmin && activeMember) {
