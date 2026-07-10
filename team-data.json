@@ -1275,6 +1275,14 @@
   },
   "interactions": [
     {
+      "id": "marihan:task:task-1783686365320",
+      "memberId": "marihan",
+      "targetType": "task",
+      "targetId": "task-1783686365320",
+      "taskId": "task-1783686365320",
+      "seenAt": "2026-07-10T18:38:06.764Z"
+    },
+    {
       "id": "renad:task:task-1783686365320",
       "memberId": "renad",
       "targetType": "task",
@@ -2188,6 +2196,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-10T13:55:22.667Z"
+    "updatedAt": "2026-07-10T18:38:06.764Z"
   }
 }
