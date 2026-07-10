@@ -322,20 +322,6 @@
       "startAt": "2026-07-09T00:44:00.000Z",
       "deadlineAt": "",
       "status": "active"
-    },
-    {
-      "id": "task-1783686077155",
-      "title": "Survey Research Paper",
-      "question": "1. Abstract \n2. Introduction \n3. Background and Related Surveys \n4. Review Methodology \n5. Proposed Taxonomy \n6. Analysis of Existing Agentic Coding Systems \n7. Intent, Memory, and Verification \n8. Benchmarks and Evaluation \n9. Research Gaps and Future Directions \n10. Conclusion \n*****\nReference \nhttps://www.linkedin.com/posts/mhshoukat_most-researchers-do-not-struggle-because\nugcPost-7474680663300952064-DO6\n/?utm_source=social_share_send&utm_medium=member_desktop_web&rcm=ACoAADwD4lsB\nw84XnhTUg-KNCDrhTNitCUhcXGc",
-      "points": 1,
-      "taskType": "technical",
-      "htmlSubmissionMode": "off",
-      "scope": "all",
-      "memberIds": [],
-      "createdAt": "2026-07-10T12:21:17.155Z",
-      "startAt": "2026-07-10T12:10:00.000Z",
-      "deadlineAt": "",
-      "status": "active"
     }
   ],
   "responses": {
@@ -2162,6 +2148,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-10T12:21:17.155Z"
+    "updatedAt": "2026-07-10T12:23:52.406Z"
   }
 }
