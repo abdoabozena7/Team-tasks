@@ -1275,6 +1275,14 @@
   },
   "interactions": [
     {
+      "id": "tasneem:task:task-1783686365320",
+      "memberId": "tasneem",
+      "targetType": "task",
+      "targetId": "task-1783686365320",
+      "taskId": "task-1783686365320",
+      "seenAt": "2026-07-11T03:18:10.108Z"
+    },
+    {
       "id": "marihan:task:task-1783686365320",
       "memberId": "marihan",
       "targetType": "task",
@@ -2196,6 +2204,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-10T18:38:06.764Z"
+    "updatedAt": "2026-07-11T03:18:10.108Z"
   }
 }
