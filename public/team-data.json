@@ -1275,6 +1275,14 @@
   },
   "interactions": [
     {
+      "id": "rodina:task:task-1783686365320",
+      "memberId": "rodina",
+      "targetType": "task",
+      "targetId": "task-1783686365320",
+      "taskId": "task-1783686365320",
+      "seenAt": "2026-07-11T13:14:39.809Z"
+    },
+    {
       "id": "tasneem:task:task-1783686365320",
       "memberId": "tasneem",
       "targetType": "task",
@@ -2204,6 +2212,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-11T03:18:10.108Z"
+    "updatedAt": "2026-07-11T13:14:39.809Z"
   }
 }
