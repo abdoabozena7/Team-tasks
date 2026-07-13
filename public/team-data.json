@@ -1275,6 +1275,14 @@
   },
   "interactions": [
     {
+      "id": "fatema:task:task-1783686365320",
+      "memberId": "fatema",
+      "targetType": "task",
+      "targetId": "task-1783686365320",
+      "taskId": "task-1783686365320",
+      "seenAt": "2026-07-13T22:22:07.012Z"
+    },
+    {
       "id": "rodina:task:task-1783686365320",
       "memberId": "rodina",
       "targetType": "task",
@@ -2212,6 +2220,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-11T13:14:39.809Z"
+    "updatedAt": "2026-07-13T22:22:07.012Z"
   }
 }
