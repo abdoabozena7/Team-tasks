@@ -173,7 +173,7 @@
         "fatima",
         "فاطمة"
       ],
-      "hidden": false,
+      "hidden": true,
       "baseCompleted": 0,
       "basePoints": 1,
       "adminNote": "",
@@ -2220,6 +2220,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-13T22:22:07.012Z"
+    "updatedAt": "2026-07-15T11:23:04.984Z"
   }
 }
