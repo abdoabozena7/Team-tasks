@@ -1219,6 +1219,16 @@
         "note": "كل Task أو Goal يبقى ليه حاجة شبه الـ DNA الخاص بيه من أول ما المستخدم يطلبه\nيعني بدل ما الـ Agents تعتمد بس على شرح اللي قبلها يبقى فيه مجموعة Constraints ومتطلبات أساسية متسجلة ومقفولة من البداية\nفكل ما Task تتقسم أو تنتقل بين Agents الـ DNA ده يفضل معاها  ولو أي Agent حاول يطلع Plan أو Output يخالف المتطلبات الأساسية دي  يتترفض أو يتعدل قبل ما يكمل.\n\nكده حتى لو الـ Tree بقت عميقة جدًا، كل Node هتفضل مربوطة بنفس الهدف الأصلي ومش هتبدأ تنحرف مع الوقت بسبب سوء الفهم أو إعادة التفسير.",
         "createdAt": "2026-07-04T14:59:19.790Z"
       }
+    ],
+    "task-1783686365320": [
+      {
+        "id": "progress-1784565241649",
+        "taskId": "task-1783686365320",
+        "memberId": "rodina",
+        "memberName": "rodina",
+        "note": "https://docs.google.com/document/d/11_vFkx5qLjhmZnS6GWwiElZGg-DQUqsH/edit?usp=drive_link&ouid=117838856770271187225&rtpof=true&sd=true",
+        "createdAt": "2026-07-20T16:34:02.191Z"
+      }
     ]
   },
   "taskUpdates": {
@@ -1805,6 +1815,15 @@
   ],
   "repoUpdates": [
     {
+      "id": "repo-progress-rodina-task-1783686365320-1784565242191",
+      "memberId": "rodina",
+      "taskId": "task-1783686365320",
+      "source": "progress",
+      "excerpt": "https://docs.google.com/document/d/11_vFkx5qLjhmZnS6GWwiElZGg-DQUqsH/edit?usp=drive_link&ouid=117838856770271187225&rtpof=true&sd=true",
+      "createdAt": "2026-07-20T16:34:02.191Z",
+      "seen": false
+    },
+    {
       "id": "repo-submission-yossef-sharawy-task-1783008997895-1783305845645",
       "memberId": "yossef-sharawy",
       "taskId": "task-1783008997895",
@@ -2283,6 +2302,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-20T16:26:57.575Z"
+    "updatedAt": "2026-07-20T16:34:02.191Z"
   }
 }
