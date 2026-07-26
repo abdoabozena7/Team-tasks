@@ -1372,6 +1372,14 @@
   },
   "interactions": [
     {
+      "id": "renad:task:task-1785069214556",
+      "memberId": "renad",
+      "targetType": "task",
+      "targetId": "task-1785069214556",
+      "taskId": "task-1785069214556",
+      "seenAt": "2026-07-26T12:34:08.989Z"
+    },
+    {
       "id": "fatema:task:task-1783686365320",
       "memberId": "fatema",
       "targetType": "task",
@@ -2326,6 +2334,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-26T12:33:34.556Z"
+    "updatedAt": "2026-07-26T12:34:08.989Z"
   }
 }
