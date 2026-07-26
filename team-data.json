@@ -336,6 +336,30 @@
       "startAt": "2026-07-10T12:24:00.000Z",
       "deadlineAt": "2026-07-31T09:00:00.000Z",
       "status": "active"
+    },
+    {
+      "id": "task-1785069214556",
+      "title": "repo (GA3BAD) understanding",
+      "question": "User request\n→ Intent Architect / Intake\n→ Repository facts discovery\n→ Execution brief + consequential questions\n→ Plan inspection\n→ Draft\n→ Normalize\n→ Validate\n→ Optional independent critic\n→ Persist pending plan\n→ User approval bound to exact fingerprint\n→ Goal becomes RUNNING\n→ Harness selects first dependency-ready task\n→ Coordinator model call with durable state envelope\n→ Workspace tools / control tools\n→ Evidence and action journal\n→ Task completion\n→ finish_goal request\n→ Deterministic completion precheck\n→ VERIFYING\n→ Independent REVIEWING\n→ COMPLETED or repair/refinement",
+      "points": 25,
+      "taskType": "nonTechnical",
+      "htmlSubmissionMode": "off",
+      "scope": "member",
+      "memberId": "shoiab",
+      "memberIds": [
+        "shoiab",
+        "abo-grir",
+        "yossef-sharawy",
+        "renad",
+        "tasneem",
+        "rodina",
+        "fatema",
+        "marihan"
+      ],
+      "createdAt": "2026-07-26T12:33:34.556Z",
+      "startAt": "2026-07-26T12:32:00.000Z",
+      "deadlineAt": "2026-08-05T12:32:00.000Z",
+      "status": "active"
     }
   ],
   "responses": {
@@ -2302,6 +2326,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-07-20T16:34:06.686Z"
+    "updatedAt": "2026-07-26T12:33:34.556Z"
   }
 }
