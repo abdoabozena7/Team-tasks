@@ -12579,16 +12579,22 @@ function encodeBase64(value: string) {
 
 async function fetchStudioData() {
   if (HIVO_API_URL) {
-    const response = await fetch(`${HIVO_API_URL}/api/data?ts=${Date.now()}`, {
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error("Backend data is not available.");
-    return sanitizeData((await response.json()) as StudioData);
+    try {
+      const response = await fetch(`${HIVO_API_URL}/api/data?ts=${Date.now()}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error("Backend data is not available.");
+      return sanitizeData((await response.json()) as StudioData);
+    } catch {
+      // Keep member login available from the deployed snapshot when the Worker
+      // cannot reach GitHub (for example, while its token is being rotated).
+    }
   }
 
   const response = await fetch(`${import.meta.env.BASE_URL}team-data.json?ts=${Date.now()}`, {
     cache: "no-store",
   });
+  if (!response.ok) throw new Error("Studio data is not available.");
   return sanitizeData((await response.json()) as StudioData);
 }
 
