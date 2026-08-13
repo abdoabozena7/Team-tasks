@@ -1309,6 +1309,13 @@
         "submittedAt": "2026-08-13T22:37:10.408Z",
         "reviewEvents": [
           {
+            "id": "review-1786660645490",
+            "status": "approved",
+            "reviewedAt": "2026-08-13T22:37:25.490Z",
+            "awardedPoints": 7,
+            "scoreOverride": true
+          },
+          {
             "id": "review-1786660630408",
             "status": "approved",
             "reviewedAt": "2026-08-13T22:37:10.408Z",
@@ -1316,7 +1323,7 @@
             "scoreOverride": true
           }
         ],
-        "reviewedAt": "2026-08-13T22:37:10.408Z",
+        "reviewedAt": "2026-08-13T22:37:25.490Z",
         "awardedPoints": 7,
         "lateSubmission": true,
         "scoreOverride": true
@@ -2473,6 +2480,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-08-13T22:37:10.408Z"
+    "updatedAt": "2026-08-13T22:37:25.490Z"
   }
 }
