@@ -377,23 +377,6 @@
       "startAt": "2026-08-30T19:51:00.000Z",
       "deadlineAt": "",
       "status": "active"
-    },
-    {
-      "id": "task-1788119523772",
-      "title": "تاسك المسابقه",
-      "question": "تجربه الفكره في مسابقات خارجيه",
-      "points": 20,
-      "taskType": "technical",
-      "htmlSubmissionMode": "off",
-      "scope": "member",
-      "memberId": "shoiab",
-      "memberIds": [
-        "shoiab"
-      ],
-      "createdAt": "2026-08-30T19:52:03.772Z",
-      "startAt": "2026-08-30T19:51:00.000Z",
-      "deadlineAt": "",
-      "status": "active"
     }
   ],
   "responses": {
@@ -2612,6 +2595,6 @@
     }
   ],
   "meta": {
-    "updatedAt": "2026-08-30T19:52:03.772Z"
+    "updatedAt": "2026-08-30T19:52:08.146Z"
   }
 }
